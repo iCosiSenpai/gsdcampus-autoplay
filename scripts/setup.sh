@@ -4,6 +4,8 @@ set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
+SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
+
 # Colori per output interattivo
 BOLD='\033[1m'
 GREEN='\033[0;32m'
@@ -14,12 +16,14 @@ NC='\033[0m' # No Color
 
 AUTO_YES=false
 FORCE_UPDATE=false
-if [ "$1" = "--yes" ]; then
-  AUTO_YES=true
-fi
-if [ "$1" = "--force-update" ] || [ "$2" = "--force-update" ]; then
-  FORCE_UPDATE=true
-fi
+
+# === Gestione argomenti (ordine libero) ===
+for arg in "$@"; do
+  case "$arg" in
+    --yes) AUTO_YES=true ;;
+    --force-update) FORCE_UPDATE=true ;;
+  esac
+done
 
 info() {
   echo -e "${BLUE}${BOLD}[INFO]${NC} $1"
@@ -67,6 +71,9 @@ print_footer() {
   ok "Setup completato con successo."
   echo "============================================"
   echo ""
+  info "Puoi ora avviare l'AI supervisore con:"
+  echo "  cd $DIR && ./launch-ai-supervisor.sh"
+  echo ""
 }
 
 print_header
@@ -104,28 +111,60 @@ mask_url() {
   fi
 }
 
-# Se config.json esiste, controlla se è un placeholder da configurare
-IS_PLACEHOLDER=false
-if [ -f "$CONFIG_FILE" ]; then
-  if grep -q "Incolla qui il tuo link autologin personale" "$CONFIG_FILE" 2>/dev/null; then
-    IS_PLACEHOLDER=true
+# Rileva se config.json è ancora un placeholder / non valido.
+is_config_valid() {
+  [ -f "$CONFIG_FILE" ] || return 1
+  # 1. JSON valido?
+  if ! node -e "JSON.parse(require('fs').readFileSync('$CONFIG_FILE','utf8'))" 2>/dev/null; then
+    return 1
   fi
-fi
+  # 2. URL autologin presente e non fittizio?
+  local url
+  url=$(node -e "const c=require('$CONFIG_FILE'); console.log(c.autologinUrl||'');" 2>/dev/null)
+  [ -n "$url" ] || return 1
+  # Rifiuta placeholder tipici
+  case "$url" in
+    *CODICEFISCALE/TOKEN*) return 1 ;;
+    *YOUR_AUTOLogin*) return 1 ;;
+    *example*) return 1 ;;
+  esac
+  # 3. Deve rispettare il formato atteso
+  if [[ ! "$url" =~ ^https://tecsial\.gsdcampus\.it/autologin/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/[A-Za-z0-9]+$ ]]; then
+    return 1
+  fi
+  # 4. Orario presente e con almeno un turno valido?
+  node -e "
+    const c = require('$CONFIG_FILE');
+    const { normalizeShifts, normalizeDays } = require('./src/lib/schedule');
+    const days = normalizeDays(c.workSchedule && c.workSchedule.days);
+    const shifts = normalizeShifts(c.workSchedule && c.workSchedule.shifts);
+    if (days.length === 0 || shifts.length === 0) process.exit(1);
+  " 2>/dev/null || return 1
+  return 0
+}
 
-# Se config.json esiste ed è valido, mostra un riepilogo e chiede se modificarlo
-if [ -f "$CONFIG_FILE" ] && [ "$IS_PLACEHOLDER" = false ]; then
-  CURRENT_URL=$(grep -o '"autologinUrl"[^,]*' "$CONFIG_FILE" | head -1 | sed 's/.*"autologinUrl"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-  CURRENT_DAYS=$(node -e "const c=require('./config.json'); console.log((c.workSchedule&&c.workSchedule.days||[]).join(','));" 2>/dev/null || echo "1,2,3,4,5")
-  CURRENT_SHIFTS=$(node -e 'const c=require("./config.json"); const s=c.workSchedule&&c.workSchedule.shifts||[]; console.log(s.map(x=>x.startHour+":"+String(x.startMin).padStart(2,"0")+"-"+x.endHour+":"+String(x.endMin).padStart(2,"0")).join(", "));' 2>/dev/null || echo "9:30-13:00, 16:30-20:00")
+read_config_url() {
+  node -e "const c=require('$CONFIG_FILE'); console.log(c.autologinUrl||'');" 2>/dev/null || echo ""
+}
+
+read_config_schedule_desc() {
+  node "$SCHEDULE_CLI" describe 2>/dev/null || echo "Orario non configurato"
+}
+
+# Se config esiste ed è valido, mostra riepilogo e chiede se modificarlo
+if is_config_valid; then
+  CURRENT_URL=$(read_config_url)
+  CURRENT_SCHEDULE=$(read_config_schedule_desc)
 
   echo ""
   echo "Trovata configurazione esistente:"
   echo "  Autologin: $(mask_url "$CURRENT_URL")"
-  echo "  Giorni:    $CURRENT_DAYS (0=dom, 1=lun, … 6=sab)"
-  echo "  Turni:     $CURRENT_SHIFTS"
+  echo "  Orario:    $CURRENT_SCHEDULE"
   echo ""
 
-  if [ "$AUTO_YES" = false ]; then
+  if [ "$AUTO_YES" = true ]; then
+    MODIFY=false
+  else
     read -q "REPLY?Vuoi modificarla? [y/N] "
     echo ""
     if [[ "$REPLY" =~ ^[Yy]$ ]]; then
@@ -133,24 +172,32 @@ if [ -f "$CONFIG_FILE" ] && [ "$IS_PLACEHOLDER" = false ]; then
     else
       MODIFY=false
     fi
-  else
-    MODIFY=false
   fi
 else
   MODIFY=true
+  if [ "$AUTO_YES" = true ]; then
+    echo ""
+    err "Configurazione mancante o non valida. Impossibile proseguire in modalità automatica."
+    info "Esegui una volta: cd $DIR && ./scripts/setup.sh (senza --yes) per configurare autologin e orari."
+    exit 1
+  fi
+  if [ -f "$CONFIG_FILE" ]; then
+    echo ""
+    warn "config.json esistente ma non valido o contiene dati fittizi."
+    warn "Verrà riconfigurato da zero."
+    echo ""
+  else
+    echo ""
+    info "Prima configurazione: servono autologin e orari di lavoro."
+    echo ""
+  fi
 fi
 
-if [ "$IS_PLACEHOLDER" = true ]; then
-  echo ""
-  warn "config.json contiene dati fittizi del repository."
-  warn "È necessario inserire i tuoi dati prima di continuare."
-  echo ""
-fi
-
-# Helper di validazione
+# Helper di validazione giorni
 valid_days() {
   local input="$1"
-  local normalized=$(echo "$input" | tr ',' '\n' | grep -E '^[0-6]$' | sort -u | tr '\n' ',' | sed 's/,$//')
+  local normalized
+  normalized=$(echo "$input" | tr ',' '\n' | grep -E '^[0-6]$' | sort -u | tr '\n' ',' | sed 's/,$//')
   [ -n "$normalized" ]
 }
 
@@ -158,34 +205,80 @@ format_days() {
   echo "$1" | tr ',' '\n' | grep -E '^[0-6]$' | sort -u | tr '\n' ',' | sed 's/,$//'
 }
 
-valid_time() {
-  local t="$1"
-  if [[ ! "$t" =~ ^[0-9]{1,2}:[0-9]{1,2}$ ]]; then
-    return 1
-  fi
-  local h m
-  h=$(echo "$t" | cut -d: -f1)
-  m=$(echo "$t" | cut -d: -f2)
-  if [ "$h" -lt 0 ] || [ "$h" -gt 23 ] || [ "$m" -lt 0 ] || [ "$m" -gt 59 ]; then
-    return 1
-  fi
-  return 0
-}
-
 valid_autologin() {
   local url="$1"
-  # Formato atteso: https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN
   if [[ ! "$url" =~ ^https://tecsial\.gsdcampus\.it/autologin/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/[A-Za-z0-9]+$ ]]; then
     return 1
   fi
   return 0
 }
 
-parse_time() {
+parse_input_time() {
   local t="$1"
-  local h=$(echo "$t" | cut -d: -f1 | sed 's/^0//')
-  local m=$(echo "$t" | cut -d: -f2 | sed 's/^0//')
-  printf '%s %s' "$h" "$m"
+  local result
+  result=$(node "$SCHEDULE_CLI" parse-time "$t" 2>/dev/null) || return 1
+  echo "$result"
+}
+
+# Chiede un orario con default. Ritorna stringa "HH:MM" tramite variabili globali LAST_H e LAST_M.
+prompt_time() {
+  local prompt_text="$1"
+  local default_time="$2"
+  local h m parsed
+  while true; do
+    read "INPUT?${prompt_text} [${default_time}]: "
+    [ -z "$INPUT" ] && INPUT="$default_time"
+    parsed=$(parse_input_time "$INPUT" 2>/dev/null || true)
+    if [ -n "$parsed" ]; then
+      h=$(echo "$parsed" | awk '{print $1}')
+      m=$(echo "$parsed" | awk '{print $2}')
+      LAST_H=$h
+      LAST_M=$m
+      return 0
+    fi
+    warn "Orario non valido. Formati accettati: HH:MM, H:MM, HH.MM, H.MM, HHMM (es. 9:30)."
+  done
+}
+
+# Chiede un range e lo aggiunge all'array SHIFT_SPECS (stringhe "startHour,startMin,endHour,endMin")
+ask_shift() {
+  local label="$1"
+  local default_start="$2"
+  local default_end="$3"
+  echo ""
+  echo -e "${BOLD}${label}${NC}"
+  prompt_time "  Inizio" "$default_start"
+  local s_h=$LAST_H s_m=$LAST_M
+  prompt_time "  Fine" "$default_end"
+  local e_h=$LAST_H e_m=$LAST_M
+
+  # Validazione inizio < fine
+  local start_min=$((s_h * 60 + s_m))
+  local end_min=$((e_h * 60 + e_m))
+  if [ "$start_min" -ge "$end_min" ]; then
+    warn "L'orario di fine deve essere successivo a quello di inizio."
+    return 1
+  fi
+
+  # Controlla sovrapposizione con turni già inseriti
+  local i=1
+  for spec in "$SHIFT_SPECS[@]"; do
+    local prev_h1 prev_m1 prev_h2 prev_m2
+    prev_h1=$(echo "$spec" | cut -d, -f1)
+    prev_m1=$(echo "$spec" | cut -d, -f2)
+    prev_h2=$(echo "$spec" | cut -d, -f3)
+    prev_m2=$(echo "$spec" | cut -d, -f4)
+    local p_start=$((prev_h1 * 60 + prev_m1))
+    local p_end=$((prev_h2 * 60 + prev_m2))
+    if [ "$start_min" -lt "$p_end" ] && [ "$end_min" -gt "$p_start" ]; then
+      warn "Questo turno si sovrappone con il turno $i (${prev_h1}:${prev_m1}-${prev_h2}:${prev_m2})."
+      return 1
+    fi
+    i=$((i + 1))
+  done
+
+  SHIFT_SPECS+=("${s_h},${s_m},${e_h},${e_m}")
+  return 0
 }
 
 # Loop di configurazione con validazione e conferma finale
@@ -213,7 +306,7 @@ while true; do
 
     echo ""
     echo -e "${BOLD}Configurazione orari di lavoro${NC}"
-    echo "Lascia vuoto e premi Invio per confermare il valore mostrato tra []."
+    echo "Scegli la modalità più adatta a te."
     echo ""
 
     while true; do
@@ -229,49 +322,115 @@ while true; do
       echo ""
     done
 
-    while true; do
-      echo ""
-      echo "Turno 1 (mattina). Formato HH:MM, es. 09:30."
-      read "SHIFT1_START?Inizio [09:30]: "
-      [ -z "$SHIFT1_START" ] && SHIFT1_START="09:30"
-      if valid_time "$SHIFT1_START"; then break; fi
-      warn "Orario non valido. Usa il formato HH:MM, es. 09:30."
-    done
-    while true; do
-      read "SHIFT1_END?Fine [13:00]: "
-      [ -z "$SHIFT1_END" ] && SHIFT1_END="13:00"
-      if valid_time "$SHIFT1_END"; then break; fi
-      warn "Orario non valido. Usa il formato HH:MM, es. 13:00."
-    done
+    echo ""
+    echo "Modalità orario:"
+    echo "  1) Continuato    — un solo turno (default 09:00-18:00)"
+    echo "  2) Solo mattina  — un turno (default 09:00-13:00)"
+    echo "  3) Solo pomeriggio — un turno (default 14:00-18:00)"
+    echo "  4) Classico      — mattina + pomeriggio (default 09:30-13:00, 16:30-20:00)"
+    echo "  5) Personalizzato — inserisci i turni uno alla volta"
+    echo ""
 
     while true; do
-      echo ""
-      echo "Turno 2 (pomeriggio). Formato HH:MM, es. 16:30."
-      read "SHIFT2_START?Inizio [16:30]: "
-      [ -z "$SHIFT2_START" ] && SHIFT2_START="16:30"
-      if valid_time "$SHIFT2_START"; then break; fi
-      warn "Orario non valido. Usa il formato HH:MM, es. 16:30."
-    done
-    while true; do
-      read "SHIFT2_END?Fine [20:00]: "
-      [ -z "$SHIFT2_END" ] && SHIFT2_END="20:00"
-      if valid_time "$SHIFT2_END"; then break; fi
-      warn "Orario non valido. Usa il formato HH:MM, es. 20:00."
+      read "MODE?Scelta [4]: "
+      [ -z "$MODE" ] && MODE="4"
+      if [[ "$MODE" =~ ^[1-5]$ ]]; then
+        break
+      fi
+      warn "Scelta non valida. Inserisci un numero da 1 a 5."
     done
 
-    read S1H S1M <<< "$(parse_time "$SHIFT1_START")"
-    read E1H E1M <<< "$(parse_time "$SHIFT1_END")"
-    read S2H S2M <<< "$(parse_time "$SHIFT2_START")"
-    read E2H E2M <<< "$(parse_time "$SHIFT2_END")"
+    # Svuota array turni
+    SHIFT_SPECS=()
+
+    case "$MODE" in
+      1)
+        ask_shift "Orario continuato" "09:00" "18:00" || continue
+        ;;
+      2)
+        ask_shift "Solo mattina" "09:00" "13:00" || continue
+        ;;
+      3)
+        ask_shift "Solo pomeriggio" "14:00" "18:00" || continue
+        ;;
+      4)
+        ask_shift "Mattina" "09:30" "13:00" || continue
+        ask_shift "Pomeriggio" "16:30" "20:00" || continue
+        ;;
+      5)
+        echo ""
+        echo -e "${BOLD}Modalità personalizzata${NC}"
+        echo "Aggiungi i turni in ordine cronologico. Massimo 3 turni."
+        while true; do
+          if [ ${#SHIFT_SPECS} -ge 3 ]; then
+            info "Hai raggiunto il massimo di 3 turni."
+            break
+          fi
+          current_idx=$(( ${#SHIFT_SPECS} + 1 ))
+          echo ""
+          read "ADD?Aggiungi turno $current_idx? [s/N]: "
+          if [[ ! "$ADD" =~ ^[Ss]$ ]]; then
+            if [ ${#SHIFT_SPECS} -eq 0 ]; then
+              warn "Devi inserire almeno un turno."
+              continue
+            fi
+            break
+          fi
+          ask_shift "Turno $current_idx" "09:00" "13:00" || continue
+        done
+        ;;
+    esac
+
+    # Ordina i turni per orario di inizio
+    if [ ${#SHIFT_SPECS} -gt 0 ]; then
+      IFS=$'\n'
+      SHIFT_SPECS=($(printf '%s\n' "${SHIFT_SPECS[@]}" | sort -t, -k1,1n -k2,2n))
+      unset IFS
+    fi
+
+    # Costruisci JSON shifts
+    SHIFTS_JSON=""
+    first=true
+    for spec in "$SHIFT_SPECS[@]"; do
+      sh=$(echo "$spec" | cut -d, -f1)
+      sm=$(echo "$spec" | cut -d, -f2)
+      eh=$(echo "$spec" | cut -d, -f3)
+      em=$(echo "$spec" | cut -d, -f4)
+      if [ "$first" = true ]; then
+        first=false
+      else
+        SHIFTS_JSON+=","
+      fi
+      SHIFTS_JSON+="\n      { \"startHour\": $sh, \"startMin\": $sm, \"endHour\": $eh, \"endMin\": $em }"
+    done
+
+    # Formatta orari per il riepilogo
+    shifts_summary=""
+    for spec in "$SHIFT_SPECS[@]"; do
+      sh=$(echo "$spec" | cut -d, -f1)
+      sm=$(echo "$spec" | cut -d, -f2)
+      eh=$(echo "$spec" | cut -d, -f3)
+      em=$(echo "$spec" | cut -d, -f4)
+      s_str=$(node "$SCHEDULE_CLI" format-time "$sh" "$sm")
+      e_str=$(node "$SCHEDULE_CLI" format-time "$eh" "$em")
+      if [ -n "$shifts_summary" ]; then shifts_summary+=", "; fi
+      shifts_summary+="${s_str}-${e_str}"
+    done
 
     echo ""
     echo -e "${BOLD}Riepilogo configurazione:${NC}"
     echo "  Autologin: $(mask_url "$AUTOLOGIN")"
     echo "  Giorni:    $DAYS_JSON (0=dom, 6=sab)"
-    echo "  Turni:     ${SHIFT1_START}-${SHIFT1_END}, ${SHIFT2_START}-${SHIFT2_END}"
+    echo "  Turni:     $shifts_summary"
     echo ""
-    read -q "REPLY?Confermi? [y/N] "
-    echo ""
+
+    if [ "$AUTO_YES" = true ]; then
+      REPLY="y"
+    else
+      read -q "REPLY?Confermi? [y/N] "
+      echo ""
+    fi
+
     if [[ "$REPLY" =~ ^[Yy]$ ]]; then
       cat > "$CONFIG_FILE" <<EOF
 {
@@ -280,9 +439,7 @@ while true; do
   "courseUrls": [],
   "workSchedule": {
     "days": [$DAYS_JSON],
-    "shifts": [
-      { "startHour": $S1H, "startMin": $S1M, "endHour": $E1H, "endMin": $E1M },
-      { "startHour": $S2H, "startMin": $S2M, "endHour": $E2H, "endMin": $E2M }
+    "shifts": [$SHIFTS_JSON
     ]
   }
 }
@@ -290,7 +447,7 @@ EOF
       ok "Configurazione salvata in config.json"
       ok "Autologin: $(mask_url "$AUTOLOGIN")"
       ok "Giorni: $DAYS_JSON"
-      ok "Turni: ${SHIFT1_START}-${SHIFT1_END}, ${SHIFT2_START}-${SHIFT2_END}"
+      ok "Turni: $shifts_summary"
       break
     else
       warn "Ricominciamo l'inserimento."
@@ -298,6 +455,7 @@ EOF
     fi
   else
     ok "Configurazione esistente confermata."
+    ok "Orario: $(read_config_schedule_desc)"
     break
   fi
 done

@@ -4,6 +4,8 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
+SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
+
 # Colori
 BOLD='\033[1m'
 GREEN='\033[0;32m'
@@ -30,7 +32,30 @@ if [ "$1" = "--ignore-hours" ]; then
 fi
 
 echo ""
-step "1/5" "Verifica requisiti"
+echo "============================================"
+echo -e "${BOLD}  Avvio GSD Campus Autoplay${NC}"
+echo "============================================"
+echo ""
+
+# Verifica che config.json esista e non sia placeholder
+step "1/5" "Verifica configurazione"
+if [ ! -f "$DIR/config.json" ]; then
+  err "config.json non trovato."
+  info "Esegui una volta: cd $DIR && ./scripts/setup.sh"
+  exit 1
+fi
+
+if ! node "$SCHEDULE_CLI" is-work-time >/dev/null 2>&1; then
+  warn "config.json presente ma non valido o incompleto."
+  info "Esegui: cd $DIR && ./scripts/setup.sh"
+  exit 1
+fi
+
+ok "Configurazione trovata."
+info "Orario configurato: $(node "$SCHEDULE_CLI" describe 2>/dev/null || echo 'non disponibile')"
+
+echo ""
+step "2/5" "Verifica requisiti"
 if [ -f "$DIR/scripts/check-requirements.sh" ]; then
   if ! "$DIR/scripts/check-requirements.sh" >> "$OUT_FILE" 2>&1; then
     echo ""
@@ -45,7 +70,7 @@ else
 fi
 
 echo ""
-step "2/5" "Controllo istanze attive"
+step "3/5" "Controllo istanze attive"
 if [ -f "$PID_FILE" ]; then
   OLD_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
   if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
@@ -54,39 +79,51 @@ if [ -f "$PID_FILE" ]; then
     info "Ferma:   ./stop.sh"
     exit 1
   fi
+  ok "Nessuna istanza attiva (PID file orfano rimosso)."
+  rm -f "$PID_FILE"
+else
   ok "Nessuna istanza attiva."
 fi
 
 echo ""
-step "3/5" "Rotazione log precedenti"
+step "4/5" "Rotazione log precedenti"
 if [ -f "$OUT_FILE" ]; then
   mv "$OUT_FILE" "logs/autoplay.out.$(date +%Y%m%d-%H%M%S).old"
   ok "Vecchio log rinominato."
 fi
 
 echo ""
-step "4/5" "Avvio scheduler in background"
+step "5/5" "Avvio scheduler in background"
 if [ "$IGNORE_HOURS" = true ]; then
   nohup "$DIR/scripts/scheduler.sh" --ignore-hours > "$OUT_FILE" 2>&1 &
 else
+  if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -q '^yes$'; then
+    info "Siamo in orario lavorativo: l'autoplay partirà subito."
+  else
+    NEXT_START=$(node "$SCHEDULE_CLI" next-start 2>/dev/null || echo "")
+    if [ -n "$NEXT_START" ]; then
+      info "Siamo fuori orario. Primo avvio previsto: $NEXT_START"
+      info "Lo scheduler attenderà automaticamente."
+    else
+      warn "Impossibile calcolare il prossimo turno; lo scheduler riproverà a breve."
+    fi
+  fi
   nohup "$DIR/scripts/scheduler.sh" > "$OUT_FILE" 2>&1 &
 fi
 echo $! > "$PID_FILE"
 PID=$(cat "$PID_FILE")
 
 echo ""
-step "5/5" "Conferma avvio"
+echo "────────────────────────────"
 if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
   ok "Scheduler autoplay avviato in background. PID: $PID"
-  echo ""
-  echo "────────────────────────────"
   echo -e "${BOLD}Comandi utili:${NC}"
   echo "  ./status.sh                 → stato e log"
   echo "  ./stop.sh                   → ferma tutto"
   echo "  tail -f logs/autoplay.log   → log in tempo reale"
   echo "  tail -f logs/scheduler.log  → log scheduler"
-  echo "────────────────────────────"
 else
   err "Avvio fallito. Controlla $OUT_FILE"
   exit 1
 fi
+echo "────────────────────────────"

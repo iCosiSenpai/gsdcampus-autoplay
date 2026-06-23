@@ -12,4 +12,6 @@ config.json
 .autoplay_pid
 .ollama_pid
 .supervisor_prompt.txt
+.claude/
+.claude/plan.md
 

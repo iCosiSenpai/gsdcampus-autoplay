@@ -35,7 +35,15 @@ All'inizio lo script chiederà la **password del Mac (sudo) una sola volta** e l
 - Ti chieda di **installare/aggiornare/verificare qualcosa** (anche con richieste `y/n`) → conferma **sempre**.
 - Ti chieda il **login Ollama** (per il modello cloud `gemma4:31b-cloud`) → inserisci le credenziali e continuerà da solo.
 - Ti chieda il **tuo link di autologin personale** GSD Campus → incollalo.
-- Ti chieda i **giorni e gli orari di lavoro** → conferma i default (lun–ven, 09:30–13:00 e 16:30–20:00) o inserisci quelli dello store.
+- Ti chieda i **giorni lavorativi** dello store (es. lun–ven).
+- Ti chieda la **modalità oraria** preferita:
+  1. **Continuato** — un solo turno (es. 09:00-18:00).
+  2. **Solo mattina** — es. 09:00-13:00.
+  3. **Solo pomeriggio** — es. 14:00-18:00.
+  4. **Classico** — due turni, default 09:30-13:00 e 16:30-20:00.
+  5. **Personalizzato** — fino a 3 turni a scelta.
+
+Gli orari si possono scrivere in modo flessibile: `9:30`, `09:30`, `9.30`, `0930`, `930`.
 
 Non avere paura di confermare: serve tutto per automatizzare il corso.
 
@@ -74,7 +82,8 @@ cd ~/gsdcampus-autoplay
 ```
 
 Vedrai:
-- se il processo è attivo
+- se il processo è attivo e da quanto tempo
+- se adesso è orario lavorativo e quando parte il prossimo turno
 - quale corso/lezione sta facendo
 - progresso del video
 - ultimi errori
@@ -137,13 +146,15 @@ Il pacchetto è già pulito: non contiene `config.json` personale, sessioni, log
 4. All’inizio lo script ti chiederà:
    - il **tuo link di autologin personale**;
    - i **giorni lavorativi** dello store;
-   - gli **orari di lavoro** dello store.
+   - la **modalità oraria** e gli orari dello store.
 5. Da lì in poi usa sempre `./launch-ai-supervisor.sh`.
 
 ## 8. Orari di lavoro automatici
 
 I Mac in negozio sono accesi 24/7. L'automazione segue automaticamente i turni lavorativi configurati in `config.json`:
 
+- **Modalità rapide**: continuato, solo mattina, solo pomeriggio, classico, personalizzato.
+- **Formati orari flessibili**: `9:30`, `09:30`, `9.30`, `0930`, `930`.
 - **Default**: lunedì–venerdì, 09:30–13:00 e 16:30–20:00.
 - Se dici all'AI `avvia il corso`, lo scheduler parte anche fuori orario e aspetta l'inizio del prossimo turno.
 - A fine turno si ferma da sola e riprende al turno successivo.
@@ -163,7 +174,7 @@ Lo script conosce già alcune risposte del quiz in `data/known_answers.json`.
 - Se la domanda è nuova, chiede a Ollama (`gemma4:31b-cloud`) la risposta in base alla conoscenza del modello.
 - Se il modello non è sicuro, il quiz si ferma e salva la domanda in `data/need_answer.json`: in quel caso scrivi in chat all’AI e lei cercherà la risposta corretta per te.
 
-## 10. Disinstallazione
+## 11. Disinstallazione
 
 Se vuoi rimuovere tutto, apri il Terminale nella cartella del progetto e lancia:
 
@@ -173,7 +184,7 @@ Se vuoi rimuovere tutto, apri il Terminale nella cartella del progetto e lancia:
 
 Lo script chiederà conferma e rimuoverà dipendenze, modelli Ollama, Claude Code CLI, log e (se vuoi) anche la cartella del progetto. Homebrew e Node.js resteranno installati, per non compromettere altri software.
 
-## 11. Avvisi
+## 12. Avvisi
 
 - Non chiudere il Mac o metterlo in stop se vuoi che il corso continui.
 - Non modificare i file in `data/` se non sai cosa stai facendo.

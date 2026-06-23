@@ -1,5 +1,5 @@
 {
-  "autologinUrl": "Incolla qui il tuo link autologin personale",
+  "autologinUrl": "https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN",
   "baseUrl": "https://tecsial.gsdcampus.it/",
   "courseUrls": [],
   "workSchedule": {

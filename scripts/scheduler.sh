@@ -4,6 +4,8 @@ set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
+SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
+
 IGNORE_HOURS=false
 if [ "$1" = "--ignore-hours" ]; then
   IGNORE_HOURS=true
@@ -16,16 +18,26 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+PID_FILE="$DIR/.autoplay_pid"
+LOG_FILE="$DIR/logs/scheduler.log"
+STOP_FILE="$DIR/.scheduler_stop"
+
+mkdir -p "$DIR/logs"
+
 log() {
-  echo "$(date '+%Y-%m-%d %H:%M:%S') | $1" | tee -a "$LOG_FILE"
+  local line="$(date '+%Y-%m-%d %H:%M:%S') | $1"
+  echo "$line" | tee -a "$LOG_FILE"
 }
 
 info() { log "${BLUE}${BOLD}[INFO]${NC} $1"; }
 ok() { log "${GREEN}${BOLD}[OK]${NC} $1"; }
 warn() { log "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
 
-LOG_FILE="$DIR/logs/scheduler.log"
-mkdir -p "$DIR/logs"
+# Pulizia file di controllo in uscita
+cleanup() {
+  rm -f "$STOP_FILE"
+}
+trap cleanup EXIT INT TERM
 
 # Calcola i millisecondi fino al prossimo inizio turno lavorativo
 ms_until_next_start() {
@@ -33,40 +45,52 @@ ms_until_next_start() {
     const { nextWorkStart, msUntil } = require('./src/lib/schedule');
     const d = nextWorkStart(new Date());
     console.log(d ? msUntil(d) : 0);
-  "
+  " 2>/dev/null
 }
 
-# Aspetta un certo numero di millisecondi, ma controlla periodicamente se lo scheduler deve fermarsi
+# Restituisce l'ora del prossimo avvio in formato leggibile
+next_start_readable() {
+  node "$SCHEDULE_CLI" next-start 2>/dev/null || echo "sconosciuto"
+}
+
+# Aspetta un certo numero di millisecondi, controllando periodicamente se lo scheduler deve fermarsi
 wait_ms() {
   local total_ms="$1"
   local step_ms=60000 # 1 minuto
   local elapsed=0
-  while [ "$elapsed" -lt "$total_ms" ]; do
-    if [ -f "$DIR/.scheduler_stop" ]; then
+
+  # Evita attese nulle o negative
+  if [[ -z "$total_ms" || "$total_ms" -le 1000 ]]; then
+    sleep 1
+    return 0
+  fi
+
+  while [[ "$elapsed" -lt "$total_ms" ]]; do
+    if [[ -f "$STOP_FILE" ]]; then
       log "Ricevuto segnale di stop. Fermo lo scheduler."
-      rm -f "$DIR/.scheduler_stop"
+      rm -f "$STOP_FILE"
       exit 0
     fi
+
     local wait=$((step_ms))
-    if [ "$((elapsed + step_ms))" -gt "$total_ms" ]; then
+    if [[ "$((elapsed + step_ms))" -gt "$total_ms" ]]; then
       wait=$((total_ms - elapsed))
     fi
+
     sleep $((wait / 1000))
     elapsed=$((elapsed + wait))
   done
 }
 
-# Controlla se siamo in orario lavorativo in modo robusto
+# Controlla se siamo in orario lavorativo
 is_in_hours() {
-  local out
-  out=$(node -e "const { isWorkTime } = require('./src/lib/schedule'); console.log(isWorkTime() ? 'yes' : 'no');" 2>/dev/null)
-  [ "$out" = "yes" ]
+  node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -q '^yes$'
 }
 
 log "Scheduler avviato. IGNORE_HOURS=$IGNORE_HOURS"
 
 while true; do
-  if [ "$IGNORE_HOURS" = true ]; then
+  if [[ "$IGNORE_HOURS" = true ]]; then
     log "Avvio autoplay (modalità ignore-hours)..."
     node "$DIR/src/autoplay.js" --ignore-hours 2>&1 | tee -a "$LOG_FILE"
     log "Autoplay terminato. Riavvio tra 60 secondi..."
@@ -83,10 +107,11 @@ while true; do
   fi
 
   NEXT_MS=$(ms_until_next_start)
-  if [ -z "$NEXT_MS" ] || [ "$NEXT_MS" -le 0 ]; then
+  if [[ -z "$NEXT_MS" || "$NEXT_MS" -le 0 ]]; then
     NEXT_MS=60000
   fi
   NEXT_MIN=$((NEXT_MS / 60000))
-  log "Prossimo avvio fra circa $NEXT_MIN minuti."
+  NEXT_START=$(next_start_readable)
+  log "Prossimo avvio: ${NEXT_START} (fra circa ${NEXT_MIN} minuti)."
   wait_ms "$NEXT_MS"
 done

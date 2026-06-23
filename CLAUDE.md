@@ -28,18 +28,21 @@ L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso 
 ## Comandi a disposizione
 
 - `./scripts/prepare-package.sh --yes --zip` — crea sul Desktop una copia pulita del progetto e uno zip da dare a un collega (rimuove dati personali, log, pid, config.json personale).
-- `./status.sh` — vedi stato attuale, log, heartbeat.
+- `./status.sh` — vedi stato attuale, log, heartbeat, orario configurato, prossimo turno.
 - `./start.sh` — avvia scheduler autoplay in background headless (rispetta gli orari di lavoro: si ferma a fine turno e riparte automaticamente all'inizio del successivo).
 - `./start.sh --ignore-hours` — avvia subito ignorando gli orari di lavoro.
 - `./stop.sh` — ferma autoplay e scheduler.
 - `./scripts/check-requirements.sh` — verifica requisiti.
-- `./scripts/setup.sh` — installa requisiti mancanti e configura `config.json` (autologin + orari).
+- `./scripts/setup.sh` — installa requisiti mancanti e configura `config.json` (autologin + orari). La configurazione degli orari è interattiva e offre scelte rapide (continuato, solo mattina, solo pomeriggio, classico, personalizzato).
 - **Nota importante:** `./launch-ai-supervisor.sh` ferma automaticamente eventuali istanze precedenti di autoplay/scheduler all'avvio, quindi non è necessario eseguire `./stop.sh` prima. Se un collega ha ancora un processo vecchio in esecuzione, il supervisore lo pulisce da solo.
 - `./scripts/ollama-daemon.sh start` — avvia Ollama in modalità headless (se serve al supervisore stesso).
 - `./scripts/ollama-daemon.sh stop` — ferma Ollama.
 - `tail -f logs/autoplay.log` — segui log in tempo reale.
 - `tail -n 30 logs/autoplay.log` — ultimi log.
 - `cat logs/status.json` — stato live.
+- `node scripts/lib/schedule-cli.js describe` — descrizione leggibile degli orari configurati.
+- `node scripts/lib/schedule-cli.js is-work-time` — controlla se adesso è orario lavorativo.
+- `node scripts/lib/schedule-cli.js next-start` — prossimo inizio turno (ISO).
 
 ## Flusso consigliato
 
@@ -48,7 +51,7 @@ Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
 1. Esegui `./status.sh` per capire lo stato attuale.
 2. Se il processo è già attivo, comunica lo stato (corso, lezione, progresso, errori).
 3. Se il processo non è attivo:
-   - Verifica l'orario locale con `node -e "console.log(require('./src/lib/schedule').isWorkTime() ? 'in_orario' : 'fuori_orario')"`.
+   - Verifica l'orario locale con `node scripts/lib/schedule-cli.js is-work-time`.
    - Se siamo **in orario**: esegui `./start.sh`.
    - Se siamo **fuori orario**: informa l'utente e chiedi cosa preferisce:
      - "aspetta il prossimo turno" → esegui `./start.sh` (lo scheduler attende automaticamente).
@@ -63,6 +66,13 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 - `days`: array di numeri del giorno (0=domenica, 1=lunedì, … 6=sabato).
 - `shifts`: array di oggetti `{startHour, startMin, endHour, endMin}`.
 - Default (se non configurato): lunedì-venerdì, turni 09:30-13:00 e 16:30-20:00.
+- `./scripts/setup.sh` permette di scegliere tra modalità rapide:
+  1. **Continuato** — un solo turno (es. 09:00-18:00).
+  2. **Solo mattina** — es. 09:00-13:00.
+  3. **Solo pomeriggio** — es. 14:00-18:00.
+  4. **Classico** — mattina + pomeriggio, default 09:30-13:00 e 16:30-20:00.
+  5. **Personalizzato** — inserisci fino a 3 turni.
+- I formati orari accettati sono flessibili: `9:30`, `09:30`, `9.30`, `0930`, `930`.
 - Ogni Mac usa il proprio fuso orario locale: uno store può essere fuori orario mentre un altro è ancora in orario.
 - `start.sh` avvia uno scheduler che, se fuori orario, aspetta l'inizio del prossimo turno e poi avvia `node src/autoplay.js`.
 - `src/autoplay.js` controlla l'orario ogni minuto: se arriva a fine turno, esce gracefulmente; lo scheduler aspetta il turno successivo e lo riavvia.
@@ -108,7 +118,7 @@ Sii conciso. Riporta:
 
 ## Permessi di Claude Code
 
-`./launch-ai-supervisor.sh` avvia Claude con `--dangerously-skip-permissions`. All'inizio lo script chiede la password di sudo una sola volta (`sudo -v`) e la mantiene valida per tutta la sessione tramite un keepalive in background. Durante il setup l'utente deve solo confermare eventuali richieste di installazione/aggiornamento da Homebrew/npm (sempre `y`). I permessi di Claude Code non richiedono conferme ripetute.
+`./launch-ai-supervisor.sh` avvia Claude con `--dangerously-skip-permissions`. All'inizio lo script chiede la password di sudo una solta volta (`sudo -v`) e la mantiene valida per tutta la sessione tramite un keepalive in background. Durante il setup l'utente deve solo confermare eventuali richieste di installazione/aggiornamento da Homebrew/npm (sempre `y`). I permessi di Claude Code non richiedono conferme ripetute.
 
 ## Requisito login Ollama
 
@@ -119,13 +129,14 @@ Il modello `gemma4:31b-cloud` è un modello **cloud Ollama** e richiede l'autent
 La prima volta che `./launch-ai-supervisor.sh` viene eseguito, `setup.sh` chiede interattivamente:
 1. Il link di autologin personale GSD Campus.
 2. I giorni lavorativi (default lun-venerdì).
-3. Gli orari di lavoro (default 09:30-13:00 e 16:30-20:00).
+3. La modalità oraria preferita (continuato, mezza giornata, classico o personalizzato) e gli orari.
 
 Questi dati vengono salvati in `config.json`. In seguito, ogni avvio mostrerà solo una conferma dei dati configurati.
 
 ## Note tecniche
 
 - Lo script principale è `src/autoplay.js`; usa Playwright in modalità headless.
-- `start.sh` controlla i requisiti prima di avviare.
+- `start.sh` controlla i requisiti e la configurazione prima di avviare.
 - I log sono in `logs/`.
 - `backups/` contiene copie di sicurezza dello script (se presenti).
+- `scripts/lib/schedule-cli.js` fornisce helper per leggere e validare gli orari dagli script shell.

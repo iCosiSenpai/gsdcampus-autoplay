@@ -19,7 +19,7 @@ Lo script:
 2. **La prima volta ti chiede:**
    - il tuo **link di autologin personale** GSD Campus;
    - i **giorni lavorativi** (default lun–ven);
-   - gli **orari di lavoro** (default 09:30–13:00 e 16:30–20:00).
+   - la **modalità oraria** preferita: continuato, solo mattina, solo pomeriggio, classico (mattina+pomeriggio) o personalizzata.
 3. Avvia Ollama se necessario.
 4. Apre una sessione Claude Code con istruzioni pre-caricate e permessi automatici.
 5. Tu scrivi nella chat cose come:
@@ -28,7 +28,7 @@ Lo script:
    - `avvia il corso`
    - `ferma tutto`
 
-All’inizio lo script chiede la **password di sudo una sola volta** e la mantiene valida per tutta la sessione tramite un keepalive in background. Poi, durante il setup, potrebbe chiedere:
+All'inizio lo script chiede la **password di sudo una sola volta** e la mantiene valida per tutta la sessione tramite un keepalive in background. Poi, durante il setup, potrebbe chiedere:
 - di **installare/aggiornare/verificare dipendenze** (anche con richieste `y/n`) → conferma sempre;
 - il **login Ollama** → inserisci le credenziali e lo script continua.
 
@@ -72,15 +72,21 @@ cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-a
 ./start.sh                              # avvia scheduler autoplay (rispetta orari lavoro)
 ./start.sh --ignore-hours               # avvia subito ignorando gli orari
 ./stop.sh                               # ferma autoplay e scheduler
-./status.sh                             # stato, heartbeat, log
+./status.sh                             # stato, heartbeat, log, orario configurato
 ./scripts/setup.sh                      # installa/aggiorna requisiti e configura config.json
 ./scripts/setup.sh --yes                # modalità automatica, salta ciò che è già installato
 ./scripts/setup.sh --yes --force-update # forza aggiornamento di tutto
 ./scripts/check-requirements.sh         # verifica requisiti
 ./scripts/maintenance.sh                # ruota log grandi e pulisce vecchi screenshot/dump
 ./scripts/uninstall.sh                  # rimuove dipendenze, modelli, CLI e progetto (conferma)
-./scripts/prepare-package.sh --yes     # crea sul Desktop copia pulita per un collega
+./scripts/prepare-package.sh --yes      # crea sul Desktop copia pulita per un collega
 ./scripts/prepare-package.sh --yes --zip # ...e anche lo zip
+
+# Helper orari
+node scripts/lib/schedule-cli.js describe      # descrizione orario configurato
+node scripts/lib/schedule-cli.js is-work-time  # siamo in orario? (yes/no)
+node scripts/lib/schedule-cli.js next-start    # prossimo inizio turno (ISO)
+node scripts/lib/schedule-cli.js next-end      # prossima fine turno (ISO)
 ```
 
 ## Struttura
@@ -89,6 +95,7 @@ cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-a
 - `CLAUDE.md` — istruzioni per l'AI supervisore
 - `src/autoplay.js` — main
 - `src/lib/` — logger, monitor, quiz, video, schedule
+- `scripts/lib/schedule-cli.js` — helper orari per gli script shell
 - `scripts/` — setup, check requisiti, daemon Ollama
 - `data/` — risposte conosciute, risposte in attesa di verifica, mappa corsi, stato sessione
 - `logs/` — log, heartbeat, status.json, supervisor.log, ollama.log
@@ -114,6 +121,8 @@ Gli orari di lavoro sono salvati in `config.json` nella chiave `workSchedule` (`
 
 I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i turni configurati in `config.json`:
 
+- Modalità rapide disponibili in `setup.sh`: continuato, solo mattina, solo pomeriggio, classico, personalizzato.
+- I formati orari accettati sono flessibili: `9:30`, `09:30`, `9.30`, `0930`, `930`.
 - Default: lunedì–venerdì, 09:30–13:00 e 16:30–20:00.
 - Se avvii `start.sh` fuori orario, lo scheduler aspetta l'inizio del prossimo turno e poi avvia l'autoplay.
 - A fine turno, `src/autoplay.js` esce gracefulmente; lo scheduler aspetta il turno successivo e lo riavvia.

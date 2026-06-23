@@ -17,6 +17,7 @@ err() { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
 step() { echo -e "${BOLD}[PASSO $1]${NC} $2"; }
 
 PID_FILE=".autoplay_pid"
+STOP_FILE=".scheduler_stop"
 
 echo ""
 echo "============================================"
@@ -24,7 +25,11 @@ echo -e "${BOLD}  Arresto GSD Campus Autoplay${NC}"
 echo "============================================"
 echo ""
 
+# 1. Segnala allo scheduler di fermarsi se in attesa
+touch "$DIR/$STOP_FILE"
+
 step "1/3" "Lettura PID dello scheduler"
+PID=""
 if [ ! -f "$PID_FILE" ]; then
   warn "Nessun PID file trovato. Procedo con pulizia orfani."
 else
@@ -40,7 +45,7 @@ fi
 echo ""
 step "2/3" "Arresto processi"
 if [ -n "$PID" ]; then
-  echo "Arresto PID $PID..."
+  echo "Arresto PID $PID con SIGTERM..."
   kill "$PID" 2>/dev/null || true
   for i in {1..10}; do
     if ! kill -0 "$PID" 2>/dev/null; then
@@ -79,9 +84,8 @@ if [ -n "$SCH_ORPHANS" ]; then
   ok "Orfani scheduler rimossi."
 fi
 
-# Segnala allo scheduler di fermarsi se in attesa
-touch "$DIR/.scheduler_stop"
-rm -f "$DIR/.scheduler_stop"
+# Rimuovi il segnale di stop se ancora presente
+rm -f "$DIR/$STOP_FILE"
 
 echo ""
 echo "============================================"

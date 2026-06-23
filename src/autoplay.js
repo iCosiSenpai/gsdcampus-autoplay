@@ -6,7 +6,7 @@ const { createLogger } = require('./lib/logger');
 const { Monitor } = require('./lib/monitor');
 const { solveQuiz } = require('./lib/quiz');
 const { watchVideo } = require('./lib/video');
-const { isWorkTime, nextWorkEnd, nextWorkStart } = require('./lib/schedule');
+const { isWorkTime, nextWorkEnd, nextWorkStart, describeSchedule } = require('./lib/schedule');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'data');
@@ -16,7 +16,14 @@ const STATE_FILE = path.join(DATA_DIR, 'storage_state.json');
 const log = createLogger(ROOT);
 const monitor = new Monitor(ROOT, log);
 
-const config = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+let config;
+try {
+  config = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+} catch (e) {
+  log('FATAL: impossibile leggere config.json:', e.message);
+  process.exit(1);
+}
+
 const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 const IGNORE_HOURS = process.argv.includes('--ignore-hours');
@@ -60,7 +67,6 @@ async function solveQuizWrapper(page) {
 
 async function runCourse(page, courseUrl) {
   const emptyUrls = new Set();
-  const session = loadSession();
   let missingPermissionCount = 0;
   const MAX_MISSING_PERMISSION = 3;
 
@@ -100,8 +106,12 @@ async function runCourse(page, courseUrl) {
         log(`Corso ${courseUrl} non accessibile: troppi MISSING_PERMISSION. Salto al prossimo corso.`);
         return;
       }
-      await page.goto(config.autologinUrl, { waitUntil: 'networkidle' });
-      await page.waitForTimeout(5000);
+      try {
+        await page.goto(config.autologinUrl, { waitUntil: 'networkidle' });
+        await page.waitForTimeout(5000);
+      } catch (e) {
+        log(`Errore durante il re-login: ${e.message}`);
+      }
       continue;
     }
     missingPermissionCount = 0;
@@ -136,8 +146,12 @@ async function runCourse(page, courseUrl) {
       const currentUrl = page.url();
       if (!currentUrl.includes('/corso/show/')) {
         log(`Spostamento inatteso: ${currentUrl}. Ritorno al login...`);
-        await page.goto(config.autologinUrl, { waitUntil: 'networkidle' });
-        await page.waitForTimeout(5000);
+        try {
+          await page.goto(config.autologinUrl, { waitUntil: 'networkidle' });
+          await page.waitForTimeout(5000);
+        } catch (e) {
+          log(`Errore re-login: ${e.message}`);
+        }
         continue;
       }
 
@@ -230,6 +244,12 @@ async function runAutoplay() {
   let outerRetries = 0;
   const MAX_OUTER_RETRIES = 5;
 
+  log('========================================');
+  log('Avvio GSD Campus autoplay');
+  log('Orario configurato:', describeSchedule());
+  log('IGNORE_HOURS:', IGNORE_HOURS);
+  log('========================================');
+
   while (outerRetries < MAX_OUTER_RETRIES) {
     outerRetries++;
     monitor.update({ phase: 'starting', running: true, lastError: null });
@@ -266,14 +286,18 @@ async function runAutoplay() {
         log(`Navigazione verso autologin`);
         await page.goto(config.autologinUrl, { waitUntil: 'networkidle', timeout: 60000 });
         let attempts = 0;
-        while (page.url().includes('autologin') && attempts < 10) {
+        while (page.url().includes('autologin') && attempts < 30) {
           await page.waitForTimeout(2000);
           attempts++;
+        }
+        if (page.url().includes('autologin')) {
+          throw new Error(`Login non completato entro ${attempts * 2} secondi. Verifica il link autologin.`);
         }
         log(`URL finale dopo login: ${page.url()}`);
       } catch (e) {
         log(`Errore durante l'autologin: ${e.message}`);
         await monitor.recordError(page, e, 'autologin');
+        throw e;
       }
 
       // Salva stato storage dopo login
@@ -331,7 +355,6 @@ async function runAutoplay() {
             const start = nextWorkStart(new Date());
             log(`Fuori orario lavorativo. Stop programmato: ${end ? end.toISOString() : 'N/A'}, prossimo avvio: ${start ? start.toISOString() : 'N/A'}`);
             monitor.update({ phase: 'off_hours', nextStart: start ? start.toISOString() : null, nextEnd: end ? end.toISOString() : null, running: false });
-            // L'utente ha scelto di avviare, quindi usciamo gracefulmente e lo scheduler riprenderà al prossimo turno
             throw new OffHoursExit('Fine turno lavorativo');
           }
         }

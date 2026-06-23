@@ -4,17 +4,21 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
+SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
+
 # Colori
 BOLD='\033[1m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+RED='\033[0;31m'
 NC='\033[0m'
 
 info() { echo -e "${BLUE}${BOLD}[INFO]${NC} $1"; }
 ok() { echo -e "${GREEN}${BOLD}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
 err() { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
+step() { echo -e "${BOLD}[PASSO $1]${NC} $2"; }
 
 # Assicurati che ~/.local/bin sia nel PATH, anche se .zshrc non è ancora stato sourceato
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -55,20 +59,46 @@ pgrep -f "scheduler.sh" 2>/dev/null | while read orphan; do
 done
 ok "Pulizia istanze precedenti completata."
 
-# 1. Richiedi password sudo all'inizio per mantenere il ticket attivo per tutta la sessione
+# 1. Verifica configurazione iniziale
+step "1/6" "Verifica configurazione"
+CONFIG_OK=false
+if [ -f "$DIR/config.json" ]; then
+  if node "$SCHEDULE_CLI" is-work-time >/dev/null 2>&1; then
+    CONFIG_OK=true
+    ok "config.json valido."
+    info "Orario configurato: $(node "$SCHEDULE_CLI" describe 2>/dev/null || echo 'non disponibile')"
+  else
+    warn "config.json presente ma non valido o incompleto."
+  fi
+else
+  warn "config.json non trovato."
+fi
+
+if [ "$CONFIG_OK" = false ]; then
+  warn "Eseguo il setup interattivo per configurare autologin e orari."
+  if [ -f "$DIR/scripts/setup.sh" ]; then
+    "$DIR/scripts/setup.sh"
+  else
+    err "Errore: scripts/setup.sh non trovato."
+    exit 1
+  fi
+fi
+
+# 2. Richiedi password sudo all'inizio per mantenere il ticket attivo per tutta la sessione
+step "2/6" "Privilegi amministrativi"
 info "Richiesta privilegi amministrativi (sudo) per l'installazione..."
 sudo -v
 ok "Privilegi sudo acquisiti."
 
-# 2. Manutenzione pre-avvio (rotazione log, pulizia vecchi dump)
-info "Manutenzione pre-avvio..."
+# 3. Manutenzione pre-avvio (rotazione log, pulizia vecchi dump)
+step "3/6" "Manutenzione pre-avvio"
 if [ -f "$DIR/scripts/maintenance.sh" ]; then
   "$DIR/scripts/maintenance.sh" &>/dev/null || true
 fi
 ok "Manutenzione completata."
 
-# 3. Verifica/installa requisiti
-info "Verifica e installazione requisiti in corso..."
+# 4. Verifica/installa requisiti
+step "4/6" "Verifica e installazione requisiti"
 if [ -f "$DIR/scripts/setup.sh" ]; then
   "$DIR/scripts/setup.sh" --yes
 else
@@ -76,15 +106,15 @@ else
   exit 1
 fi
 
-# 4. Avvia Ollama se necessario
-info "Avvio/controllo Ollama..."
+# 5. Avvia Ollama se necessario
+step "5/6" "Avvio/controllo Ollama"
 if [ -f "$DIR/scripts/ollama-daemon.sh" ]; then
   "$DIR/scripts/ollama-daemon.sh" start
 fi
 ok "Ollama pronto."
 
-# 5. Verifica che Claude Code CLI sia accessibile
-step "5/5 - Claude Code CLI"
+# 6. Verifica che Claude Code CLI sia accessibile
+step "6/6" "Claude Code CLI"
 if command -v claude &>/dev/null; then
   ok "Claude Code CLI trovato: $(claude --version 2>/dev/null | head -1)."
 else
@@ -98,11 +128,11 @@ else
   fi
 fi
 
-# 6. Verifica login Ollama e modello cloud
+# 7. Verifica login Ollama e modello cloud
 if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
   echo ""
   warn "Il modello $MODEL è un modello CLOUD e richiede il login Ollama."
-  warn "Apro il login interattivo. Inserisci le credenziali..."
+  warn "Apro il login interattivo. Inserisci le tue credenziali..."
   echo ""
   ollama login
   echo ""
@@ -129,6 +159,6 @@ echo "  • 'avvia il corso'"
 echo "  • 'ferma tutto'"
 echo ""
 
-# 6. Avvia Claude con skip permessi e modello Ollama
+# 8. Avvia Claude con skip permessi e modello Ollama
 info "Avvio Claude Code con modello $MODEL..."
 ollama launch claude --model "$MODEL" -- --dangerously-skip-permissions
