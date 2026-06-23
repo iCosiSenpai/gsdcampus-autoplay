@@ -93,10 +93,11 @@ load_example() {
 
 mask_url() {
   local url="$1"
-  if [ "${#url}" -le 20 ]; then
+  local len=${#url}
+  if [ "$len" -le 20 ]; then
     echo "$url"
   else
-    echo "${url:0:20}…(${#url} caratteri)"
+    printf '%s\n' "$(echo "$url" | cut -c1-20)…(${len} caratteri)"
   fi
 }
 
