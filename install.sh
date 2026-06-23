@@ -162,11 +162,15 @@ ok "Pronto. Avvio il supervisore AI..."
 echo ""
 
 # 4. Avvia il launcher in modo interattivo (legge da terminale anche se siamo in pipe).
-#    IMPORTANTE: si usa "<>" (lettura-scrittura) e non "<" (sola lettura): il TUI di Claude Code
-#    deve mettere il terminale in raw mode, cosa impossibile con uno stdin di sola lettura
-#    (sintomo: la finestra dell'AI si apre ma non si riesce a digitare).
+#    IMPORTANTE: redirigiamo stdin/stdout/stderr TUTTI sullo stesso /dev/tty, condividendo
+#    lo stesso file description (1>&0 2>&0). Se si redirige solo fd0 con "<>", stdin finisce
+#    sul device /dev/tty (major 2) mentre stdout/stderr restano sul pty ereditato (major 16):
+#    il TUI di Claude Code entra in raw mode su fd0 ma scrive/legge la dimensione del terminale
+#    su fd1, due handle di device diverso. Risultato: la finestra dell'AI si apre ma non
+#    risponde / non si può digitare. Unificando i tre fd sullo stesso device, si replica
+#    esattamente il comportamento del lancio manuale da shell interattiva.
 if [ -n "$TTY_REDIR" ]; then
-  exec ./launch-ai-supervisor.sh <> "$TTY_REDIR"
+  exec ./launch-ai-supervisor.sh <>"$TTY_REDIR" 1>&0 2>&0
 else
   warn "Nessun terminale interattivo rilevato: non posso aprire l'AI automaticamente."
   info "Apri il Terminale ed esegui:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
