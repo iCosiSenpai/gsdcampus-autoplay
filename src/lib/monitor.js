@@ -30,6 +30,7 @@ class Monitor {
       lessonUrl: null,
       lessonTitle: null,
       videoProgress: null,
+      lastQuizResult: null,
       lastError: null,
       uptimeSec: 0,
       headless: true,

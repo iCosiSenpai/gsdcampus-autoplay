@@ -1,16 +1,26 @@
 node_modules
 .DS_Store
-logs/*.out
-logs/*.old
+# log e artefatti runtime (possono contenere URL del corso / dati personali)
+logs/
+archive/
+backups/
 debug/screenshots/*.png
 debug/dumps/*.html
+debug/exploration/
+# dump di lavoro non necessari nel repo condiviso
 data/session_state.json
 data/need_answer.json
 data/storage_state.json
 data/pending_quiz_answers.json
+data/extracted_full.json
+data/summary_dump.json
+data/quiz-domande.txt
+# dati personali
 config.json
+PROMPT-per-altra-AI.md
 .autoplay_pid
 .ollama_pid
+.scheduler_stop
 .supervisor_prompt.txt
 .claude/
 .claude/plan.md

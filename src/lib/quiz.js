@@ -4,8 +4,43 @@ const { askQuizQuestion } = require('./ollama-quiz');
 
 const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-async function solveQuiz(page, root, log) {
+// Promuove nella banca condivisa (known_answers.json) solo le risposte date da Ollama in
+// QUESTO quiz, e solo se il quiz è stato superato. Così la banca cresce esclusivamente con
+// risposte verificate dall'esito reale, non con guess non confermati.
+function promoteVerifiedAnswers(root, sessionAnswers, log) {
+  const keys = Object.keys(sessionAnswers);
+  if (keys.length === 0) return 0;
+  const knownPath = path.join(root, 'data', 'known_answers.json');
+  let known = {};
+  try { known = JSON.parse(fs.readFileSync(knownPath, 'utf8')); } catch (e) { /* parte vuota */ }
+  let added = 0;
+  for (const [q, a] of Object.entries(sessionAnswers)) {
+    if (!known[q]) { known[q] = a; added++; }
+  }
+  if (added > 0) {
+    try {
+      fs.writeFileSync(knownPath, JSON.stringify(known, null, 2));
+      log(`Banca risposte aggiornata: +${added} risposte verificate (quiz superato).`);
+    } catch (e) {
+      log(`Impossibile aggiornare known_answers.json: ${e.message}`);
+    }
+  }
+  return added;
+}
+
+function extractScore(text) {
+  const t = (text || '').toLowerCase();
+  const pct = t.match(/(\d{1,3}([.,]\d+)?)\s*%/);
+  const frac = t.match(/(\d+)\s*\/\s*(\d+)/);
+  if (pct) return `${pct[1]}%`;
+  if (frac) return `${frac[1]}/${frac[2]}`;
+  return null;
+}
+
+async function solveQuiz(page, root, log, monitor) {
   const knownAnswersPath = path.join(root, 'data', 'known_answers.json');
+  // Risposte fornite da Ollama in questa sessione di quiz, da promuovere solo se si supera.
+  const sessionAnswers = {};
   log('Rilevato questionario. Inizio risoluzione autonoma...');
   await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
 
@@ -46,15 +81,33 @@ async function solveQuiz(page, root, log) {
 
     if (!q || !q.text) {
       log('Nessuna domanda trovata. Verifico esito...');
-      const result = await page.evaluate(() => {
-        const text = document.body.innerText.toLowerCase();
-        return text.includes('superato') || text.includes('idoneo');
-      }).catch(() => false);
-      if (result) {
-        log('Quiz terminato con successo!');
+      const outcome = await page.evaluate(() => {
+        const text = document.body.innerText || '';
+        const low = text.toLowerCase();
+        const passed = low.includes('superato') || low.includes('idoneo');
+        const failed = low.includes('non superato') || low.includes('non idoneo');
+        return { bodyText: text.slice(0, 2000), passed: passed && !failed, failed };
+      }).catch(() => ({ passed: false, failed: false, bodyText: '' }));
+
+      const score = extractScore(outcome.bodyText);
+
+      if (outcome.passed) {
+        const result = score ? `superato (${score})` : 'superato';
+        log(`Quiz terminato con successo! Esito: ${result}`);
+        monitor?.update({ lastQuizResult: result });
+        promoteVerifiedAnswers(root, sessionAnswers, log);
         return true;
       }
+
+      if (outcome.failed) {
+        const result = score ? `non superato (${score})` : 'non superato';
+        log(`Quiz NON superato. Esito: ${result}. Le risposte di Ollama non vengono promosse.`);
+        monitor?.update({ lastQuizResult: result });
+        return false;
+      }
+
       log('Quiz non completato o in stato ignoto.');
+      monitor?.update({ lastQuizResult: 'ignoto' });
       return false;
     }
 
@@ -98,6 +151,7 @@ async function solveQuiz(page, root, log) {
         await page.waitForTimeout(500);
         await page.getByRole('button', { name: /avanti/i }).first().click();
         found = true;
+        sessionAnswers[q.text] = ollamaAnswer.text;
 
         // Salva la risposta data in modo che possa essere verificata/aggiornata
         try {

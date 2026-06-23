@@ -58,6 +58,7 @@ Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
      - "avvia subito" → esegui `./start.sh --ignore-hours`.
      - "non fare nulla" → non avviare nulla.
 4. Se il processo è attivo ma l'ultimo log/heartbeat è vecchio (più di 2 minuti) o c'è un errore, esegui `./stop.sh` poi `./start.sh` (o `--ignore-hours` se fuori orario e l'utente vuole forzare).
+5. **Autologin non valido/scaduto**: se `logs/status.json` ha `phase: "autologin_invalid"` (o vedi nel log "AUTOLOGIN NON VALIDO"), il link non autentica più. NON riavviare in loop: avvisa l'utente che il link autologin è scaduto/errato e chiedigli il link aggiornato; quando te lo fornisce, aggiorna tu `config.json` con il tool Edit e riavvia con `./start.sh`.
 
 ## Orario di lavoro
 
@@ -92,8 +93,9 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 
 - `src/lib/quiz.js` risolve i quiz usando `data/known_answers.json`.
 - Se una domanda non è presente in `known_answers.json`, lo script chiede a Ollama (`gemma4:31b-cloud`) la risposta in base alla conoscenza generale del modello.
-- Le risposte date da Ollama vengono salvate in `data/pending_quiz_answers.json` in modo che, se il tentativo non passa, si possano correggere e aggiungere a `known_answers.json`.
+- Le risposte date da Ollama vengono salvate in `data/pending_quiz_answers.json`. **Solo se il quiz viene superato**, quelle risposte vengono promosse automaticamente nella banca condivisa `data/known_answers.json` (la banca cresce solo con risposte verificate dall'esito).
 - Se Ollama non riesce a rispondere, lo script si ferma e salva la domanda in `data/need_answer.json`: in quel caso puoi cercare la risposta online, aggiornare `known_answers.json` e riavviare.
+- Strumenti manutenzione banca risposte: `node scripts/lib/answers-cli.js stats|list|merge` e `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
 
 ## Domande che l'utente può fare
 
@@ -113,6 +115,7 @@ Sii conciso. Riporta:
 - se l'autoplay è attivo e il PID
 - corso e lezione attuali
 - progresso video (se applicabile)
+- esito ultimo quiz (`lastQuizResult` in `logs/status.json`, se presente)
 - ultimo errore (se presente)
 - azione che hai intrapreso
 

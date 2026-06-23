@@ -13,21 +13,26 @@ Questo script automatizza le video-lezioni e i quiz del corso GSD Campus.
 
 ## 2. Comando principale (l'unico che devi ricordare)
 
+### Prima installazione (Mac nuovo)
+
 1. Apri il **Terminale** sul Mac.
 2. Incolla questo comando su **una sola riga** e premi `Invio`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash
+```
+
+Questo scarica il progetto in `~/gsdcampus-autoplay`, installa tutto e apre l'AI.
+Lo stesso comando, se lanciato di nuovo, **aggiorna** il progetto all'ultima versione
+(ricevi i fix e le risposte ai quiz aggiornate) **senza perdere** il tuo autologin e i tuoi orari.
+
+### Usi successivi (progetto già installato)
 
 ```bash
 cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
 ```
 
 > Se incolli più righe e l'ultima non parte, premi `Invio` una seconda volta.
-
-In alternativa, puoi fare a mano:
-
-```bash
-cd ~/gsdcampus-autoplay
-./launch-ai-supervisor.sh
-```
 
 La prima volta installerà/aggiornerà tutto in automatico.
 
@@ -168,11 +173,17 @@ Se un corso non compare o dà errore `MISSING_PERMISSION`, probabilmente il link
 
 ## 10. Domande e quiz
 
-Lo script conosce già alcune risposte del quiz in `data/known_answers.json`.
+Lo script usa una **banca risposte condivisa** (`data/known_answers.json`) uguale per tutti i colleghi.
 
 - Se trova una domanda conosciuta, risponde in automatico.
 - Se la domanda è nuova, chiede a Ollama (`gemma4:31b-cloud`) la risposta in base alla conoscenza del modello.
+- **Solo se il quiz viene superato**, le risposte nuove di Ollama vengono aggiunte alla banca
+  condivisa (`known_answers.json`): così la banca cresce nel tempo solo con risposte verificate
+  dall'esito reale. L'esito (superato/non superato + punteggio) compare in `./status.sh`.
 - Se il modello non è sicuro, il quiz si ferma e salva la domanda in `data/need_answer.json`: in quel caso scrivi in chat all’AI e lei cercherà la risposta corretta per te.
+
+Se vedi in `./status.sh` il messaggio **"Autologin non valido/scaduto"**, il tuo link di
+accesso non funziona più: chiedi un link aggiornato e all'AI di sostituirlo in `config.json`.
 
 ## 11. Disinstallazione
 

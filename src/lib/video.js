@@ -20,9 +20,19 @@ async function watchVideo(page, log, monitor) {
   let freezeCount = 0;
   let reloadCount = 0;
   const MAX_RELOADS = 3;
+  const startedAt = Date.now();
+  // Tetto di sicurezza: anche se "ended" non scatta mai (player rotto, duration NaN),
+  // non restare bloccati all'infinito su una singola lezione.
+  const MAX_WATCH_MS = 3 * 60 * 60 * 1000; // 3 ore
 
   while (!finished) {
     await page.waitForTimeout(30000);
+
+    if (Date.now() - startedAt > MAX_WATCH_MS) {
+      log('Tetto massimo tempo video raggiunto (3h). Passo al contenuto successivo.');
+      break;
+    }
+
     const status = await page.evaluate(() => {
       const v = document.querySelector('video');
       return v ? { ended: v.ended, t: v.currentTime, d: v.duration } : null;
@@ -35,6 +45,13 @@ async function watchVideo(page, log, monitor) {
 
     monitor?.update({ phase: 'video', videoProgress: `${formatTime(status.t)} / ${formatTime(status.d)}` });
     log(`Video: ${formatTime(status.t)} / ${formatTime(status.d)}`);
+
+    // Se la durata è nota, considera finito anche quando si arriva a ridosso della fine
+    // (alcuni player non impostano subito v.ended).
+    if (Number.isFinite(status.d) && status.d > 0 && status.t >= status.d - 1.5) {
+      finished = true;
+      break;
+    }
 
     if (status.t === lastTime) {
       freezeCount++;

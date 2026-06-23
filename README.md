@@ -34,9 +34,18 @@ All'inizio lo script chiede la **password di sudo una sola volta** e la mantiene
 
 Non avere paura di confermare: serve tutto per automatizzare il corso.
 
-## Prima installazione
+## Prima installazione (consigliata: installer una-riga)
 
-Basta eseguire il comando principale. La prima volta installerà tutto in automatico e aprirà Claude Code:
+Su un Mac nuovo, apri il Terminale e incolla questo unico comando:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash
+```
+
+Scarica il progetto in `~/gsdcampus-autoplay`, installa tutto e apre l'AI. Rilanciando lo stesso
+comando il progetto si **aggiorna** (fix + banca risposte) senza perdere autologin e orari (`config.json`).
+
+In alternativa, manualmente con git:
 
 ```bash
 git clone https://github.com/iCosiSenpai/gsdcampus-autoplay.git && cd gsdcampus-autoplay && ./launch-ai-supervisor.sh
@@ -137,9 +146,22 @@ I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i tu
 - `logs/ollama.log` — log di Ollama
 - `logs/scheduler.log` — log dello scheduler (orari, prossimi avvii)
 
-## Quiz
+## Quiz e banca risposte condivisa
 
-- Le risposte corrette sono in `data/known_answers.json`.
-- Se una domanda non è nota, lo script chiede a Ollama (`gemma4:31b-cloud`) la risposta usando la conoscenza del modello.
-- Le risposte date da Ollama vengono salvate in `data/pending_quiz_answers.json` per verifica.
-- Se Ollama non sa rispondere, il quiz si ferma e salva la domanda in `data/need_answer.json`; a quel punto puoi cercare la risposta e aggiungerla a `data/known_answers.json`.
+- La **banca risposte condivisa** è in `data/known_answers.json` (committata nel repo: uguale per tutti i colleghi).
+- Se una domanda non è nota, lo script chiede a Ollama (`gemma4:31b-cloud`) la risposta usando la conoscenza del modello; la salva in `data/pending_quiz_answers.json`.
+- **Verifica dall'esito**: solo quando un quiz viene **superato**, le risposte nuove di Ollama vengono promosse automaticamente nella banca condivisa. Così la banca cresce solo con risposte verificate. L'esito (superato/non superato + punteggio) finisce in `logs/status.json` (`lastQuizResult`) ed è mostrato da `./status.sh`.
+- Se Ollama non sa rispondere, il quiz si ferma e salva la domanda in `data/need_answer.json`.
+- Manutenzione banca (per chi prepara i rilasci): `node scripts/lib/answers-cli.js stats|list|merge` e `... set "domanda" "risposta"`.
+
+## Robustezza autologin
+
+Il link autologin è personale e può scadere. Se il link non autentica più, lo script lo rileva
+(la piattaforma mostra la pagina di login) ed esce subito con stato `autologin_invalid` e un
+messaggio chiaro, invece di ritentare a vuoto. `./status.sh` segnala di aggiornare il link in `config.json`.
+
+## Strumento di esplorazione (manutentore)
+
+`node scripts/explore.js <autologin1> [autologin2] ...` esplora uno o più account e salva in
+`debug/exploration/<codice>/` la struttura reale di dashboard, lezioni e quiz. Utile per validare
+i selettori e raccogliere domande dei quiz. I dump contengono dati personali: `debug/` è in `.gitignore`.

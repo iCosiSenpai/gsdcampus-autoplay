@@ -76,7 +76,9 @@ cp "$DIR/package.json" "$OUTPUT_DIR/"
 cp "$DIR/package-lock.json" "$OUTPUT_DIR/"
 cp "$DIR/config.json.example" "$OUTPUT_DIR/"
 cp "$DIR/.gitignore" "$OUTPUT_DIR/"
+cp "$DIR/install.sh" "$OUTPUT_DIR/" 2>/dev/null || true
 ok "Copia completata."
+info "NB: data/known_answers.json (banca risposte condivisa) viene MANTENUTA nel pacchetto."
 
 step "3/6" "Rimozione dati personali"
 rm -f "$OUTPUT_DIR/data/session_state.json"
@@ -92,6 +94,7 @@ step "4/6" "Pulizia log, debug e temporanei"
 find "$OUTPUT_DIR/logs" -type f -delete 2>/dev/null || true
 find "$OUTPUT_DIR/debug/screenshots" -type f -delete 2>/dev/null || true
 find "$OUTPUT_DIR/debug/dumps" -type f -delete 2>/dev/null || true
+rm -rf "$OUTPUT_DIR/debug/exploration"   # dump esplorazione: contengono dati personali dei colleghi
 rm -rf "$OUTPUT_DIR/scripts/logs"
 rm -f "$OUTPUT_DIR/.autoplay_pid"
 rm -f "$OUTPUT_DIR/.ollama_pid"
