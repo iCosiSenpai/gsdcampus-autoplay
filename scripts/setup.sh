@@ -148,66 +148,117 @@ if [ "$IS_PLACEHOLDER" = true ]; then
   echo ""
 fi
 
-if [ "$MODIFY" = true ]; then
-  echo ""
-  warn "Incolla il TUO link di autologin personale GSD Campus."
-  warn "Lo trovi nell'email di invito al corso o nella piattaforma."
-  echo ""
-  read "AUTOLOGIN?Link autologin: "
-  echo ""
+# Helper di validazione
+valid_days() {
+  local input="$1"
+  local normalized=$(echo "$input" | tr ',' '\n' | grep -E '^[0-6]$' | sort -u | tr '\n' ',' | sed 's/,$//')
+  [ -n "$normalized" ]
+}
 
-  while [ -z "$AUTOLOGIN" ]; do
-    warn "Il link autologin è obbligatorio."
+format_days() {
+  echo "$1" | tr ',' '\n' | grep -E '^[0-6]$' | sort -u | tr '\n' ',' | sed 's/,$//'
+}
+
+valid_time() {
+  local t="$1"
+  if [[ ! "$t" =~ ^[0-9]{1,2}:[0-9]{1,2}$ ]]; then
+    return 1
+  fi
+  local h m
+  h=$(echo "$t" | cut -d: -f1)
+  m=$(echo "$t" | cut -d: -f2)
+  if [ "$h" -lt 0 ] || [ "$h" -gt 23 ] || [ "$m" -lt 0 ] || [ "$m" -gt 59 ]; then
+    return 1
+  fi
+  return 0
+}
+
+parse_time() {
+  local t="$1"
+  local h=$(echo "$t" | cut -d: -f1 | sed 's/^0//')
+  local m=$(echo "$t" | cut -d: -f2 | sed 's/^0//')
+  printf '%s %s' "$h" "$m"
+}
+
+# Loop di configurazione con validazione e conferma finale
+while true; do
+  if [ "$MODIFY" = true ]; then
+    echo ""
+    warn "Incolla il TUO link di autologin personale GSD Campus."
+    warn "Lo trovi nell'email di invito al corso o nella piattaforma."
+    echo ""
     read "AUTOLOGIN?Link autologin: "
     echo ""
-  done
 
-  echo ""
-  echo -e "${BOLD}Configurazione orari di lavoro${NC}"
-  echo "Lascia vuoto e premi Invio per confermare il valore mostrato tra []."
-  echo ""
+    while [ -z "$AUTOLOGIN" ]; do
+      warn "Il link autologin è obbligatorio."
+      read "AUTOLOGIN?Link autologin: "
+      echo ""
+    done
 
-  echo "Giorni lavorativi (0=dom, 1=lun, 2=mar, 3=mer, 4=gio, 5=ven, 6=sab)."
-  echo "Esempi: 1,2,3,4,5 oppure 1,2,3,4,5,6"
-  read "DAYS?Giorni [1,2,3,4,5]: "
-  [ -z "$DAYS" ] && DAYS="1,2,3,4,5"
-  echo ""
+    echo ""
+    echo -e "${BOLD}Configurazione orari di lavoro${NC}"
+    echo "Lascia vuoto e premi Invio per confermare il valore mostrato tra []."
+    echo ""
 
-  echo "Turno 1 (mattina). Formato HH:MM, es. 09:30."
-  read "SHIFT1_START?Inizio [09:30]: "
-  [ -z "$SHIFT1_START" ] && SHIFT1_START="09:30"
-  read "SHIFT1_END?Fine [13:00]: "
-  [ -z "$SHIFT1_END" ] && SHIFT1_END="13:00"
-  echo ""
+    while true; do
+      echo "Giorni lavorativi (0=dom, 1=lun, 2=mar, 3=mer, 4=gio, 5=ven, 6=sab)."
+      echo "Esempi: 1,2,3,4,5 oppure 1,2,3,4,5,6"
+      read "DAYS?Giorni [1,2,3,4,5]: "
+      [ -z "$DAYS" ] && DAYS="1,2,3,4,5"
+      if valid_days "$DAYS"; then
+        DAYS_JSON=$(format_days "$DAYS")
+        break
+      fi
+      warn "Input non valido. Usa solo numeri da 0 a 6 separati da virgola."
+      echo ""
+    done
 
-  echo "Turno 2 (pomeriggio). Formato HH:MM, es. 16:30."
-  read "SHIFT2_START?Inizio [16:30]: "
-  [ -z "$SHIFT2_START" ] && SHIFT2_START="16:30"
-  read "SHIFT2_END?Fine [20:00]: "
-  [ -z "$SHIFT2_END" ] && SHIFT2_END="20:00"
-  echo ""
+    while true; do
+      echo ""
+      echo "Turno 1 (mattina). Formato HH:MM, es. 09:30."
+      read "SHIFT1_START?Inizio [09:30]: "
+      [ -z "$SHIFT1_START" ] && SHIFT1_START="09:30"
+      if valid_time "$SHIFT1_START"; then break; fi
+      warn "Orario non valido. Usa il formato HH:MM, es. 09:30."
+    done
+    while true; do
+      read "SHIFT1_END?Fine [13:00]: "
+      [ -z "$SHIFT1_END" ] && SHIFT1_END="13:00"
+      if valid_time "$SHIFT1_END"; then break; fi
+      warn "Orario non valido. Usa il formato HH:MM, es. 13:00."
+    done
 
-  # Parsing helper
-  parse_time() {
-    local t="$1"
-    local h m
-    h=$(echo "$t" | sed 's/[^0-9]//g' | cut -c1-2)
-    m=$(echo "$t" | sed 's/[^0-9]//g' | cut -c3-4)
-    [ -z "$h" ] && h=0
-    [ -z "$m" ] && m=0
-    printf '%s %s' "$h" "$m"
-  }
+    while true; do
+      echo ""
+      echo "Turno 2 (pomeriggio). Formato HH:MM, es. 16:30."
+      read "SHIFT2_START?Inizio [16:30]: "
+      [ -z "$SHIFT2_START" ] && SHIFT2_START="16:30"
+      if valid_time "$SHIFT2_START"; then break; fi
+      warn "Orario non valido. Usa il formato HH:MM, es. 16:30."
+    done
+    while true; do
+      read "SHIFT2_END?Fine [20:00]: "
+      [ -z "$SHIFT2_END" ] && SHIFT2_END="20:00"
+      if valid_time "$SHIFT2_END"; then break; fi
+      warn "Orario non valido. Usa il formato HH:MM, es. 20:00."
+    done
 
-  read S1H S1M <<< "$(parse_time "$SHIFT1_START")"
-  read E1H E1M <<< "$(parse_time "$SHIFT1_END")"
-  read S2H S2M <<< "$(parse_time "$SHIFT2_START")"
-  read E2H E2M <<< "$(parse_time "$SHIFT2_END")"
+    read S1H S1M <<< "$(parse_time "$SHIFT1_START")"
+    read E1H E1M <<< "$(parse_time "$SHIFT1_END")"
+    read S2H S2M <<< "$(parse_time "$SHIFT2_START")"
+    read E2H E2M <<< "$(parse_time "$SHIFT2_END")"
 
-  # Normalizza giorni in array JSON
-  DAYS_JSON=$(echo "$DAYS" | tr ',' '\n' | grep -E '^[0-6]$' | sort -u | tr '\n' ',' | sed 's/,$//')
-  [ -z "$DAYS_JSON" ] && DAYS_JSON="1,2,3,4,5"
-
-  cat > "$CONFIG_FILE" <<EOF
+    echo ""
+    echo -e "${BOLD}Riepilogo configurazione:${NC}"
+    echo "  Autologin: $(mask_url "$AUTOLOGIN")"
+    echo "  Giorni:    $DAYS_JSON (0=dom, 6=sab)"
+    echo "  Turni:     ${SHIFT1_START}-${SHIFT1_END}, ${SHIFT2_START}-${SHIFT2_END}"
+    echo ""
+    read -q "REPLY?Confermi? [y/N] "
+    echo ""
+    if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+      cat > "$CONFIG_FILE" <<EOF
 {
   "autologinUrl": "$AUTOLOGIN",
   "baseUrl": "https://tecsial.gsdcampus.it/",
@@ -225,14 +276,20 @@ if [ "$MODIFY" = true ]; then
   }
 }
 EOF
-
-  ok "Configurazione salvata in config.json"
-  ok "Autologin: $(mask_url "$AUTOLOGIN")"
-  ok "Giorni: $DAYS_JSON"
-  ok "Turni: ${S1H}:${S1M}-${E1H}:${E1M}, ${S2H}:${S2M}-${E2H}:${E2M}"
-else
-  ok "Configurazione esistente confermata."
-fi
+      ok "Configurazione salvata in config.json"
+      ok "Autologin: $(mask_url "$AUTOLOGIN")"
+      ok "Giorni: $DAYS_JSON"
+      ok "Turni: ${SHIFT1_START}-${SHIFT1_END}, ${SHIFT2_START}-${SHIFT2_END}"
+      break
+    else
+      warn "Ricominciamo l'inserimento."
+      echo ""
+    fi
+  else
+    ok "Configurazione esistente confermata."
+    break
+  fi
+done
 
 # 1. Homebrew
 step "1/7 - Homebrew"
