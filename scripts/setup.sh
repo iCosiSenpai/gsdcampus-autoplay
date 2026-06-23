@@ -113,11 +113,7 @@ fi
 if [ -f "$CONFIG_FILE" ] && [ "$IS_PLACEHOLDER" = false ]; then
   CURRENT_URL=$(grep -o '"autologinUrl"[^,]*' "$CONFIG_FILE" | head -1 | sed 's/.*"autologinUrl"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
   CURRENT_DAYS=$(node -e "const c=require('./config.json'); console.log((c.workSchedule&&c.workSchedule.days||[]).join(','));" 2>/dev/null || echo "1,2,3,4,5")
-  CURRENT_SHIFTS=$(node -e "
-const c=require('./config.json');
-const s=c.workSchedule&&c.workSchedule.shifts||[];
-console.log(s.map(x=\>\`${x.startHour}:${String(x.startMin).padStart(2,'0')}-${x.endHour}:${String(x.endMin).padStart(2,'0')}\`).join(', '));
-" 2>/dev/null || echo "9:30-13:00, 16:30-20:00")
+  CURRENT_SHIFTS=$(node -e 'const c=require("./config.json"); const s=c.workSchedule&&c.workSchedule.shifts||[]; console.log(s.map(x=>x.startHour+":"+String(x.startMin).padStart(2,"0")+"-"+x.endHour+":"+String(x.endMin).padStart(2,"0")).join(", "));' 2>/dev/null || echo "9:30-13:00, 16:30-20:00")
 
   echo ""
   echo "Trovata configurazione esistente:"
