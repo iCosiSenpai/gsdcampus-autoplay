@@ -9,41 +9,44 @@ Script Playwright per completare in automatico le video-lezioni e i quiz del cor
 Apri il Terminale, incolla questo comando su **una sola riga** e premi Invio:
 
 ```bash
-cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
-```
-
-> Se il terminale incolla più righe ma non esegue l'ultima, premi Invio una seconda volta.
-
-Lo script:
-1. Installa/verifica tutti i requisiti (Homebrew, Node, Playwright, Chrome, Ollama, modello, Claude CLI).
-2. **La prima volta ti chiede:**
-   - il tuo **link di autologin personale** GSD Campus;
-   - i **giorni lavorativi** (default lun–ven);
-   - la **modalità oraria** preferita: continuato, solo mattina, solo pomeriggio, classico (mattina+pomeriggio) o personalizzata.
-3. Avvia Ollama se necessario.
-4. Apre una sessione Claude Code con istruzioni pre-caricate e permessi automatici.
-5. Tu scrivi nella chat cose come:
-   - `controlla il corso`
-   - `come sta andando?`
-   - `avvia il corso`
-   - `ferma tutto`
-
-All'inizio lo script chiede la **password di sudo una sola volta** e la mantiene valida per tutta la sessione tramite un keepalive in background. Poi, durante il setup, potrebbe chiedere:
-- di **installare/aggiornare/verificare dipendenze** (anche con richieste `y/n`) → conferma sempre;
-- il **login Ollama** → inserisci le credenziali e lo script continua.
-
-Non avere paura di confermare: serve tutto per automatizzare il corso.
-
-## Prima installazione (consigliata: installer una-riga)
-
-Su un Mac nuovo, apri il Terminale e incolla questo unico comando:
-
-```bash
 curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash
 ```
 
-Scarica il progetto in `~/gsdcampus-autoplay`, installa tutto e apre l'AI. Rilanciando lo stesso
-comando il progetto si **aggiorna** (fix + banca risposte) senza perdere autologin e orari (`config.json`).
+> Se incolli e l'ultima riga non parte, premi Invio una seconda volta.
+
+È l'unico comando che ti serve e vale per **tutte** le occasioni:
+- **prima installazione** su un Mac nuovo: scarica il progetto in `~/gsdcampus-autoplay`, installa tutti i requisiti e apre l'AI;
+- **aggiornamenti** successivi: riallinea il codice (fix + banca risposte) senza toccare autologin e orari (`config.json`), poi apre l'AI;
+- **avvio** quotidiano: apre l'AI.
+
+Rilanciandolo su un'installazione esistente compare un menu:
+1. **Aggiorna e avvia** — fix + banca risposte aggiornati, poi apre l'AI (consigliato).
+2. **Cambia link autologin/orari** — reinserisci accesso e orari, poi avvia.
+3. **Reinstallazione pulita** — riallinea il codice e reinstalla le dipendenze.
+4. **Solo avvia** — apre l'AI senza modificare nulla.
+5. **Disinstalla** — rimuove tutto (con conferma).
+6. **Annulla**.
+
+In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e orari resta al suo posto.
+
+## Prima installazione
+
+La prima volta il Terminale ti chiede alcune cose: rispondi con calma.
+- la **password del Mac (sudo)** — una sola volta, all'inizio; lo script la mantiene valida per tutta la sessione con un keepalive in background;
+- conferme di **installazione/aggiornamento/verifica dipendenze** (anche `y/n`) → rispondi **sempre sì**;
+- il **login Ollama** (modello AI `gemma4:31b-cloud`) → inserisci le credenziali;
+- il **tuo link di autologin personale** GSD Campus → incollalo (lo trovi nell'email del corso);
+- i **giorni lavorativi** (default lun–ven);
+- la **modalità oraria** preferita:
+  1. **Continuato** — un solo turno (es. 09:00–18:00).
+  2. **Solo mattina** — es. 09:00–13:00.
+  3. **Solo pomeriggio** — es. 14:00–18:00.
+  4. **Classico** — due turni (default 09:30–13:00 e 16:30–20:00).
+  5. **Personalizzato** — fino a 3 turni a scelta.
+
+Gli orari si possono scrivere come vuoi: `9:30`, `09:30`, `9.30`, `0930`, `930`.
+
+Non avere paura di confermare: serve tutto per automatizzare il corso.
 
 In alternativa, manualmente con git:
 
@@ -51,13 +54,15 @@ In alternativa, manualmente con git:
 git clone https://github.com/iCosiSenpai/gsdcampus-autoplay.git && cd gsdcampus-autoplay && ./launch-ai-supervisor.sh
 ```
 
-## Comando unico per tutti i giorni
+## Riaprire l'AI nei giorni successivi
 
-Il comando seguente aggiorna (se necessario), installa ciò che manca e apre Claude Code:
+Se hai già installato e vuoi solo riaprire l'AI senza passare dall'installer:
 
 ```bash
 cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
 ```
+
+Salta l'installazione e apre subito l'AI. Una volta aperta, **non ricordare comandi tecnici: parlane in italiano**, per esempio `controlla il corso`, `come sta andando?`, `avvia il corso`, `ferma tutto`. L'AI avvia, ferma e controlla lo script al posto tuo e ti dice come sta andando.
 
 ## Aggiornamento forzato
 

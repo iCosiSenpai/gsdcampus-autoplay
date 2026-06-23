@@ -5,14 +5,14 @@
 Questo script completa in automatico le video-lezioni e i quiz del corso GSD Campus.
 
 **Per te servono solo due cose:**
-1. **Installarlo una volta** (capitolo 1).
+1. **Un comando solo** per installare, aggiornare e avviare (capitolo 1).
 2. **Parlarci dall'AI** per avviarlo e controllarlo (capitolo 2).
 
 Tutto il resto (requisiti, orari, manutenzione) è più in basso e di solito non ti serve.
 
 ---
 
-## ⭐ 1. Installazione (una volta sola)
+## ⭐ 1. Comando principale (installazione, aggiornamento, avvio)
 
 1. Apri il **Terminale** sul Mac (Spotlight → scrivi "Terminale" → Invio).
 2. Incolla questo comando su **una sola riga** e premi `Invio`:
@@ -23,7 +23,9 @@ curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main
 
 > Se incolli e l'ultima riga non parte, premi `Invio` una seconda volta.
 
-Questo scarica il progetto in `~/gsdcampus-autoplay`, installa tutto da solo e apre l'AI.
+È l'unico comando che ti serve e vale per **tutte** le occasioni: prima installazione,
+aggiornamenti successivi e avvio quotidiano dell'AI. La prima volta scarica il progetto in
+`~/gsdcampus-autoplay`, installa tutto da solo e apre l'AI.
 
 **Se lanci di nuovo lo stesso comando** quando il progetto è già installato, ti compare un menu
 che chiede cosa vuoi fare:
@@ -35,6 +37,8 @@ che chiede cosa vuoi fare:
 6. **Annulla**.
 
 In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e orari resta al suo posto.
+
+### Prima installazione (la prima volta)
 
 Durante la prima installazione il Terminale ti chiederà alcune cose: rispondi con calma.
 
