@@ -277,11 +277,7 @@ while true; do
 {
   "autologinUrl": "$AUTOLOGIN",
   "baseUrl": "https://tecsial.gsdcampus.it/",
-  "courseUrls": [
-    "https://tecsial.gsdcampus.it/corso/show/8122",
-    "https://tecsial.gsdcampus.it/corso/show/15580",
-    "https://tecsial.gsdcampus.it/corso/show/16146"
-  ],
+  "courseUrls": [],
   "workSchedule": {
     "days": [$DAYS_JSON],
     "shifts": [

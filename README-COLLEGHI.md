@@ -143,7 +143,13 @@ I Mac in negozio sono accesi 24/7. L'automazione segue automaticamente i turni l
 - A fine turno si ferma da sola e riprende al turno successivo.
 - Se vuoi forzare l'avvio subito (anche di notte o nel weekend), chiedi all'AI: "avvia ignorando gli orari".
 
-## 9. Domande e quiz
+## 9. Corsi assegnati
+
+Non devi inserire manualmente gli URL dei corsi. Dopo il login, lo script scopre automaticamente i corsi assegnati al tuo account dalla dashboard di GSD Campus e li elabora uno alla volta.
+
+Se un corso non compare o dà errore `MISSING_PERMISSION`, probabilmente il link autologin non è corretto o il corso non è assegnato al tuo account.
+
+## 10. Domande e quiz
 
 Lo script conosce già alcune risposte del quiz in `data/known_answers.json`.
 

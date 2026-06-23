@@ -18,7 +18,7 @@ Prima di eseguire qualsiasi operazione, leggi `config.json` e mostra questa conf
 
 Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `config.json`**: usa il tool Edit per aggiornare tu stesso il file `config.json` con il link e/o gli orari corretti, poi chiedi conferma della modifica.
 
-**Nota su replicabilità su altri Mac**: gli ID dei corsi (`/corso/show/8122`, `/corso/show/15580`, `/corso/show/16146`) sono fissi e uguali per tutti gli utenti. L'URL di autologin è personale: la prima volta, chiedi conferma all'utente e correggi `config.json` tu stesso se necessario.
+**Nota su replicabilità su altri Mac**: gli ID dei corsi (`/corso/show/XXXX`) sono **personali** e variano da utente a utente. Per questo lo script `src/autoplay.js` scopre automaticamente i corsi dalla dashboard `https://tecsial.gsdcampus.it/corso/listAllByUser` dopo il login. `config.json` non deve più contenere `courseUrls` (o può contenerlo vuoto `[]`). L'URL di autologin è l'unico dato personale necessario.
 
 ---
 

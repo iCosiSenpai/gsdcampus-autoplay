@@ -94,7 +94,9 @@ Lo script usa `chromium.launch({ headless: true })`. Non compare nessuna finestr
 
 ## Note su replicabilità
 
-Gli ID dei corsi (`/corso/show/8122`, `/corso/show/15580`, `/corso/show/16146`) sono fissi nella piattaforma GSD Campus e sono gli stessi per tutti gli utenti.
+Gli ID dei corsi (`/corso/show/XXXX`) sono **personali** e variano da utente a utente.
+
+Per questo lo script `src/autoplay.js`, dopo il login, naviga automaticamente sulla dashboard e scopre i corsi assegnati all'utente. Non serve più inserire manualmente gli URL dei corsi in `config.json`.
 
 L'URL di autologin è **personale**: la prima volta lo script te lo chiede in terminale durante il setup. In seguito, l'AI mostrerà solo una conferma; se qualcosa non è corretto, basta scriverlo in chat e l'AI modificherà `config.json` al posto tuo.
 

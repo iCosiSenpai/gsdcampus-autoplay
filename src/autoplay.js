@@ -275,6 +275,44 @@ async function runAutoplay() {
         log('Impossibile salvare storage state:', e.message);
       }
 
+      // Scoperta automatica corsi dalla dashboard (se non configurati in config.json)
+      async function discoverCourses() {
+        if (Array.isArray(config.courseUrls) && config.courseUrls.length > 0) {
+          log('Corsi configurati manualmente in config.json.');
+          return config.courseUrls;
+        }
+        log('Scoperta automatica corsi dalla dashboard...');
+        try {
+          await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
+          await page.waitForTimeout(3000);
+          const links = await page.evaluate(() => {
+            const seen = new Set();
+            return [...document.querySelectorAll('a[href*="/corso/show/"]')]
+              .map(a => a.href)
+              .filter(href => {
+                const id = href.match(/\/corso\/show\/(\d+)/)?.[1];
+                if (!id || seen.has(id)) return false;
+                seen.add(id);
+                return true;
+              });
+          });
+          if (links.length === 0) {
+            log('Nessun corso trovato in dashboard. Verifica autologin e permessi.');
+            return [];
+          }
+          log(`Trovati ${links.length} corsi: ${links.join(', ')}`);
+          return links;
+        } catch (e) {
+          log(`Errore scoperta corsi: ${e.message}`);
+          return [];
+        }
+      }
+
+      let courseUrls = await discoverCourses();
+      if (courseUrls.length === 0) {
+        throw new Error('Nessun corso disponibile dopo autologin. Verificare il link autologin e i permessi account.');
+      }
+
       // Loop corsi
       let lastHourCheck = 0;
       while (true) {
@@ -290,7 +328,7 @@ async function runAutoplay() {
           }
         }
 
-        for (const courseUrl of config.courseUrls) {
+        for (const courseUrl of courseUrls) {
           log(`Controllo corso: ${courseUrl}`);
           await runCourse(page, courseUrl);
         }
