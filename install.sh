@@ -145,7 +145,7 @@ case "$MODE" in
     ;;
   uninstall)
     if [ -n "$TTY_REDIR" ]; then
-      exec ./scripts/uninstall.sh < "$TTY_REDIR"
+      exec ./scripts/uninstall.sh <> "$TTY_REDIR"
     else
       warn "Serve un terminale per la disinstallazione."
       info "Esegui:  cd ~/gsdcampus-autoplay && ./scripts/uninstall.sh"
@@ -161,9 +161,12 @@ echo ""
 ok "Pronto. Avvio il supervisore AI..."
 echo ""
 
-# 4. Avvia il launcher in modo interattivo (legge da terminale anche se siamo in pipe)
+# 4. Avvia il launcher in modo interattivo (legge da terminale anche se siamo in pipe).
+#    IMPORTANTE: si usa "<>" (lettura-scrittura) e non "<" (sola lettura): il TUI di Claude Code
+#    deve mettere il terminale in raw mode, cosa impossibile con uno stdin di sola lettura
+#    (sintomo: la finestra dell'AI si apre ma non si riesce a digitare).
 if [ -n "$TTY_REDIR" ]; then
-  exec ./launch-ai-supervisor.sh < "$TTY_REDIR"
+  exec ./launch-ai-supervisor.sh <> "$TTY_REDIR"
 else
   warn "Nessun terminale interattivo rilevato: non posso aprire l'AI automaticamente."
   info "Apri il Terminale ed esegui:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
