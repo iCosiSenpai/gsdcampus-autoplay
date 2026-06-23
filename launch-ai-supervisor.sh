@@ -31,19 +31,39 @@ echo -e "${BOLD}  gsdcampus-autoplay — AI Supervisor${NC}"
 echo "============================================"
 echo ""
 
-# 0. Richiedi password sudo all'inizio per mantenere il ticket attivo per tutta la sessione
+# 0. Ferma eventuali istanze precedenti per evitare conflitti tra codice vecchio e nuovo
+info "Controllo e arresto eventuali istanze precedenti..."
+if [ -f "$DIR/.autoplay_pid" ]; then
+  OLD_PID=$(cat "$DIR/.autoplay_pid" 2>/dev/null || echo "")
+  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+    warn "Trovato scheduler precedente (PID $OLD_PID). Arresto in corso..."
+    kill "$OLD_PID" 2>/dev/null || true
+    sleep 2
+    kill -9 "$OLD_PID" 2>/dev/null || true
+  fi
+  rm -f "$DIR/.autoplay_pid"
+fi
+pgrep -f "node src/autoplay.js" 2>/dev/null | while read orphan; do
+  kill -9 "$orphan" 2>/dev/null || true
+done
+pgrep -f "scheduler.sh" 2>/dev/null | while read orphan; do
+  [ "$orphan" != "$$" ] && kill -9 "$orphan" 2>/dev/null || true
+done
+ok "Pulizia istanze precedenti completata."
+
+# 1. Richiedi password sudo all'inizio per mantenere il ticket attivo per tutta la sessione
 info "Richiesta privilegi amministrativi (sudo) per l'installazione..."
 sudo -v
 ok "Privilegi sudo acquisiti."
 
-# 1. Manutenzione pre-avvio (rotazione log, pulizia vecchi dump)
+# 2. Manutenzione pre-avvio (rotazione log, pulizia vecchi dump)
 info "Manutenzione pre-avvio..."
 if [ -f "$DIR/scripts/maintenance.sh" ]; then
   "$DIR/scripts/maintenance.sh" &>/dev/null || true
 fi
 ok "Manutenzione completata."
 
-# 2. Verifica/installa requisiti
+# 3. Verifica/installa requisiti
 info "Verifica e installazione requisiti in corso..."
 if [ -f "$DIR/scripts/setup.sh" ]; then
   "$DIR/scripts/setup.sh" --yes
@@ -52,14 +72,14 @@ else
   exit 1
 fi
 
-# 3. Avvia Ollama se necessario
+# 4. Avvia Ollama se necessario
 info "Avvio/controllo Ollama..."
 if [ -f "$DIR/scripts/ollama-daemon.sh" ]; then
   "$DIR/scripts/ollama-daemon.sh" start
 fi
 ok "Ollama pronto."
 
-# 4. Verifica login Ollama e modello cloud
+# 5. Verifica login Ollama e modello cloud
 if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
   echo ""
   warn "Il modello $MODEL è un modello CLOUD e richiede il login Ollama."

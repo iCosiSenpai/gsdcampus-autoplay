@@ -35,6 +35,7 @@ L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso 
 - `cd /Users/lab/gsdcampus-autoplay && ./stop.sh` — ferma autoplay e scheduler.
 - `cd /Users/lab/gsdcampus-autoplay && ./scripts/check-requirements.sh` — verifica requisiti.
 - `cd /Users/lab/gsdcampus-autoplay && ./scripts/setup.sh` — installa requisiti mancanti e configura `config.json` (autologin + orari).
+- **Nota importante:** `./launch-ai-supervisor.sh` ferma automaticamente eventuali istanze precedenti di autoplay/scheduler all'avvio, quindi non è necessario eseguire `./stop.sh` prima. Se un collega ha ancora un processo vecchio in esecuzione, il supervisore lo pulisce da solo.
 - `cd /Users/lab/gsdcampus-autoplay && ./scripts/ollama-daemon.sh start` — avvia Ollama (se serve al supervisore stesso).
 - `cd /Users/lab/gsdcampus-autoplay && ./scripts/ollama-daemon.sh stop` — ferma Ollama.
 - `tail -f /Users/lab/gsdcampus-autoplay/logs/autoplay.log` — segui log in tempo reale.

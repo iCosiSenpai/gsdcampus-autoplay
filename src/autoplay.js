@@ -61,6 +61,8 @@ async function solveQuizWrapper(page) {
 async function runCourse(page, courseUrl) {
   const emptyUrls = new Set();
   const session = loadSession();
+  let missingPermissionCount = 0;
+  const MAX_MISSING_PERMISSION = 3;
 
   while (true) {
     monitor.update({ phase: 'checking', courseUrl });
@@ -92,11 +94,17 @@ async function runCourse(page, courseUrl) {
     }
 
     if (page.url().includes('error?code=missing_permission')) {
-      log('Siamo in pagina MISSING_PERMISSION. Riprovo il login...');
+      missingPermissionCount++;
+      log(`Siamo in pagina MISSING_PERMISSION (tentativo ${missingPermissionCount}/${MAX_MISSING_PERMISSION}).`);
+      if (missingPermissionCount >= MAX_MISSING_PERMISSION) {
+        log(`Corso ${courseUrl} non accessibile: troppi MISSING_PERMISSION. Salto al prossimo corso.`);
+        return;
+      }
       await page.goto(config.autologinUrl, { waitUntil: 'networkidle' });
       await page.waitForTimeout(5000);
       continue;
     }
+    missingPermissionCount = 0;
 
     let scoredLinks = [];
     try {
