@@ -89,8 +89,20 @@ tail -f logs/scheduler.log
 ## 6. Se qualcosa non va
 
 1. Chiudi la sessione di Claude Code con `Ctrl+C`.
-2. Riapri il supervisore: `./launch-ai-supervisor.sh`
+2. Riapri il supervisore:
+   ```bash
+   cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
+   ```
+   La seconda volta sarà molto più veloce: lo script verifica che tutto esista e, se sì, salta l'installazione.
 3. Scrivi: `controlla il corso`
+
+### Aggiornamento forzato
+
+Se vuoi davvero reinstallare/aggiornare tutto (dipendenze, browser, Ollama, ecc.):
+
+```bash
+cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update
+```
 
 ## 7. Replicare su un altro Mac
 

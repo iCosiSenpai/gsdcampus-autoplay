@@ -13,8 +13,12 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 AUTO_YES=false
+FORCE_UPDATE=false
 if [ "$1" = "--yes" ]; then
   AUTO_YES=true
+fi
+if [ "$1" = "--force-update" ] || [ "$2" = "--force-update" ]; then
+  FORCE_UPDATE=true
 fi
 
 info() {
@@ -40,7 +44,10 @@ print_header() {
   echo -e "${BOLD}  Setup gsdcampus-autoplay${NC}"
   echo "============================================"
   echo ""
-  echo "Questo script aggiorna/verifica:"
+  echo "Questo script aggiorna/verifica i requisiti."
+  echo "Se sono già installati e aggiornati, li salta."
+  echo ""
+  echo "Verifica:"
   echo "  • Homebrew e formule installate"
   echo "  • Node.js e npm"
   echo "  • Dipendenze npm (Playwright)"
@@ -86,10 +93,6 @@ step "0/7 - Configurazione personale"
 
 CONFIG_FILE="$DIR/config.json"
 EXAMPLE_FILE="$DIR/config.json.example"
-
-load_example() {
-  cat "$EXAMPLE_FILE"
-}
 
 mask_url() {
   local url="$1"
@@ -192,6 +195,7 @@ while true; do
     warn "Incolla il TUO link di autologin personale GSD Campus."
     warn "Lo trovi nell'email di invito al corso o nella piattaforma."
     echo ""
+
     while true; do
       read "AUTOLOGIN?Link autologin: "
       echo ""
@@ -308,46 +312,59 @@ if ! command -v brew &>/dev/null; then
   info "Homebrew non trovato. Installazione in corso..."
   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
+  ok "Homebrew installato."
+elif [ "$FORCE_UPDATE" = true ]; then
+  info "Aggiornamento Homebrew (richiesto --force-update)..."
+  brew update
+  brew upgrade
+  ok "Homebrew aggiornato."
 else
-  ok "Homebrew già installato: $(brew --version | head -1)"
+  ok "Homebrew già installato: $(brew --version | head -1). Salto."
 fi
-info "Aggiornamento Homebrew..."
-brew update
-brew upgrade
-ok "Homebrew aggiornato."
 
 # 2. Node.js
 step "2/7 - Node.js"
 if command -v node &>/dev/null; then
-  info "Node.js presente: $(node -v). Verifica aggiornamento..."
+  ok "Node.js già installato: $(node -v). Salto."
 else
   info "Node.js non trovato. Installazione in corso..."
+  brew install node 2>/dev/null || true
+  ok "Node.js pronto: $(node -v)"
 fi
-brew install node 2>/dev/null || true
-brew upgrade node 2>/dev/null || true
-ok "Node.js pronto: $(node -v)"
 
 # 3. npm dependencies
 step "3/7 - Dipendenze npm"
-info "Installazione/aggiornamento dipendenze..."
-npm install
-ok "Dipendenze npm aggiornate."
+if [ "$FORCE_UPDATE" = true ] || [ ! -d "$DIR/node_modules" ]; then
+  info "Installazione/aggiornamento dipendenze..."
+  npm install
+  ok "Dipendenze npm aggiornate."
+else
+  ok "Dipendenze npm già presenti. Salto."
+fi
 
 # 4. Playwright browsers / Chrome
 step "4/7 - Browser per Playwright"
-info "Installazione/aggiornamento Chromium..."
-npx playwright install chromium
-ok "Browser Playwright pronto."
+if [ "$FORCE_UPDATE" = true ] || [ ! -d "$HOME/Library/Caches/ms-playwright" ]; then
+  info "Installazione/aggiornamento Chromium..."
+  npx playwright install chromium
+  ok "Browser Playwright pronto."
+else
+  ok "Browser Playwright già presente. Salto."
+fi
 
 # 5. Ollama
 step "5/7 - Ollama"
-if command -v ollama &>/dev/null; then
-  info "Ollama presente: $(ollama --version | head -1). Reinstallazione/aggiornamento..."
-else
+if ! command -v ollama &>/dev/null; then
   info "Ollama non trovato. Installazione in corso..."
+  curl -fsSL https://ollama.com/install.sh | sh
+  ok "Ollama installato."
+elif [ "$FORCE_UPDATE" = true ]; then
+  info "Reinstallazione/aggiornamento Ollama (richiesto --force-update)..."
+  curl -fsSL https://ollama.com/install.sh | sh
+  ok "Ollama aggiornato."
+else
+  ok "Ollama già installato: $(ollama --version | head -1). Salto."
 fi
-curl -fsSL https://ollama.com/install.sh | sh
-ok "Ollama pronto."
 
 # 6. Modello gemma4:31b-cloud (cloud, richiede login Ollama)
 step "6/7 - Modello Ollama gemma4:31b-cloud"
@@ -366,13 +383,13 @@ if ! ollama list 2>/dev/null | grep -q "gemma4:31b-cloud"; then
     exit 1
   fi
 else
-  ok "Modello gemma4:31b-cloud presente."
+  ok "Modello gemma4:31b-cloud già presente. Salto."
 fi
 
 # 7. Claude Code CLI
 step "7/7 - Claude Code CLI"
 if command -v claude &>/dev/null; then
-  ok "Claude Code CLI presente: $(claude --version 2>/dev/null | head -1)."
+  ok "Claude Code CLI già installato: $(claude --version 2>/dev/null | head -1). Salto."
 else
   info "Claude Code CLI non trovato. Installazione in corso..."
   curl -fsSL https://claude.ai/install.sh | bash

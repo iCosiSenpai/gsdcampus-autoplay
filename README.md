@@ -42,6 +42,22 @@ Basta eseguire il comando principale. La prima volta installerà tutto in automa
 cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
 ```
 
+## Aggiornamento (dopo un `git pull`)
+
+Se hai già installato tutto e vuoi solo aggiornare gli script, usa il comando rapido:
+
+```bash
+cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
+```
+
+Lo script verificherà i requisiti e, se sono già presenti, li salterà senza reinstallare.
+
+Se invece vuoi forzare l'aggiornamento di tutto (Homebrew, npm, browser, Ollama, ecc.):
+
+```bash
+cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update
+```
+
 ## Altri comandi (opzionali)
 
 ```bash
@@ -50,6 +66,8 @@ cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
 ./stop.sh                               # ferma autoplay e scheduler
 ./status.sh                             # stato, heartbeat, log
 ./scripts/setup.sh                      # installa/aggiorna requisiti e configura config.json
+./scripts/setup.sh --yes                # modalità automatica, salta ciò che è già installato
+./scripts/setup.sh --yes --force-update # forza aggiornamento di tutto
 ./scripts/check-requirements.sh         # verifica requisiti
 ./scripts/maintenance.sh                # ruota log grandi e pulisce vecchi screenshot/dump
 ./scripts/uninstall.sh                  # rimuove dipendenze, modelli, CLI e progetto (conferma)
