@@ -162,15 +162,19 @@ ok "Pronto. Avvio il supervisore AI..."
 echo ""
 
 # 4. Avvia il launcher in modo interattivo (legge da terminale anche se siamo in pipe).
-#    IMPORTANTE: redirigiamo stdin/stdout/stderr TUTTI sullo stesso /dev/tty, condividendo
-#    lo stesso file description (1>&0 2>&0). Se si redirige solo fd0 con "<>", stdin finisce
-#    sul device /dev/tty (major 2) mentre stdout/stderr restano sul pty ereditato (major 16):
-#    il TUI di Claude Code entra in raw mode su fd0 ma scrive/legge la dimensione del terminale
-#    su fd1, due handle di device diverso. Risultato: la finestra dell'AI si apre ma non
-#    risponde / non si può digitare. Unificando i tre fd sullo stesso device, si replica
-#    esattamente il comportamento del lancio manuale da shell interattiva.
+#    Nel path "curl | bash", fd0 è la pipe (lo script) ma fd1/fd2 sono ancora il pty reale
+#    ereditato dal terminale (es. /dev/ttys002, device major 16). Duplichiamo fd0 e fd2 su
+#    fd1 (<&1 2>&1) così stdin/stdout/stderr condividono tutti lo stesso pty reale: è esattamente
+#    ciò che fa la shell interattiva nel lancio manuale.
+#
+#    NON usare /dev/tty (device major 2) per i fd del TUI: il claude CLI è compilato con Bun,
+#    che crea il WriteStream del TTY tramite kqueue; kqueue su macOS non supporta /dev/tty e
+#    fallisce con EINVAL (crash "invalid argument, kqueue" in internal:util/colors).
+#    Inoltre, redirigere solo fd0 su /dev/tty lascia stdout/stderr sul pty reale: il TUI entra
+#    in raw mode su fd0 ma scrive su fd1 (device diverso) e l'input da tastiera non arriva
+#    (la finestra si apre ma non risponde).
 if [ -n "$TTY_REDIR" ]; then
-  exec ./launch-ai-supervisor.sh <>"$TTY_REDIR" 1>&0 2>&0
+  exec ./launch-ai-supervisor.sh <&1 2>&1
 else
   warn "Nessun terminale interattivo rilevato: non posso aprire l'AI automaticamente."
   info "Apri il Terminale ed esegui:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
