@@ -1,0 +1,475 @@
+[
+  {
+    "courseName": "Corso #127",
+    "courseUrl": "https://tecsial.gsdcampus.it/corso/show/8460",
+    "items": [
+      {
+        "title": "1.9 1-6 INTRO ARCHITETTURA DI RETE\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8407",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 7-11 OPPORTUNITA' E INTEGRAZIONI\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8408",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 12-19 MINACCE E RISCHI + CASO\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8409",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 20-23 FRAMEWORK NORMATIVI\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8410",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 24-25 BEST PRACTICE\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8411",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 26 SEGMENTAZIONE DI RETE\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8412",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 27-33 SECURITY BY DESIGN\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8413",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 34 DATA CLASSIFICATION\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8414",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 35 SIEM -MONITORAGGIO\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8415",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 36 EDR\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8416",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 37 NTA\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8417",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 38 INCIDENT RESPONSE PLAN\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8418",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 39-43 IL FATTORE UMANO + CASO\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8419",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 44-45 BUSINESS E-MAIL COMPROMISE\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8420",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 46-47 MAN IN THE MIDDLE\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8421",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 48-49 RANSOMWARE\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8422",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 50-51 SHADOW IT - DATA LEAKAGE\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8423",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 52-54 GOVERNANCE CONDIVISIONE SICURA\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8424",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 55-57 AUDIT E RIGHT MNGMNT + CASO\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8425",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "1.9 58-60 CONCLUSIONI\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8426",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 1-4 divario digitale intro\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8427",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 5-6 divario digitale under 15\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8428",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 7-8 divario digitale under 30\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8429",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 9-10 divario digitale over 50\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8430",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 11-12 divario digitale over 70\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8431",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 13-14 divario digitale mod. apprend.\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8432",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 15-19 divario digitale dati di ricerca\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8433",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 20-22 divario digitale trend u15\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8434",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 23-25 divario digitale trend u30\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8435",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 26-28 divario digitale trend over 50\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8436",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 29-31 divario digitale trend over 70\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8437",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 32-34 reverse mentoring\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8438",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 35-39 divario digitale territoriale\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8439",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 40-44 divario digitale natività digitale\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8440",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 45-46 divario digitale AI\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8441",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 47-49 divario digitale psico della resistenza\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8442",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 50-51 divario digitale economia comportamentale\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8443",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 52-54 divario digitale neuroplasticità e apprendimento\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8444",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 55-56 digital facilitator\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8445",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.1 57-60 divario digitale modelli futuri\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8446",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 1-2 navigazione e ricerca su internet\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8447",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 3-6 motori di ricerca\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8448",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 7-15 modelli e ricerche\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8449",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 16-18 cookies e cronologie\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8450",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 19-23 vpn e privacy\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8451",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 24-28 impostazioni di ricerca firefox\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8452",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 29-30 tor browser\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8453",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 31-32 fingerprint browser\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8454",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 33-34 pi-hole\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8455",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 35-36 tracciamento e sicurezza\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8456",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 37-39 tricks e alternative\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8457",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 40-41 ricerca per tipologia\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8458",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 42-45 dns e privacy\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8459",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 46-49 tools ricerca\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8460",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 50-51 fact checking\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8461",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 52-57 tools navigazione e ricerca 2\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8462",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.2 58-60 privacy approccio a livelli\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8463",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 1-4 riconoscere affidabilità info sul web\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8464",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 5-7 affidabilità delle fonti\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8465",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 8-12 fact checking\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8466",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 13-17 identificazione fake news\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8467",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 18-22 bias e valutazione informazioni\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8468",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 23-26 sicurezza e tracciamento dati\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8469",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 27-31 valore dei dati - patrimonio informativo\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8470",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 32-37 strumenti digitali di verifica\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8471",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 38-41 educazione digitale e pensiero critico\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8472",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 42-45 strategie di disinformazione intenzionale\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8473",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 46-48 impatto della disinformazione\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8474",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 49-52 il futuro della verifica delle informazioni\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8475",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 53-55 quadro normativo per la disinformazione\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8476",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "2.3 56-57 strumenti per riconoscere la disinformazione\n100.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/8477",
+        "type": "video",
+        "status": "100.00%"
+      },
+      {
+        "title": "SISTEMI DIGITALI MODULO: GESTIRE DATI INFORMAZIONI (Valutazione)\nUltimo tentativo: Superato. Data: 18/06/2026",
+        "url": "https://tecsial.gsdcampus.it/questionario/VA/dashboard/68/modulo/809",
+        "type": "quiz",
+        "status": "Superato"
+      },
+      {
+        "title": "SISTEMI DIGITALI MODULO: GESTIRE DATI INFORMAZIONI (Valutazione)",
+        "url": "https://tecsial.gsdcampus.it/questionario/VA/dashboard/68/corso/127",
+        "type": "quiz",
+        "status": "Pending"
+      }
+    ]
+  },
+  {
+    "courseName": "Corso #156",
+    "courseUrl": "https://tecsial.gsdcampus.it/corso/show/15639",
+    "items": [
+      {
+        "title": "3.1 1-3 evoluzione contenuto digitale\n0.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/13275",
+        "type": "video",
+        "status": "0.00%"
+      }
+    ]
+  },
+  {
+    "courseName": "Corso #157",
+    "courseUrl": "https://tecsial.gsdcampus.it/corso/show/16205",
+    "items": [
+      {
+        "title": "4.0 1-2 evoluzione cyber\n0.00 %",
+        "url": "https://tecsial.gsdcampus.it/lezione/show/13347",
+        "type": "video",
+        "status": "0.00%"
+      }
+    ]
+  },
+  {
+    "courseName": "Corso #49",
+    "courseUrl": "https://tecsial.gsdcampus.it/corso/show/4561",
+    "items": []
+  }
+]

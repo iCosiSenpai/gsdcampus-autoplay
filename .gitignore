@@ -1,0 +1,15 @@
+node_modules
+.DS_Store
+logs/*.out
+logs/*.old
+debug/screenshots/*.png
+debug/dumps/*.html
+data/session_state.json
+data/need_answer.json
+data/storage_state.json
+data/pending_quiz_answers.json
+config.json
+.autoplay_pid
+.ollama_pid
+.supervisor_prompt.txt
+
