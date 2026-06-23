@@ -26,10 +26,12 @@ ok()   { printf "${GREEN}${BOLD}[OK]${NC} %s\n" "$1"; }
 warn() { printf "${YELLOW}${BOLD}[ATTENZIONE]${NC} %s\n" "$1"; }
 err()  { printf "${RED}${BOLD}[ERRORE]${NC} %s\n" "$1"; }
 
-# Quando lo script arriva da "curl | bash", lo stdin è la pipe, non il Terminale.
-# Gli script interattivi (sudo, ollama login, incolla autologin) devono leggere da /dev/tty.
+# Quando lo script arriva da "curl | bash", lo stdin è la pipe, non il Terminale: i comandi
+# interattivi (read dell'autologin/orari, sudo, ollama login) leggerebbero il testo dello script
+# invece dell'input dell'utente. Riconnettiamo l'input alla tastiera tramite /dev/tty.
+# Verifichiamo che /dev/tty sia davvero APRIBILE in lettura (non basta che esista).
 TTY_REDIR=""
-if [ -e /dev/tty ]; then
+if { : < /dev/tty; } 2>/dev/null; then
   TTY_REDIR="/dev/tty"
 fi
 

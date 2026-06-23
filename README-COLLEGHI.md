@@ -2,201 +2,184 @@
 
 # Guida per colleghi — GSD Campus Autopilot
 
-Questo script automatizza le video-lezioni e i quiz del corso GSD Campus.
+Questo script completa in automatico le video-lezioni e i quiz del corso GSD Campus.
 
-## 1. Cosa serve
+**Per te servono solo due cose:**
+1. **Installarlo una volta** (capitolo 1).
+2. **Parlarci dall'AI** per avviarlo e controllarlo (capitolo 2).
 
-- Mac con macOS
-- Connessione internet
-- Account utente del Mac con permessi di installare programmi
-- I Mac devono restare **accesi 24/7** quando il corso deve girare
+Tutto il resto (requisiti, orari, manutenzione) è più in basso e di solito non ti serve.
 
-## 2. Comando principale (l'unico che devi ricordare)
+---
 
-### Prima installazione (Mac nuovo)
+## ⭐ 1. Installazione (una volta sola)
 
-1. Apri il **Terminale** sul Mac.
+1. Apri il **Terminale** sul Mac (Spotlight → scrivi "Terminale" → Invio).
 2. Incolla questo comando su **una sola riga** e premi `Invio`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash
 ```
 
-Questo scarica il progetto in `~/gsdcampus-autoplay`, installa tutto e apre l'AI.
-Lo stesso comando, se lanciato di nuovo, **aggiorna** il progetto all'ultima versione
-(ricevi i fix e le risposte ai quiz aggiornate) **senza perdere** il tuo autologin e i tuoi orari.
+> Se incolli e l'ultima riga non parte, premi `Invio` una seconda volta.
 
-### Usi successivi (progetto già installato)
+Questo scarica il progetto in `~/gsdcampus-autoplay`, installa tutto da solo e apre l'AI.
+**Lo stesso comando, rilanciato in futuro, aggiorna tutto** (fix e risposte ai quiz) **senza
+perdere** il tuo link e i tuoi orari.
+
+Durante la prima installazione il Terminale ti chiederà alcune cose: rispondi con calma.
+
+- La **password del Mac (sudo)**: una sola volta, all'inizio.
+- Eventuali conferme di **installazione/aggiornamento** (anche `y/n`) → rispondi **sempre sì**.
+- Il **login Ollama** (per il modello AI) → inserisci le credenziali.
+- Il **tuo link di autologin personale** GSD Campus → incollalo (lo trovi nell'email del corso).
+- I **giorni lavorativi** dello store (es. lun–ven).
+- La **modalità oraria**:
+  1. **Continuato** — un solo turno (es. 09:00–18:00).
+  2. **Solo mattina** — es. 09:00–13:00.
+  3. **Solo pomeriggio** — es. 14:00–18:00.
+  4. **Classico** — due turni (default 09:30–13:00 e 16:30–20:00).
+  5. **Personalizzato** — fino a 3 turni a scelta.
+
+Gli orari si possono scrivere come vuoi: `9:30`, `09:30`, `9.30`, `0930`, `930`.
+
+Non avere paura di confermare: serve tutto per far funzionare l'automazione.
+
+---
+
+## ⭐ 2. Usare l'automazione con l'AI
+
+Dopo l'installazione si apre una sessione di **Claude Code** (l'AI) con le istruzioni già caricate.
+Da lì in poi **non devi ricordare comandi tecnici: parli con l'AI in italiano.**
+
+Scrivi semplicemente, per esempio:
+
+```
+avvia il corso
+```
+oppure
+```
+controlla il corso
+```
+
+L'AI capisce, avvia/ferma/riavvia lo script al posto tuo e ti dice come sta andando.
+
+### Frasi che puoi usare
+
+- `avvia il corso`
+- `controlla il corso`
+- `come sta andando?`
+- `ferma tutto`
+- `status`
+- `riavvia`
+
+### Riaprire l'AI nei giorni successivi
+
+Se hai chiuso la finestra, riapri l'AI così (una sola riga):
 
 ```bash
 cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
 ```
 
-> Se incolli più righe e l'ultima non parte, premi `Invio` una seconda volta.
+La seconda volta è molto più veloce: salta l'installazione e apre subito l'AI.
 
-La prima volta installerà/aggiornerà tutto in automatico.
+---
 
-All'inizio lo script chiederà la **password del Mac (sudo) una sola volta** e la terrà valida per tutta la sessione. Poi, durante l'installazione, potrebbe succedere che:
-- Ti chieda di **installare/aggiornare/verificare qualcosa** (anche con richieste `y/n`) → conferma **sempre**.
-- Ti chieda il **login Ollama** (per il modello cloud `gemma4:31b-cloud`) → inserisci le credenziali e continuerà da solo.
-- Ti chieda il **tuo link di autologin personale** GSD Campus → incollalo.
-- Ti chieda i **giorni lavorativi** dello store (es. lun–ven).
-- Ti chieda la **modalità oraria** preferita:
-  1. **Continuato** — un solo turno (es. 09:00-18:00).
-  2. **Solo mattina** — es. 09:00-13:00.
-  3. **Solo pomeriggio** — es. 14:00-18:00.
-  4. **Classico** — due turni, default 09:30-13:00 e 16:30-20:00.
-  5. **Personalizzato** — fino a 3 turni a scelta.
+## 3. Vedere cosa sta facendo (senza AI)
 
-Gli orari si possono scrivere in modo flessibile: `9:30`, `09:30`, `9.30`, `0930`, `930`.
-
-Non avere paura di confermare: serve tutto per automatizzare il corso.
-
-## 3. Come usare l'automazione
-
-Dopo aver lanciato il comando sopra, si apre una sessione di Claude Code con già caricate le istruzioni. Scrivi semplicemente:
-
-```
-controlla il corso
-```
-
-Oppure:
-
-```
-come sta andando?
-```
-
-L'AI ti risponderà e, se necessario, avvierà / fermerà / riavvierà lo script al posto tuo.
-
-## 4. Altre frasi utili
-
-- `controlla il corso`
-- `come sta andando?`
-- `avvia il corso`
-- `ferma tutto`
-- `status`
-- `riavvia`
-
-## 5. Cosa sta facendo adesso?
-
-In qualsiasi momento puoi aprire un altro terminale e scrivere:
+In qualsiasi momento puoi aprire un altro Terminale e scrivere:
 
 ```bash
-cd ~/gsdcampus-autoplay
-./status.sh
+cd ~/gsdcampus-autoplay && ./status.sh
 ```
 
-Vedrai:
-- se il processo è attivo e da quanto tempo
-- se adesso è orario lavorativo e quando parte il prossimo turno
-- quale corso/lezione sta facendo
-- progresso del video
-- ultimi errori
+Vedrai: se è attivo e da quanto, se è orario lavorativo e quando parte il prossimo turno,
+quale corso/lezione sta facendo, il progresso del video, l'esito dell'ultimo quiz e gli errori.
 
-Per i log in tempo reale:
+Per i log in tempo reale: `tail -f logs/autoplay.log`.
 
-```bash
-tail -f logs/autoplay.log
-tail -f logs/scheduler.log
-```
+---
 
-## 6. Se qualcosa non va
+## 4. Se qualcosa non va
 
-1. Chiudi la sessione di Claude Code con `Ctrl+C`.
+1. Nella finestra dell'AI premi `Ctrl+C` per chiudere.
 2. Riapri il supervisore:
    ```bash
    cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
    ```
-   La seconda volta sarà molto più veloce: lo script verifica che tutto esista e, se sì, salta l'installazione.
-3. Scrivi: `controlla il corso`
+3. Scrivi: `controlla il corso`.
 
-### Aggiornamento forzato
+Se in `./status.sh` vedi **"Autologin non valido/scaduto"**, il tuo link di accesso non funziona
+più: procurati un link aggiornato e chiedi all'AI di sostituirlo (lo fa lei in `config.json`).
 
-Se vuoi davvero reinstallare/aggiornare tutto (dipendenze, browser, Ollama, ecc.) e poi aprire Claude Code:
+### Comandi di emergenza (di rado necessari)
 
 ```bash
+# Reinstalla/aggiorna tutto e riapre l'AI
 cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update && ./launch-ai-supervisor.sh
-```
 
-### Ricominciare da zero (cancella autologin e orari)
-
-```bash
+# Reinserisci link autologin e orari da zero
 cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-ai-supervisor.sh
 ```
 
-## 7. Replicare su un altro Mac
+---
 
-### Per chi prepara il pacchetto
+## 5. Requisiti
 
-Sul Mac "master" (quello con il progetto funzionante), apri il Terminale nella cartella del progetto e lancia:
+- Mac con macOS e connessione internet.
+- Account del Mac con permessi di installare programmi.
+- Il Mac deve restare **acceso 24/7** quando il corso deve girare (non metterlo in stop).
 
-```bash
-./scripts/prepare-package.sh --yes --zip
-```
+---
 
-Questo crea sul Desktop:
-- una cartella pulita `gsdcampus-autoplay-pkg`
-- uno zip `gsdcampus-autoplay.zip`
+## 6. Come gestisce corsi e quiz (per curiosità)
 
-Il pacchetto è già pulito: non contiene `config.json` personale, sessioni, log, screenshot, né dati del tuo corso.
+- **Corsi**: non devi inserire URL. Dopo il login, lo script scopre da solo i corsi assegnati al
+  tuo account e li completa uno alla volta. Se un corso dà `MISSING_PERMISSION`, il link non è
+  corretto o quel corso non è assegnato a te.
+- **Quiz**: usa una **banca risposte condivisa** (uguale per tutti i colleghi). Se la domanda è
+  nota risponde da sola; se è nuova chiede al modello AI. **Solo se il quiz viene superato**, le
+  risposte nuove entrano nella banca condivisa, che così cresce solo con risposte verificate.
+  L'esito (superato/non superato + punteggio) compare in `./status.sh`.
 
-### Per chi riceve il pacchetto
+---
 
-1. Copia sul nuovo Mac la cartella `gsdcampus-autoplay-pkg` (o estrai lo zip).
-2. Rinominala in `gsdcampus-autoplay` e mettila nella home (`~/gsdcampus-autoplay`).
-3. Apri il Terminale e lancia:
-   ```bash
-   cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
-   ```
-4. All’inizio lo script ti chiederà:
-   - il **tuo link di autologin personale**;
-   - i **giorni lavorativi** dello store;
-   - la **modalità oraria** e gli orari dello store.
-5. Da lì in poi usa sempre `./launch-ai-supervisor.sh`.
+## 7. Orari di lavoro automatici
 
-## 8. Orari di lavoro automatici
+L'automazione segue i turni configurati in fase di installazione:
 
-I Mac in negozio sono accesi 24/7. L'automazione segue automaticamente i turni lavorativi configurati in `config.json`:
-
-- **Modalità rapide**: continuato, solo mattina, solo pomeriggio, classico, personalizzato.
-- **Formati orari flessibili**: `9:30`, `09:30`, `9.30`, `0930`, `930`.
-- **Default**: lunedì–venerdì, 09:30–13:00 e 16:30–20:00.
-- Se dici all'AI `avvia il corso`, lo scheduler parte anche fuori orario e aspetta l'inizio del prossimo turno.
+- Default: lunedì–venerdì, 09:30–13:00 e 16:30–20:00 (puoi cambiarli).
 - A fine turno si ferma da sola e riprende al turno successivo.
-- Se vuoi forzare l'avvio subito (anche di notte o nel weekend), chiedi all'AI: "avvia ignorando gli orari".
+- Se chiedi all'AI `avvia il corso` fuori orario, aspetta automaticamente l'inizio del turno.
+- Per forzare l'avvio subito (anche di notte/weekend) chiedi all'AI: "avvia ignorando gli orari".
 
-## 9. Corsi assegnati
+---
 
-Non devi inserire manualmente gli URL dei corsi. Dopo il login, lo script scopre automaticamente i corsi assegnati al tuo account dalla dashboard di GSD Campus e li elabora uno alla volta.
+## 8. Solo per chi prepara/distribuisce (manutentore)
 
-Se un corso non compare o dà errore `MISSING_PERMISSION`, probabilmente il link autologin non è corretto o il corso non è assegnato al tuo account.
-
-## 10. Domande e quiz
-
-Lo script usa una **banca risposte condivisa** (`data/known_answers.json`) uguale per tutti i colleghi.
-
-- Se trova una domanda conosciuta, risponde in automatico.
-- Se la domanda è nuova, chiede a Ollama (`gemma4:31b-cloud`) la risposta in base alla conoscenza del modello.
-- **Solo se il quiz viene superato**, le risposte nuove di Ollama vengono aggiunte alla banca
-  condivisa (`known_answers.json`): così la banca cresce nel tempo solo con risposte verificate
-  dall'esito reale. L'esito (superato/non superato + punteggio) compare in `./status.sh`.
-- Se il modello non è sicuro, il quiz si ferma e salva la domanda in `data/need_answer.json`: in quel caso scrivi in chat all’AI e lei cercherà la risposta corretta per te.
-
-Se vedi in `./status.sh` il messaggio **"Autologin non valido/scaduto"**, il tuo link di
-accesso non funziona più: chiedi un link aggiornato e all'AI di sostituirlo in `config.json`.
-
-## 11. Disinstallazione
-
-Se vuoi rimuovere tutto, apri il Terminale nella cartella del progetto e lancia:
+Normalmente i colleghi usano l'installer del capitolo 1. In alternativa, dal Mac "master":
 
 ```bash
-./scripts/uninstall.sh
+./scripts/prepare-package.sh --yes --zip   # crea sul Desktop una copia pulita + zip
 ```
 
-Lo script chiederà conferma e rimuoverà dipendenze, modelli Ollama, Claude Code CLI, log e (se vuoi) anche la cartella del progetto. Homebrew e Node.js resteranno installati, per non compromettere altri software.
+Il pacchetto è già ripulito dai dati personali (niente `config.json`, sessioni, log).
 
-## 12. Avvisi
+---
 
-- Non chiudere il Mac o metterlo in stop se vuoi che il corso continui.
+## 9. Disinstallazione
+
+```bash
+cd ~/gsdcampus-autoplay && ./scripts/uninstall.sh
+```
+
+Rimuove dipendenze, modello Ollama, Claude Code CLI, log e (se vuoi) la cartella del progetto.
+Homebrew e Node.js restano, per non compromettere altri software.
+
+---
+
+## 10. Avvisi
+
+- Non spegnere né mettere in stop il Mac se vuoi che il corso continui.
 - Non modificare i file in `data/` se non sai cosa stai facendo.
 - Se il sito del corso cambia layout, avvisa chi ha creato l'automazione.
