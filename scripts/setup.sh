@@ -169,6 +169,15 @@ valid_time() {
   return 0
 }
 
+valid_autologin() {
+  local url="$1"
+  # Formato atteso: https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN
+  if [[ ! "$url" =~ ^https://tecsial\.gsdcampus\.it/autologin/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/[A-Za-z0-9]+$ ]]; then
+    return 1
+  fi
+  return 0
+}
+
 parse_time() {
   local t="$1"
   local h=$(echo "$t" | cut -d: -f1 | sed 's/^0//')
@@ -183,13 +192,19 @@ while true; do
     warn "Incolla il TUO link di autologin personale GSD Campus."
     warn "Lo trovi nell'email di invito al corso o nella piattaforma."
     echo ""
-    read "AUTOLOGIN?Link autologin: "
-    echo ""
-
-    while [ -z "$AUTOLOGIN" ]; do
-      warn "Il link autologin è obbligatorio."
+    while true; do
       read "AUTOLOGIN?Link autologin: "
       echo ""
+      if [ -z "$AUTOLOGIN" ]; then
+        warn "Il link autologin è obbligatorio."
+      elif ! valid_autologin "$AUTOLOGIN"; then
+        warn "Link non valido."
+        echo "Formato atteso: https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN"
+        echo "Esempio:        https://tecsial.gsdcampus.it/autologin/CSOLSS95L23D862R/EbeavV6UwGUVXyVdsPqmTHWd1bWrGddQ"
+        echo "Riprova."
+      else
+        break
+      fi
     done
 
     echo ""
