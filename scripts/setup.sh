@@ -281,6 +281,191 @@ ask_shift() {
   return 0
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Helper interattivi per giorni e turni
+# ─────────────────────────────────────────────────────────────────────────────
+
+day_label() {
+  case "$1" in
+    0) echo "dom";; 1) echo "lun";; 2) echo "mar";; 3) echo "mer";;
+    4) echo "gio";; 5) echo "ven";; 6) echo "sab";; *) echo "$1";;
+  esac
+}
+
+# Da "1,2,3" a "lun, mar, mer"
+days_human() {
+  local csv="$1" out="" d
+  for d in ${(s:,:)csv}; do
+    [ -n "$out" ] && out+=", "
+    out+="$(day_label "$d")"
+  done
+  echo "$out"
+}
+
+# Da spec "sh,sm,eh,em" a "HH:MM-HH:MM"
+spec_to_label() {
+  local spec="$1" sh sm eh em
+  sh=$(echo "$spec" | cut -d, -f1); sm=$(echo "$spec" | cut -d, -f2)
+  eh=$(echo "$spec" | cut -d, -f3); em=$(echo "$spec" | cut -d, -f4)
+  echo "$(node "$SCHEDULE_CLI" format-time "$sh" "$sm")-$(node "$SCHEDULE_CLI" format-time "$eh" "$em")"
+}
+
+# Ordina i turni per orario di inizio
+sort_shifts() {
+  [ ${#SHIFT_SPECS} -gt 0 ] || return 0
+  IFS=$'\n'
+  SHIFT_SPECS=($(printf '%s\n' "${SHIFT_SPECS[@]}" | sort -t, -k1,1n -k2,2n))
+  unset IFS
+}
+
+# Rimuove il turno con indice 1-based
+remove_shift() {
+  local idx="$1" i=1 newarr=()
+  for spec in "${SHIFT_SPECS[@]}"; do
+    [ "$i" -ne "$idx" ] && newarr+=("$spec")
+    i=$((i + 1))
+  done
+  SHIFT_SPECS=("${newarr[@]}")
+}
+
+# Fine dell'ultimo turno (HH:MM), per proporre un default sensato al turno successivo
+last_shift_end() {
+  [ ${#SHIFT_SPECS} -gt 0 ] || { echo ""; return 0; }
+  sort_shifts
+  local spec=${SHIFT_SPECS[-1]} eh em
+  eh=$(echo "$spec" | cut -d, -f3); em=$(echo "$spec" | cut -d, -f4)
+  printf "%02d:%02d" "$eh" "$em"
+}
+
+# Mostra la tabella dei turni correnti
+render_shifts() {
+  if [ ${#SHIFT_SPECS} -eq 0 ]; then
+    echo -e "  ${YELLOW}(nessun turno impostato)${NC}"
+  else
+    local i=1
+    for spec in "${SHIFT_SPECS[@]}"; do
+      echo -e "  ${BOLD}$i)${NC} $(spec_to_label "$spec")"
+      i=$((i + 1))
+    done
+  fi
+}
+
+# Scelta giorni lavorativi con modelli rapidi
+configure_days() {
+  echo ""
+  echo -e "${BOLD}Giorni lavorativi${NC}"
+  echo "  1) Lun–Ven  (5 giorni)"
+  echo "  2) Lun–Sab  (6 giorni)"
+  echo "  3) Tutti i giorni"
+  echo "  4) Personalizzati"
+  echo ""
+  local choice
+  while true; do
+    read "choice?Scelta [1]: "
+    [ -z "$choice" ] && choice=1
+    case "$choice" in
+      1) DAYS="1,2,3,4,5"; break ;;
+      2) DAYS="1,2,3,4,5,6"; break ;;
+      3) DAYS="0,1,2,3,4,5,6"; break ;;
+      4)
+        while true; do
+          echo "Numeri: 0=dom 1=lun 2=mar 3=mer 4=gio 5=ven 6=sab"
+          read "DAYS?Giorni separati da virgola (es. 1,2,3,4,5): "
+          if valid_days "$DAYS"; then break; fi
+          warn "Input non valido. Usa solo numeri da 0 a 6 separati da virgola."
+        done
+        break ;;
+      *) warn "Scelta non valida (1-4)." ;;
+    esac
+  done
+  DAYS_JSON=$(format_days "$DAYS")
+  ok "Giorni: $(days_human "$DAYS_JSON")"
+}
+
+# Configurazione turni: modello di partenza + editor interattivo (aggiungi/rimuovi/svuota)
+configure_shifts() {
+  echo ""
+  echo -e "${BOLD}Turni di lavoro${NC}"
+  echo "Scegli un modello di partenza, poi potrai aggiungere o rimuovere turni a piacere."
+  echo "  1) Classico        — 09:30-13:00 e 16:30-20:00"
+  echo "  2) Continuato      — 09:00-18:00"
+  echo "  3) Solo mattina    — 09:00-13:00"
+  echo "  4) Solo pomeriggio — 14:00-18:00"
+  echo "  5) Parto da zero   — nessun turno, li aggiungo io"
+  echo ""
+  local seed
+  while true; do
+    read "seed?Modello di partenza [1]: "
+    [ -z "$seed" ] && seed=1
+    case "$seed" in
+      1) SHIFT_SPECS=("9,30,13,0" "16,30,20,0"); break ;;
+      2) SHIFT_SPECS=("9,0,18,0"); break ;;
+      3) SHIFT_SPECS=("9,0,13,0"); break ;;
+      4) SHIFT_SPECS=("14,0,18,0"); break ;;
+      5) SHIFT_SPECS=(); break ;;
+      *) warn "Scelta non valida (1-5)." ;;
+    esac
+  done
+
+  # Editor interattivo dei turni
+  local act ridx le def_start
+  while true; do
+    sort_shifts
+    echo ""
+    echo -e "${BOLD}── I tuoi turni ──${NC}"
+    render_shifts
+    echo ""
+    echo -e "${BOLD}Cosa vuoi fare?${NC}"
+    echo "  [a] aggiungi un turno"
+    [ ${#SHIFT_SPECS} -gt 0 ] && echo "  [r] rimuovi un turno"
+    [ ${#SHIFT_SPECS} -gt 0 ] && echo "  [s] svuota tutti i turni"
+    echo "  [c] conferma e continua"
+    echo ""
+    read "act?Scelta [c]: "
+    [ -z "$act" ] && act="c"
+    case "$act" in
+      a|A)
+        if [ ${#SHIFT_SPECS} -ge 4 ]; then
+          warn "Hai raggiunto il massimo di 4 turni."
+        else
+          def_start="09:00"
+          le=$(last_shift_end)
+          [ -n "$le" ] && def_start="$le"
+          if ask_shift "Nuovo turno" "$def_start" "13:00"; then
+            ok "Turno aggiunto."
+          fi
+        fi
+        ;;
+      r|R)
+        if [ ${#SHIFT_SPECS} -eq 0 ]; then
+          warn "Non c'è nessun turno da rimuovere."
+        else
+          read "ridx?Numero del turno da rimuovere: "
+          if [[ "$ridx" =~ ^[0-9]+$ ]] && [ "$ridx" -ge 1 ] && [ "$ridx" -le ${#SHIFT_SPECS} ]; then
+            remove_shift "$ridx"
+            ok "Turno $ridx rimosso."
+          else
+            warn "Numero non valido."
+          fi
+        fi
+        ;;
+      s|S)
+        SHIFT_SPECS=()
+        ok "Tutti i turni rimossi."
+        ;;
+      c|C)
+        if [ ${#SHIFT_SPECS} -eq 0 ]; then
+          warn "Devi avere almeno un turno per continuare. Aggiungine uno con [a]."
+        else
+          break
+        fi
+        ;;
+      *) warn "Azione non valida. Usa a, r, s oppure c." ;;
+    esac
+  done
+  sort_shifts
+}
+
 # Loop di configurazione con validazione e conferma finale
 while true; do
   if [ "$MODIFY" = true ]; then
@@ -306,102 +491,20 @@ while true; do
 
     echo ""
     echo -e "${BOLD}Configurazione orari di lavoro${NC}"
-    echo "Scegli la modalità più adatta a te."
-    echo ""
 
-    while true; do
-      echo "Giorni lavorativi (0=dom, 1=lun, 2=mar, 3=mer, 4=gio, 5=ven, 6=sab)."
-      echo "Esempi: 1,2,3,4,5 oppure 1,2,3,4,5,6"
-      read "DAYS?Giorni [1,2,3,4,5]: "
-      [ -z "$DAYS" ] && DAYS="1,2,3,4,5"
-      if valid_days "$DAYS"; then
-        DAYS_JSON=$(format_days "$DAYS")
-        break
-      fi
-      warn "Input non valido. Usa solo numeri da 0 a 6 separati da virgola."
-      echo ""
-    done
+    configure_days
+    configure_shifts
 
-    echo ""
-    echo "Modalità orario:"
-    echo "  1) Continuato    — un solo turno (default 09:00-18:00)"
-    echo "  2) Solo mattina  — un turno (default 09:00-13:00)"
-    echo "  3) Solo pomeriggio — un turno (default 14:00-18:00)"
-    echo "  4) Classico      — mattina + pomeriggio (default 09:30-13:00, 16:30-20:00)"
-    echo "  5) Personalizzato — inserisci i turni uno alla volta"
-    echo ""
-
-    while true; do
-      read "MODE?Scelta [4]: "
-      [ -z "$MODE" ] && MODE="4"
-      if [[ "$MODE" =~ ^[1-5]$ ]]; then
-        break
-      fi
-      warn "Scelta non valida. Inserisci un numero da 1 a 5."
-    done
-
-    # Svuota array turni
-    SHIFT_SPECS=()
-
-    case "$MODE" in
-      1)
-        ask_shift "Orario continuato" "09:00" "18:00" || continue
-        ;;
-      2)
-        ask_shift "Solo mattina" "09:00" "13:00" || continue
-        ;;
-      3)
-        ask_shift "Solo pomeriggio" "14:00" "18:00" || continue
-        ;;
-      4)
-        ask_shift "Mattina" "09:30" "13:00" || continue
-        ask_shift "Pomeriggio" "16:30" "20:00" || continue
-        ;;
-      5)
-        echo ""
-        echo -e "${BOLD}Modalità personalizzata${NC}"
-        echo "Aggiungi i turni in ordine cronologico. Massimo 3 turni."
-        while true; do
-          if [ ${#SHIFT_SPECS} -ge 3 ]; then
-            info "Hai raggiunto il massimo di 3 turni."
-            break
-          fi
-          current_idx=$(( ${#SHIFT_SPECS} + 1 ))
-          echo ""
-          read "ADD?Aggiungi turno $current_idx? [s/N]: "
-          if [[ ! "$ADD" =~ ^[Ss]$ ]]; then
-            if [ ${#SHIFT_SPECS} -eq 0 ]; then
-              warn "Devi inserire almeno un turno."
-              continue
-            fi
-            break
-          fi
-          ask_shift "Turno $current_idx" "09:00" "13:00" || continue
-        done
-        ;;
-    esac
-
-    # Ordina i turni per orario di inizio
-    if [ ${#SHIFT_SPECS} -gt 0 ]; then
-      IFS=$'\n'
-      SHIFT_SPECS=($(printf '%s\n' "${SHIFT_SPECS[@]}" | sort -t, -k1,1n -k2,2n))
-      unset IFS
-    fi
-
-    # Costruisci JSON shifts
+    # Costruisci JSON shifts su una sola riga (JSON non richiede a capo; evita problemi di
+    # escaping di \n in zsh, che lascerebbe backslash-n letterali rendendo il file non valido).
     SHIFTS_JSON=""
-    first=true
     for spec in "$SHIFT_SPECS[@]"; do
       sh=$(echo "$spec" | cut -d, -f1)
       sm=$(echo "$spec" | cut -d, -f2)
       eh=$(echo "$spec" | cut -d, -f3)
       em=$(echo "$spec" | cut -d, -f4)
-      if [ "$first" = true ]; then
-        first=false
-      else
-        SHIFTS_JSON+=","
-      fi
-      SHIFTS_JSON+="\n      { \"startHour\": $sh, \"startMin\": $sm, \"endHour\": $eh, \"endMin\": $em }"
+      [ -n "$SHIFTS_JSON" ] && SHIFTS_JSON+=", "
+      SHIFTS_JSON+="{ \"startHour\": $sh, \"startMin\": $sm, \"endHour\": $eh, \"endMin\": $em }"
     done
 
     # Formatta orari per il riepilogo
@@ -420,7 +523,7 @@ while true; do
     echo ""
     echo -e "${BOLD}Riepilogo configurazione:${NC}"
     echo "  Autologin: $(mask_url "$AUTOLOGIN")"
-    echo "  Giorni:    $DAYS_JSON (0=dom, 6=sab)"
+    echo "  Giorni:    $(days_human "$DAYS_JSON")"
     echo "  Turni:     $shifts_summary"
     echo ""
 
@@ -439,14 +542,13 @@ while true; do
   "courseUrls": [],
   "workSchedule": {
     "days": [$DAYS_JSON],
-    "shifts": [$SHIFTS_JSON
-    ]
+    "shifts": [$SHIFTS_JSON]
   }
 }
 EOF
       ok "Configurazione salvata in config.json"
       ok "Autologin: $(mask_url "$AUTOLOGIN")"
-      ok "Giorni: $DAYS_JSON"
+      ok "Giorni: $(days_human "$DAYS_JSON")"
       ok "Turni: $shifts_summary"
       break
     else
