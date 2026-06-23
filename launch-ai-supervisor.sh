@@ -5,6 +5,7 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
+CHECK_REQ="$DIR/scripts/check-requirements.sh"
 
 # Colori
 BOLD='\033[1m'
@@ -33,6 +34,12 @@ fi
 
 MODEL="gemma4:31b-cloud"
 
+# Controlla se tutti i requisiti sono già soddisfatti (senza output)
+requirements_satisfied() {
+  [ -f "$CHECK_REQ" ] || return 1
+  "$CHECK_REQ" >/dev/null 2>&1
+}
+
 echo ""
 echo "============================================"
 echo -e "${BOLD}  gsdcampus-autoplay — AI Supervisor${NC}"
@@ -60,7 +67,7 @@ done
 ok "Pulizia istanze precedenti completata."
 
 # 1. Verifica configurazione iniziale
-step "1/6" "Verifica configurazione"
+step "1/5" "Verifica configurazione"
 CONFIG_OK=false
 if [ -f "$DIR/config.json" ]; then
   if node "$SCHEDULE_CLI" is-work-time >/dev/null 2>&1; then
@@ -84,37 +91,41 @@ if [ "$CONFIG_OK" = false ]; then
   fi
 fi
 
-# 2. Richiedi password sudo all'inizio per mantenere il ticket attivo per tutta la sessione
-step "2/6" "Privilegi amministrativi"
-info "Richiesta privilegi amministrativi (sudo) per l'installazione..."
-sudo -v
-ok "Privilegi sudo acquisiti."
-
-# 3. Manutenzione pre-avvio (rotazione log, pulizia vecchi dump)
-step "3/6" "Manutenzione pre-avvio"
+# 2. Manutenzione pre-avvio (rotazione log, pulizia vecchi dump)
+step "2/5" "Manutenzione pre-avvio"
 if [ -f "$DIR/scripts/maintenance.sh" ]; then
   "$DIR/scripts/maintenance.sh" &>/dev/null || true
 fi
 ok "Manutenzione completata."
 
-# 4. Verifica/installa requisiti
-step "4/6" "Verifica e installazione requisiti"
-if [ -f "$DIR/scripts/setup.sh" ]; then
-  "$DIR/scripts/setup.sh" --yes
+# 3. Verifica/installa requisiti: fast-path se tutto è già a posto
+step "3/5" "Verifica requisiti"
+if requirements_satisfied; then
+  ok "Tutti i requisiti sono già soddisfatti. Salto l'installazione."
 else
-  err "Errore: scripts/setup.sh non trovato."
-  exit 1
+  warn "Requisiti mancanti o da verificare. Avvio setup..."
+  # Richiedi sudo solo se serve davvero installare qualcosa
+  info "Richiesta privilegi amministrativi (sudo) per l'installazione..."
+  sudo -v
+  ok "Privilegi sudo acquisiti."
+
+  if [ -f "$DIR/scripts/setup.sh" ]; then
+    "$DIR/scripts/setup.sh" --yes
+  else
+    err "Errore: scripts/setup.sh non trovato."
+    exit 1
+  fi
 fi
 
-# 5. Avvia Ollama se necessario
-step "5/6" "Avvio/controllo Ollama"
+# 4. Avvia Ollama se necessario
+step "4/5" "Avvio/controllo Ollama"
 if [ -f "$DIR/scripts/ollama-daemon.sh" ]; then
   "$DIR/scripts/ollama-daemon.sh" start
 fi
 ok "Ollama pronto."
 
-# 6. Verifica che Claude Code CLI sia accessibile
-step "6/6" "Claude Code CLI"
+# 5. Verifica che Claude Code CLI sia accessibile
+step "5/5" "Claude Code CLI"
 if command -v claude &>/dev/null; then
   ok "Claude Code CLI trovato: $(claude --version 2>/dev/null | head -1)."
 else
@@ -128,7 +139,7 @@ else
   fi
 fi
 
-# 7. Verifica login Ollama e modello cloud
+# Verifica login Ollama e modello cloud (rapida, nessun download se già presente)
 if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
   echo ""
   warn "Il modello $MODEL è un modello CLOUD e richiede il login Ollama."
@@ -159,6 +170,6 @@ echo "  • 'avvia il corso'"
 echo "  • 'ferma tutto'"
 echo ""
 
-# 8. Avvia Claude con skip permessi e modello Ollama
+# Avvia Claude con skip permessi e modello Ollama
 info "Avvio Claude Code con modello $MODEL..."
 ollama launch claude --model "$MODEL" -- --dangerously-skip-permissions
