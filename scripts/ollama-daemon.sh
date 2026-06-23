@@ -5,6 +5,13 @@ DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 PID_FILE=".ollama_pid"
 
+# Usa il binario interno dell'app per evitare l'apertura della GUI nella barra di stato
+if [ -x "/Applications/Ollama.app/Contents/MacOS/Ollama" ]; then
+  OLLAMA_BIN="/Applications/Ollama.app/Contents/MacOS/Ollama"
+else
+  OLLAMA_BIN="ollama"
+fi
+
 is_running() {
   # 1. Verifica via porta
   if curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
@@ -25,9 +32,16 @@ start() {
     echo "Ollama gia attivo"
     return 0
   fi
+
+  # Se c'è un'istanza GUI dell'app aperta, chiudila silenziosamente per non mostrare l'icona
+  if pgrep -x "Ollama" >/dev/null 2>&1; then
+    osascript -e 'quit app "Ollama"' >/dev/null 2>&1 || true
+    sleep 1
+  fi
+
   mkdir -p logs
-  echo "$(date '+%Y-%m-%d %H:%M:%S') | Avvio Ollama in background..." >> "$DIR/logs/ollama.log"
-  nohup ollama serve >> "$DIR/logs/ollama.log" 2>&1 &
+  echo "$(date '+%Y-%m-%d %H:%M:%S') | Avvio Ollama in background (headless)..." >> "$DIR/logs/ollama.log"
+  nohup "$OLLAMA_BIN" serve >> "$DIR/logs/ollama.log" 2>&1 &
   local pid=$!
   echo "$pid" > "$PID_FILE"
   echo "Ollama avviato (PID $pid), attendo prontezza..."
@@ -56,6 +70,8 @@ stop() {
   pgrep -f "ollama serve" 2>/dev/null | while read pid; do
     kill "$pid" 2>/dev/null || true
   done
+  # Chiudi anche eventuale app GUI rimasta
+  osascript -e 'quit app "Ollama"' >/dev/null 2>&1 || true
   echo "Ollama fermato"
 }
 
