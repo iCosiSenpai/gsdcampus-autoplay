@@ -36,26 +36,34 @@ Non avere paura di confermare: serve tutto per automatizzare il corso.
 
 ## Prima installazione
 
-Basta eseguire il comando principale. La prima volta installerà tutto in automatico:
+Basta eseguire il comando principale. La prima volta installerà tutto in automatico e aprirà Claude Code:
+
+```bash
+git clone https://github.com/iCosiSenpai/gsdcampus-autoplay.git && cd gsdcampus-autoplay && ./launch-ai-supervisor.sh
+```
+
+## Comando unico per tutti i giorni
+
+Il comando seguente aggiorna (se necessario), installa ciò che manca e apre Claude Code:
 
 ```bash
 cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
 ```
 
-## Aggiornamento (dopo un `git pull`)
+## Aggiornamento forzato
 
-Se hai già installato tutto e vuoi solo aggiornare gli script, usa il comando rapido:
+Se vuoi davvero reinstallare/aggiornare tutto (Homebrew, npm, browser, Ollama, ecc.), poi apri Claude Code:
 
 ```bash
-cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
+cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update && ./launch-ai-supervisor.sh
 ```
 
-Lo script verificherà i requisiti e, se sono già presenti, li salterà senza reinstallare.
+## Ricominciare da zero (cancella autologin e orari)
 
-Se invece vuoi forzare l'aggiornamento di tutto (Homebrew, npm, browser, Ollama, ecc.):
+Se vuoi reinserire autologin e orari da capo:
 
 ```bash
-cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update
+cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-ai-supervisor.sh
 ```
 
 ## Altri comandi (opzionali)

@@ -16,11 +16,15 @@ ok() { echo -e "${GREEN}${BOLD}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
 err() { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
 
+# Assicurati che ~/.local/bin sia nel PATH, anche se .zshrc non è ancora stato sourceato
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-
-# Se ~/.local/bin non è ancora nel PATH di questo processo, aggiungilo
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
   export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# Tenta di sourceare .zshrc per ereditare eventuali PATH aggiuntivi, silenziosamente
+if [ -f "$HOME/.zshrc" ]; then
+  source "$HOME/.zshrc" >/dev/null 2>&1 || true
 fi
 
 MODEL="gemma4:31b-cloud"
@@ -79,7 +83,22 @@ if [ -f "$DIR/scripts/ollama-daemon.sh" ]; then
 fi
 ok "Ollama pronto."
 
-# 5. Verifica login Ollama e modello cloud
+# 5. Verifica che Claude Code CLI sia accessibile
+step "5/5 - Claude Code CLI"
+if command -v claude &>/dev/null; then
+  ok "Claude Code CLI trovato: $(claude --version 2>/dev/null | head -1)."
+else
+  warn "Claude Code CLI non trovato nel PATH. Forzo ~/.local/bin..."
+  if [ -x "$HOME/.local/bin/claude" ]; then
+    export PATH="$HOME/.local/bin:$PATH"
+    ok "Claude Code CLI trovato in ~/.local/bin."
+  else
+    err "Claude Code CLI non trovato. Esegui ./scripts/setup.sh o riapri il Terminale."
+    exit 1
+  fi
+fi
+
+# 6. Verifica login Ollama e modello cloud
 if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
   echo ""
   warn "Il modello $MODEL è un modello CLOUD e richiede il login Ollama."
@@ -110,5 +129,6 @@ echo "  • 'avvia il corso'"
 echo "  • 'ferma tutto'"
 echo ""
 
-# 5. Avvia Claude con skip permessi e modello Ollama
+# 6. Avvia Claude con skip permessi e modello Ollama
+info "Avvio Claude Code con modello $MODEL..."
 ollama launch claude --model "$MODEL" -- --dangerously-skip-permissions

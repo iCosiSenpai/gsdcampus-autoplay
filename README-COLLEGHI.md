@@ -98,10 +98,16 @@ tail -f logs/scheduler.log
 
 ### Aggiornamento forzato
 
-Se vuoi davvero reinstallare/aggiornare tutto (dipendenze, browser, Ollama, ecc.):
+Se vuoi davvero reinstallare/aggiornare tutto (dipendenze, browser, Ollama, ecc.) e poi aprire Claude Code:
 
 ```bash
-cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update
+cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update && ./launch-ai-supervisor.sh
+```
+
+### Ricominciare da zero (cancella autologin e orari)
+
+```bash
+cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-ai-supervisor.sh
 ```
 
 ## 7. Replicare su un altro Mac

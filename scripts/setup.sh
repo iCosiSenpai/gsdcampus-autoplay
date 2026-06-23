@@ -384,22 +384,25 @@ fi
 
 # 7. Claude Code CLI
 step "7/7 - Claude Code CLI"
-if command -v claude &>/dev/null; then
-  ok "Claude Code CLI già installato: $(claude --version 2>/dev/null | head -1). Salto."
-else
+if ! command -v claude &>/dev/null; then
   info "Claude Code CLI non trovato. Installazione in corso..."
   curl -fsSL https://claude.ai/install.sh | bash
-  ok "Claude Code CLI installato."
 fi
 
-# Assicurarsi che ~/.local/bin sia nel PATH (solo se non già presente)
+# Assicurarsi che ~/.local/bin sia nel PATH in .zshrc e nel processo corrente
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
   info "Aggiunta ~/.local/bin al PATH in .zshrc..."
-  export PATH="$HOME/.local/bin:$PATH"
-  if [ -f "$HOME/.zshrc" ] && ! grep -q 'export PATH="\$HOME/.local/bin:\$PATH"' "$HOME/.zshrc" 2>/dev/null; then
+  if [ -f "$HOME/.zshrc" ] && ! grep -qE 'export PATH=.*\$HOME/\.local/bin' "$HOME/.zshrc" 2>/dev/null; then
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
   fi
-  ok "PATH aggiornato."
+fi
+export PATH="$HOME/.local/bin:$PATH"
+
+if command -v claude &>/dev/null; then
+  ok "Claude Code CLI pronto: $(claude --version 2>/dev/null | head -1)."
+else
+  err "Claude Code CLI non trovato neanche dopo l'installazione. Prova a chiudere e riaprire il Terminale, poi riesegui ./launch-ai-supervisor.sh."
+  exit 1
 fi
 
 print_footer
