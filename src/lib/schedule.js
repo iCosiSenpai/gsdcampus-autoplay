@@ -1,13 +1,36 @@
 /**
  * Gestione orari lavorativi per l'automazione.
- * Turni: 09:30-13:00 e 16:30-20:00, lunedì-venerdì.
+ * Legge la configurazione da config.json se disponibile, altrimenti usa default:
+ * lunedì-venerdì, turni 09:30-13:00 e 16:30-20:00.
  */
 
-const WORK_DAYS = [1, 2, 3, 4, 5]; // lun-ven
-const SHIFTS = [
+const fs = require('fs');
+const path = require('path');
+
+const DEFAULT_DAYS = [1, 2, 3, 4, 5];
+const DEFAULT_SHIFTS = [
   { startHour: 9, startMin: 30, endHour: 13, endMin: 0 },
   { startHour: 16, startMin: 30, endHour: 20, endMin: 0 },
 ];
+
+function loadScheduleConfig() {
+  try {
+    const root = path.join(__dirname, '..', '..');
+    const cfgPath = path.join(root, 'config.json');
+    if (!fs.existsSync(cfgPath)) {
+      return { days: DEFAULT_DAYS, shifts: DEFAULT_SHIFTS };
+    }
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    if (cfg.workSchedule && Array.isArray(cfg.workSchedule.days) && Array.isArray(cfg.workSchedule.shifts)) {
+      return cfg.workSchedule;
+    }
+  } catch (e) {
+    // fallback su default
+  }
+  return { days: DEFAULT_DAYS, shifts: DEFAULT_SHIFTS };
+}
+
+const { days: WORK_DAYS, shifts: SHIFTS } = loadScheduleConfig();
 
 function isWorkTime(date = new Date()) {
   const day = date.getDay();

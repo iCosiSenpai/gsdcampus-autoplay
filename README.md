@@ -6,24 +6,29 @@ Script Playwright per completare in automatico le video-lezioni e i quiz del cor
 
 ## Comando principale
 
-Apri il Terminale e incolla:
+Apri il Terminale, incolla questo comando su **una sola riga** e premi Invio:
 
 ```bash
-cd ~/gsdcampus-autoplay
-./launch-ai-supervisor.sh
+cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
 ```
+
+> Se il terminale incolla più righe ma non esegue l'ultima, premi Invio una seconda volta.
 
 Lo script:
 1. Installa/verifica tutti i requisiti (Homebrew, Node, Playwright, Chrome, Ollama, modello, Claude CLI).
-2. Avvia Ollama se necessario.
-3. Apre una sessione Claude Code con istruzioni pre-caricate e permessi automatici.
-4. Tu scrivi nella chat cose come:
+2. **La prima volta ti chiede:**
+   - il tuo **link di autologin personale** GSD Campus;
+   - i **giorni lavorativi** (default lun–ven);
+   - gli **orari di lavoro** (default 09:30–13:00 e 16:30–20:00).
+3. Avvia Ollama se necessario.
+4. Apre una sessione Claude Code con istruzioni pre-caricate e permessi automatici.
+5. Tu scrivi nella chat cose come:
    - `controlla il corso`
    - `come sta andando?`
    - `avvia il corso`
    - `ferma tutto`
 
-All’inizio lo script chiede la **password di sudo una sola volta** e la mantiene valida per tutta la sessione. Poi, durante il setup, potrebbe chiedere:
+All’inizio lo script chiede la **password di sudo una sola volta** e la mantiene valida per tutta la sessione tramite un keepalive in background. Poi, durante il setup, potrebbe chiedere:
 - di **installare/aggiornare/verificare dipendenze** (anche con richieste `y/n`) → conferma sempre;
 - il **login Ollama** → inserisci le credenziali e lo script continua.
 
@@ -34,8 +39,7 @@ Non avere paura di confermare: serve tutto per automatizzare il corso.
 Basta eseguire il comando principale. La prima volta installerà tutto in automatico:
 
 ```bash
-cd ~/gsdcampus-autoplay
-./launch-ai-supervisor.sh
+cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
 ```
 
 ## Altri comandi (opzionali)
@@ -45,7 +49,7 @@ cd ~/gsdcampus-autoplay
 ./start.sh --ignore-hours               # avvia subito ignorando gli orari
 ./stop.sh                               # ferma autoplay e scheduler
 ./status.sh                             # stato, heartbeat, log
-./scripts/setup.sh                      # installa/aggiorna requisiti (chiede conferma)
+./scripts/setup.sh                      # installa/aggiorna requisiti e configura config.json
 ./scripts/check-requirements.sh         # verifica requisiti
 ./scripts/maintenance.sh                # ruota log grandi e pulisce vecchi screenshot/dump
 ./scripts/uninstall.sh                  # rimuove dipendenze, modelli, CLI e progetto (conferma)
@@ -58,7 +62,7 @@ cd ~/gsdcampus-autoplay
 - `launch-ai-supervisor.sh` — unico comando per l'utente
 - `CLAUDE.md` — istruzioni per l'AI supervisore
 - `src/autoplay.js` — main
-- `src/lib/` — logger, monitor, quiz, video
+- `src/lib/` — logger, monitor, quiz, video, schedule
 - `scripts/` — setup, check requisiti, daemon Ollama
 - `data/` — risposte conosciute, risposte in attesa di verifica, mappa corsi, stato sessione
 - `logs/` — log, heartbeat, status.json, supervisor.log, ollama.log
@@ -74,13 +78,15 @@ Lo script usa `chromium.launch({ headless: true })`. Non compare nessuna finestr
 
 Gli ID dei corsi (`/corso/show/8122`, `/corso/show/15580`, `/corso/show/16146`) sono fissi nella piattaforma GSD Campus e sono gli stessi per tutti gli utenti.
 
-L'URL di autologin è **personale**: la prima volta l'AI chiederà di confermare il link e gli orari dello store. Se qualcosa non è corretto, basta scriverlo in chat e l'AI modificherà `config.json` al posto tuo.
+L'URL di autologin è **personale**: la prima volta lo script te lo chiede in terminale durante il setup. In seguito, l'AI mostrerà solo una conferma; se qualcosa non è corretto, basta scriverlo in chat e l'AI modificherà `config.json` al posto tuo.
+
+Gli orari di lavoro sono salvati in `config.json` nella chiave `workSchedule` (`days` + `shifts`). Puoi modificarli chattando con l'AI o eseguendo `./scripts/setup.sh`.
 
 ## Orari di lavoro automatici
 
-I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i turni:
+I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i turni configurati in `config.json`:
 
-- **Turni**: lunedì–venerdì, 09:30–13:00 e 16:30–20:00.
+- Default: lunedì–venerdì, 09:30–13:00 e 16:30–20:00.
 - Se avvii `start.sh` fuori orario, lo scheduler aspetta l'inizio del prossimo turno e poi avvia l'autoplay.
 - A fine turno, `src/autoplay.js` esce gracefulmente; lo scheduler aspetta il turno successivo e lo riavvia.
 - Nessun cron richiesto.

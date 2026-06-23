@@ -14,22 +14,28 @@ Questo script automatizza le video-lezioni e i quiz del corso GSD Campus.
 ## 2. Comando principale (l'unico che devi ricordare)
 
 1. Apri il **Terminale** sul Mac.
-2. Trascina la cartella `gsdcampus-autoplay` dalla scrivania (o da Finder) dentro la finestra del Terminale: si scriverà automaticamente il percorso.
-3. **Scrivi `cd ` prima del percorso** (ricorda lo spazio tra `cd` e il percorso), quindi tocca `Invio`.
-   - Esempio: `cd /Users/mario/gsdcampus-autoplay`
-4. Incolla il comando di avvio e tocca `Invio`:
+2. Incolla questo comando su **una sola riga** e premi `Invio`:
 
 ```bash
-./launch-ai-supervisor.sh
+cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
 ```
 
-> In alternativa, puoi anche scrivere a mano: `cd ~/gsdcampus-autoplay` (spazio tra `cd` e `~`), poi `Invio`, poi `./launch-ai-supervisor.sh`.
+> Se incolli più righe e l'ultima non parte, premi `Invio` una seconda volta.
+
+In alternativa, puoi fare a mano:
+
+```bash
+cd ~/gsdcampus-autoplay
+./launch-ai-supervisor.sh
+```
 
 La prima volta installerà/aggiornerà tutto in automatico.
 
 All'inizio lo script chiederà la **password del Mac (sudo) una sola volta** e la terrà valida per tutta la sessione. Poi, durante l'installazione, potrebbe succedere che:
 - Ti chieda di **installare/aggiornare/verificare qualcosa** (anche con richieste `y/n`) → conferma **sempre**.
 - Ti chieda il **login Ollama** (per il modello cloud `gemma4:31b-cloud`) → inserisci le credenziali e continuerà da solo.
+- Ti chieda il **tuo link di autologin personale** GSD Campus → incollalo.
+- Ti chieda i **giorni e gli orari di lavoro** → conferma i default (lun–ven, 09:30–13:00 e 16:30–20:00) o inserisci quelli dello store.
 
 Non avere paura di confermare: serve tutto per automatizzare il corso.
 
@@ -77,7 +83,7 @@ Per i log in tempo reale:
 
 ```bash
 tail -f logs/autoplay.log
-tail -f logs/supervisor.log
+tail -f logs/scheduler.log
 ```
 
 ## 6. Se qualcosa non va
@@ -106,19 +112,21 @@ Il pacchetto è già pulito: non contiene `config.json` personale, sessioni, log
 
 1. Copia sul nuovo Mac la cartella `gsdcampus-autoplay-pkg` (o estrai lo zip).
 2. Rinominala in `gsdcampus-autoplay` e mettila nella home (`~/gsdcampus-autoplay`).
-3. Apri il Terminale:
+3. Apri il Terminale e lancia:
    ```bash
-   cd ~/gsdcampus-autoplay
-   ./launch-ai-supervisor.sh
+   cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
    ```
-4. All’inizio l’AI ti chiederà di confermare il **tuo link di autologin personale** e gli **orari di lavoro dello store**. Se qualcosa non è corretto, scrivilo in chat e l’AI modificherà `config.json` al posto tuo.
+4. All’inizio lo script ti chiederà:
+   - il **tuo link di autologin personale**;
+   - i **giorni lavorativi** dello store;
+   - gli **orari di lavoro** dello store.
 5. Da lì in poi usa sempre `./launch-ai-supervisor.sh`.
 
 ## 8. Orari di lavoro automatici
 
-I Mac in negozio sono accesi 24/7. L'automazione segue automaticamente i turni lavorativi:
+I Mac in negozio sono accesi 24/7. L'automazione segue automaticamente i turni lavorativi configurati in `config.json`:
 
-- **Turni**: lunedì–venerdì, 09:30–13:00 e 16:30–20:00.
+- **Default**: lunedì–venerdì, 09:30–13:00 e 16:30–20:00.
 - Se dici all'AI `avvia il corso`, lo scheduler parte anche fuori orario e aspetta l'inizio del prossimo turno.
 - A fine turno si ferma da sola e riprende al turno successivo.
 - Se vuoi forzare l'avvio subito (anche di notte o nel weekend), chiedi all'AI: "avvia ignorando gli orari".

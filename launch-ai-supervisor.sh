@@ -14,6 +14,7 @@ NC='\033[0m'
 info() { echo -e "${BLUE}${BOLD}[INFO]${NC} $1"; }
 ok() { echo -e "${GREEN}${BOLD}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
+err() { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 

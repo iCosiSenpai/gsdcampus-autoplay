@@ -7,19 +7,14 @@ Il progetto si trova in: /Users/lab/gsdcampus-autoplay
 
 ## Conferma iniziale (da mostrare all'utente)
 
-Prima di eseguire qualsiasi operazione, mostra questa conferma e attendi l'OK dell'utente:
+Prima di eseguire qualsiasi operazione, leggi `config.json` e mostra questa conferma. Se `config.json` non esiste o contiene il placeholder del repository, avvisa l'utente di lanciare `./scripts/setup.sh` per configurarlo.
 
 ---
 **Conferma configurazione**
 
-- **Corso da seguire**: GSD Campus — autologin https://tecsial.gsdcampus.it/autologin/CSOLSS95L23D862R/EbeavV6UwGUVXyVdsPqmTHWd1bWrGddQ
-  Corsi configurati:
-  - https://tecsial.gsdcampus.it/corso/show/8122
-  - https://tecsial.gsdcampus.it/corso/show/15580
-  - https://tecsial.gsdcampus.it/corso/show/16146
-
-- **Orario lavorativo autorizzato per eseguire il corso**: lunedì–venerdì, 09:30–13:00 e 16:30–20:00.
-  (Questo Mac è configurato per il fuso orario locale dello store; un altro store può essere in orario diverso.)
+- **Corso da seguire**: GSD Campus — autologin e orari letti da `config.json`.
+  - Mostra l'URL di autologin (solo dominio/primi caratteri per privacy).
+  - Mostra i giorni e i turni lavorativi configurati.
 
 Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `config.json`**: usa il tool Edit per aggiornare tu stesso il file `config.json` con il link e/o gli orari corretti, poi chiedi conferma della modifica.
 
@@ -39,7 +34,7 @@ L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso 
 - `cd /Users/lab/gsdcampus-autoplay && ./start.sh --ignore-hours` — avvia subito ignorando gli orari di lavoro.
 - `cd /Users/lab/gsdcampus-autoplay && ./stop.sh` — ferma autoplay e scheduler.
 - `cd /Users/lab/gsdcampus-autoplay && ./scripts/check-requirements.sh` — verifica requisiti.
-- `cd /Users/lab/gsdcampus-autoplay && ./scripts/setup.sh` — installa requisiti mancanti.
+- `cd /Users/lab/gsdcampus-autoplay && ./scripts/setup.sh` — installa requisiti mancanti e configura `config.json` (autologin + orari).
 - `cd /Users/lab/gsdcampus-autoplay && ./scripts/ollama-daemon.sh start` — avvia Ollama (se serve al supervisore stesso).
 - `cd /Users/lab/gsdcampus-autoplay && ./scripts/ollama-daemon.sh stop` — ferma Ollama.
 - `tail -f /Users/lab/gsdcampus-autoplay/logs/autoplay.log` — segui log in tempo reale.
@@ -63,8 +58,11 @@ Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
 
 ## Orario di lavoro
 
-L'orario di lavoro configurato è: **lunedì–venerdì, 09:30-13:00 e 16:30-20:00**.
+L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 
+- `days`: array di numeri del giorno (0=domenica, 1=lunedì, … 6=sabato).
+- `shifts`: array di oggetti `{startHour, startMin, endHour, endMin}`.
+- Default (se non configurato): lunedì-venerdì, turni 09:30-13:00 e 16:30-20:00.
 - Ogni Mac usa il proprio fuso orario locale: uno store può essere fuori orario mentre un altro è ancora in orario.
 - `start.sh` avvia uno scheduler che, se fuori orario, aspetta l'inizio del prossimo turno e poi avvia `node src/autoplay.js`.
 - `src/autoplay.js` controlla l'orario ogni minuto: se arriva a fine turno, esce gracefulmente; lo scheduler aspetta il turno successivo e lo riavvia.
@@ -110,15 +108,24 @@ Sii conciso. Riporta:
 
 ## Permessi di Claude Code
 
-`./launch-ai-supervisor.sh` avvia Claude con `--dangerously-skip-permissions`. All'inizio lo script chiede la password di sudo una sola volta (`sudo -v`) e la mantiene valida per tutta la sessione. Durante il setup l'utente deve solo confermare eventuali richieste di installazione/aggiornamento da Homebrew/npm (sempre `y`). I permessi di Claude Code non richiedono conferme ripetute.
+`./launch-ai-supervisor.sh` avvia Claude con `--dangerously-skip-permissions`. All'inizio lo script chiede la password di sudo una sola volta (`sudo -v`) e la mantiene valida per tutta la sessione tramite un keepalive in background. Durante il setup l'utente deve solo confermare eventuali richieste di installazione/aggiornamento da Homebrew/npm (sempre `y`). I permessi di Claude Code non richiedono conferme ripetute.
 
 ## Requisito login Ollama
 
 Il modello `gemma4:31b-cloud` è un modello **cloud Ollama** e richiede l'autenticazione. `./launch-ai-supervisor.sh` e `./scripts/setup.sh` gestiscono automaticamente il login: aprono `ollama login` in modo interattivo, aspettano che l'utente inserisca le credenziali, poi procedono con il download del modello e l'avvio di Claude. Non devi fare altro.
+
+## Configurazione iniziale
+
+La prima volta che `./launch-ai-supervisor.sh` viene eseguito, `setup.sh` chiede interattivamente:
+1. Il link di autologin personale GSD Campus.
+2. I giorni lavorativi (default lun-venerdì).
+3. Gli orari di lavoro (default 09:30-13:00 e 16:30-20:00).
+
+Questi dati vengono salvati in `config.json`. In seguito, ogni avvio mostrerà solo una conferma dei dati configurati.
 
 ## Note tecniche
 
 - Lo script principale è `src/autoplay.js`; usa Playwright in modalità headless.
 - `start.sh` controlla i requisiti prima di avviare.
 - I log sono in `logs/`.
-- `backups/autoplay-v3-2026-06-23.js` contiene il vecchio script headed di emergenza.
+- `backups/` contiene copie di sicurezza dello script (se presenti).
