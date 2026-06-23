@@ -162,19 +162,24 @@ if [ "$MODIFY" = true ]; then
   done
 
   echo ""
+  echo -e "${BOLD}Configurazione orari di lavoro${NC}"
+  echo "Lascia vuoto e premi Invio per confermare il valore mostrato tra []."
+  echo ""
+
   echo "Giorni lavorativi (0=dom, 1=lun, 2=mar, 3=mer, 4=gio, 5=ven, 6=sab)."
-  read "DAYS?Giorni separati da virgola [1,2,3,4,5]: "
+  echo "Esempi: 1,2,3,4,5 oppure 1,2,3,4,5,6"
+  read "DAYS?Giorni [1,2,3,4,5]: "
   [ -z "$DAYS" ] && DAYS="1,2,3,4,5"
   echo ""
 
-  echo "Turno 1 (mattina)."
+  echo "Turno 1 (mattina). Formato HH:MM, es. 09:30."
   read "SHIFT1_START?Inizio [09:30]: "
   [ -z "$SHIFT1_START" ] && SHIFT1_START="09:30"
   read "SHIFT1_END?Fine [13:00]: "
   [ -z "$SHIFT1_END" ] && SHIFT1_END="13:00"
   echo ""
 
-  echo "Turno 2 (pomeriggio)."
+  echo "Turno 2 (pomeriggio). Formato HH:MM, es. 16:30."
   read "SHIFT2_START?Inizio [16:30]: "
   [ -z "$SHIFT2_START" ] && SHIFT2_START="16:30"
   read "SHIFT2_END?Fine [20:00]: "
