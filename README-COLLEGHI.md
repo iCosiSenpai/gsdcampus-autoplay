@@ -24,8 +24,17 @@ curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main
 > Se incolli e l'ultima riga non parte, premi `Invio` una seconda volta.
 
 Questo scarica il progetto in `~/gsdcampus-autoplay`, installa tutto da solo e apre l'AI.
-**Lo stesso comando, rilanciato in futuro, aggiorna tutto** (fix e risposte ai quiz) **senza
-perdere** il tuo link e i tuoi orari.
+
+**Se lanci di nuovo lo stesso comando** quando il progetto è già installato, ti compare un menu
+che chiede cosa vuoi fare:
+1. **Aggiorna e avvia** — scarica fix e risposte quiz aggiornate, poi apre l'AI (consigliato).
+2. **Cambia link autologin/orari** — reinserisci accesso e orari, poi avvia.
+3. **Reinstallazione pulita** — riallinea il codice e reinstalla tutte le dipendenze.
+4. **Solo avvia** — apre l'AI senza modificare nulla.
+5. **Disinstalla** — rimuove tutto (con conferma).
+6. **Annulla**.
+
+In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e orari resta al suo posto.
 
 Durante la prima installazione il Terminale ti chiederà alcune cose: rispondi con calma.
 
@@ -49,8 +58,14 @@ Non avere paura di confermare: serve tutto per far funzionare l'automazione.
 
 ## ⭐ 2. Usare l'automazione con l'AI
 
-Dopo l'installazione si apre una sessione di **Claude Code** (l'AI) con le istruzioni già caricate.
-Da lì in poi **non devi ricordare comandi tecnici: parli con l'AI in italiano.**
+**Cosa succede appena finita l'installazione:** parte da sola una sessione dell'**AI** — è
+**Claude che gira in locale tramite Ollama** con il modello cloud `gemma4:31b-cloud`. Non devi
+lanciare nessun altro comando: la finestra dell'AI si apre da sé, con le istruzioni già caricate.
+
+Da lì in poi **non devi ricordare comandi tecnici: parli con l'AI in italiano.** È l'AI che avvia,
+ferma e controlla lo script al posto tuo.
+
+> Se hai chiuso la finestra dell'AI, riaprila con: `cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh`
 
 Scrivi semplicemente, per esempio:
 

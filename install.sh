@@ -7,12 +7,18 @@
 #
 # Cosa fa:
 #   1. Verifica che git sia disponibile (lo installa via Command Line Tools se manca).
-#   2. Clona il progetto in ~/gsdcampus-autoplay, oppure lo aggiorna (git pull) se già presente.
-#      L'aggiornamento NON tocca config.json (è in .gitignore): autologin e orari restano.
+#   2. PRIMA installazione: clona il progetto in ~/gsdcampus-autoplay e apre l'AI (con setup).
+#      Se l'installazione ESISTE GIÀ, chiede COSA vuoi fare con un menu:
+#        - Aggiorna e avvia
+#        - Cambia link autologin e/o orari
+#        - Reinstallazione pulita (riallinea codice + reinstalla dipendenze)
+#        - Solo avvia
+#        - Disinstalla
+#        - Annulla
 #   3. Avvia ./launch-ai-supervisor.sh, che installa il resto (Node, Playwright, Ollama, Claude)
 #      e apre l'AI. La parte Ollama/Claude non viene modificata da questo script.
 #
-# Idempotente: puoi rilanciare lo stesso comando per ricevere fix e banca risposte aggiornati.
+# L'aggiornamento NON tocca config.json (è in .gitignore): autologin e orari restano.
 
 set -euo pipefail
 
@@ -50,36 +56,115 @@ if ! command -v git >/dev/null 2>&1; then
 fi
 ok "git disponibile."
 
-# 2. Clona o aggiorna
-if [ -d "$TARGET/.git" ]; then
-  info "Progetto già presente in $TARGET. Aggiorno (git pull)..."
-  git -C "$TARGET" fetch --quiet origin "$BRANCH" || warn "fetch non riuscito, proseguo con la versione locale."
-  # Aggiorna senza toccare i file ignorati (config.json, sessioni, log).
-  if git -C "$TARGET" merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
-    ok "Progetto aggiornato all'ultima versione."
+# Aggiorna il codice all'ultima versione (senza toccare i file ignorati: config.json, log, ...)
+update_repo() {
+  info "Aggiorno il progetto all'ultima versione..."
+  git fetch --quiet origin "$BRANCH" || warn "fetch non riuscito, proseguo con la versione locale."
+  if git merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
+    ok "Progetto aggiornato."
   else
-    warn "Impossibile fare un fast-forward pulito (modifiche locali?). Uso la versione attuale."
+    warn "Impossibile aggiornare in modo pulito (modifiche locali?). Uso la versione attuale."
+  fi
+}
+
+# 2. Prima installazione oppure gestione di un'installazione esistente
+MODE="install"   # install | update | reconfig | clean | launch | uninstall | cancel
+
+if [ -d "$TARGET/.git" ]; then
+  if [ -n "$TTY_REDIR" ]; then
+    echo ""
+    info "Trovata un'installazione esistente in $TARGET."
+    echo ""
+    printf "${BOLD}Perché stai rilanciando l'installer?${NC}\n"
+    echo "  1) Aggiorna e avvia          — scarica fix e risposte quiz aggiornate, poi apre l'AI (consigliato)"
+    echo "  2) Cambia link autologin/orari — riconfigura accesso e orari, poi avvia"
+    echo "  3) Reinstallazione pulita     — riallinea il codice e reinstalla tutte le dipendenze"
+    echo "  4) Solo avvia                 — apre l'AI senza modificare nulla"
+    echo "  5) Disinstalla                — rimuove dipendenze, modello, CLI (con conferma)"
+    echo "  6) Annulla"
+    echo ""
+    while true; do
+      printf "Scelta [1]: "
+      IFS= read -r CHOICE < "$TTY_REDIR" || CHOICE=""
+      [ -z "$CHOICE" ] && CHOICE=1
+      case "$CHOICE" in
+        1) MODE="update";    break ;;
+        2) MODE="reconfig";  break ;;
+        3) MODE="clean";     break ;;
+        4) MODE="launch";    break ;;
+        5) MODE="uninstall"; break ;;
+        6) MODE="cancel";    break ;;
+        *) warn "Scelta non valida (1-6)." ;;
+      esac
+    done
+  else
+    # Nessun terminale interattivo: posso solo aggiornare il codice.
+    MODE="update"
   fi
 elif [ -d "$TARGET" ]; then
   warn "Esiste già $TARGET ma non è una copia git. Non la sovrascrivo: uso il contenuto attuale."
+  MODE="launch"
 else
   info "Scarico il progetto in $TARGET..."
   git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$TARGET"
   ok "Progetto scaricato."
+  MODE="install"   # prima volta: il launcher avvierà il setup interattivo (autologin + orari)
+fi
+
+if [ "$MODE" = "cancel" ]; then
+  info "Operazione annullata. Niente è stato modificato."
+  exit 0
 fi
 
 cd "$TARGET"
 chmod +x ./launch-ai-supervisor.sh ./start.sh ./stop.sh ./status.sh 2>/dev/null || true
 chmod +x ./scripts/*.sh 2>/dev/null || true
 
+# 3. Esegui l'azione scelta
+case "$MODE" in
+  update)
+    update_repo
+    ;;
+  reconfig)
+    update_repo
+    warn "Riconfigurazione: ti verranno richiesti di nuovo il link autologin e gli orari."
+    rm -f config.json
+    ;;
+  clean)
+    info "Reinstallazione pulita."
+    git fetch --quiet origin "$BRANCH" || true
+    if git reset --hard "origin/$BRANCH" >/dev/null 2>&1; then
+      ok "Codice riallineato a origin/$BRANCH (config.json e dati personali restano)."
+    else
+      warn "Impossibile riallineare il codice; proseguo con la versione attuale."
+    fi
+    if [ -n "$TTY_REDIR" ] && [ -f config.json ]; then
+      info "Reinstallo/aggiorno tutte le dipendenze (può richiedere qualche minuto)..."
+      ./scripts/setup.sh --yes --force-update < "$TTY_REDIR" || warn "Force-update dipendenze non completato; proseguo."
+    fi
+    ;;
+  uninstall)
+    if [ -n "$TTY_REDIR" ]; then
+      exec ./scripts/uninstall.sh < "$TTY_REDIR"
+    else
+      warn "Serve un terminale per la disinstallazione."
+      info "Esegui:  cd ~/gsdcampus-autoplay && ./scripts/uninstall.sh"
+      exit 1
+    fi
+    ;;
+  launch|install)
+    : # nessuna azione preliminare
+    ;;
+esac
+
 echo ""
-ok "Installazione base completata. Avvio il supervisore AI..."
+ok "Pronto. Avvio il supervisore AI..."
 echo ""
 
-# 3. Avvia il launcher in modo interattivo (legge da terminale anche se siamo in pipe)
+# 4. Avvia il launcher in modo interattivo (legge da terminale anche se siamo in pipe)
 if [ -n "$TTY_REDIR" ]; then
   exec ./launch-ai-supervisor.sh < "$TTY_REDIR"
 else
-  warn "Nessun terminale interattivo rilevato."
+  warn "Nessun terminale interattivo rilevato: non posso aprire l'AI automaticamente."
   info "Apri il Terminale ed esegui:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
 fi
