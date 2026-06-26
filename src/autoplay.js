@@ -7,6 +7,7 @@ const { Monitor } = require('./lib/monitor');
 const { solveQuiz } = require('./lib/quiz');
 const { watchVideo } = require('./lib/video');
 const { isWorkTime, nextWorkEnd, nextWorkStart, describeSchedule } = require('./lib/schedule');
+const courseState = require('./lib/course-state');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'data');
@@ -28,6 +29,9 @@ const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 const IGNORE_HOURS = process.argv.includes('--ignore-hours');
 const CHECK_INTERVAL_MS = 60000; // controlla orario ogni minuto
+const MAX_MISSING_PERMISSION = 3;
+const MAX_COURSE_ITER = 80;
+const MAX_LOGIN_DROPS = 4;
 
 class OffHoursExit extends Error {
   constructor(message) {
@@ -37,8 +41,6 @@ class OffHoursExit extends Error {
   }
 }
 
-// Errore NON ritentabile: il link autologin non ha autenticato (token errato o scaduto).
-// Ritentare il login o riavviare il browser non aiuta: serve un link valido in config.json.
 class AutologinError extends Error {
   constructor(message) {
     super(message);
@@ -47,9 +49,6 @@ class AutologinError extends Error {
   }
 }
 
-// Sessione caduta ripetutamente durante l'esecuzione (token autologin scaduto/consumato a
-// metà sessione). Bubbla al loop esterno per un riavvio pulito del browser invece di
-// ritentare il login all'infinito.
 class SessionError extends Error {
   constructor(message) {
     super(message);
@@ -58,10 +57,14 @@ class SessionError extends Error {
   }
 }
 
-// La piattaforma è una SPA: quando la sessione non è valida, qualsiasi URL mostra la pagina
-// di login (campo password presente) o redirige su /login. È il modo affidabile per
-// distinguere "loggato" da "non loggato", verificato sui 5 account reali esplorati con
-// scripts/explore.js.
+class AllCoursesNeedHelpExit extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'AllCoursesNeedHelpExit';
+    this.code = 'ALL_NEED_HELP';
+  }
+}
+
 async function isLoginPage(page) {
   if (/\/login(\?|$|\/)/.test(page.url())) return true;
   return await page.evaluate(() => {
@@ -89,32 +92,76 @@ function loadSession() {
   return null;
 }
 
-async function solveQuizWrapper(page) {
+async function solveQuizWrapper(page, courseUrl) {
   try {
-    return await solveQuiz(page, ROOT, log, monitor);
+    const result = await solveQuiz(page, ROOT, log, monitor);
+    // Backward compat: solveQuiz restituisce un oggetto.
+    if (result && typeof result === 'object') {
+      return result;
+    }
+    return { outcome: result ? 'solved' : 'failed', passed: !!result };
   } catch (e) {
     await monitor.recordError(page, e, 'solveQuiz');
+    return { outcome: 'error', passed: false, error: e.message };
+  }
+}
+
+// Gestisce la pagina di informativa/accettazione che precede alcuni corsi.
+// Spunta le checkbox della privacy/scheda tecnica e clicca "Prosegui".
+async function handleCourseInformativa(page, log) {
+  const url = page.url();
+  if (!url.includes('/corso/informativa/')) return false;
+  log(`Pagina informativa rilevata (${url}). Cerco checkbox da accettare...`);
+  try {
+    const checkboxes = await page.locator('input[type="checkbox"].form-check-input.accept').all();
+    if (checkboxes.length === 0) {
+      log('Nessuna checkbox di accettazione trovata.');
+      return false;
+    }
+    for (const cb of checkboxes) {
+      await cb.check().catch(() => {});
+    }
+    log(`Spuntate ${checkboxes.length} checkbox. Attendo abilitazione bottone...`);
+    await page.waitForTimeout(1000);
+    const submitBtn = page.locator('button[type="submit"].btn.btn-primary');
+    const exists = await submitBtn.count().catch(() => 0) > 0;
+    if (!exists) {
+      log('Bottone Prosegui non trovato.');
+      return false;
+    }
+    const isDisabled = await submitBtn.isDisabled().catch(() => true);
+    if (isDisabled) {
+      log('Bottone ancora disabilitato; forzo enabled via JS.');
+      await page.evaluate(() => {
+        const btn = document.querySelector('button[type="submit"].btn.btn-primary');
+        if (btn) btn.disabled = false;
+      });
+    }
+    await submitBtn.click().catch(e => log(`Errore click submit: ${e.message}`));
+    await page.waitForTimeout(4000);
+    log(`Dopo submit: URL = ${page.url()}`);
+    return true;
+  } catch (e) {
+    log(`Errore gestione informativa: ${e.message}`);
     return false;
   }
 }
 
-async function runCourse(page, courseUrl, sessionState) {
+async function runCourse(page, courseUrl, sessionState, state) {
   const emptyUrls = new Set();
   let missingPermissionCount = 0;
-  const MAX_MISSING_PERMISSION = 3;
-  // Tetto di iterazioni per singolo corso: evita loop infiniti se un corso non avanza mai.
   let iter = 0;
-  const MAX_ITER = 80;
+
+  log(`Inizio corso ${courseUrl}. Stato: ${JSON.stringify(courseState.getCourse(state, courseUrl))}`);
 
   while (true) {
-    if (++iter > MAX_ITER) {
-      log(`Corso ${courseUrl}: superato il limite di ${MAX_ITER} iterazioni senza completamento. Passo al prossimo.`);
+    if (++iter > MAX_COURSE_ITER) {
+      log(`Corso ${courseUrl}: superato il limite di ${MAX_COURSE_ITER} iterazioni senza completamento. Passo al prossimo.`);
       return;
     }
     monitor.update({ phase: 'checking', courseUrl });
 
     try {
-      // Torniamo sempre alla dashboard per simulare navigazione umana
       log('Ritorno dashboard per accesso al corso...');
       await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForTimeout(3000);
@@ -139,12 +186,10 @@ async function runCourse(page, courseUrl, sessionState) {
       continue;
     }
 
-    // Sessione caduta a metà corso: la pagina è tornata al login. Conta i drop e, se troppi,
-    // bubbla al loop esterno per un riavvio pulito del browser invece di ritentare a vuoto.
     if (await isLoginPage(page)) {
       sessionState.loginDrops++;
-      log(`Sessione persa (pagina di login). Drop ${sessionState.loginDrops}/${sessionState.maxLoginDrops}. Ritento autologin...`);
-      if (sessionState.loginDrops >= sessionState.maxLoginDrops) {
+      log(`Sessione persa (pagina di login). Drop ${sessionState.loginDrops}/${MAX_LOGIN_DROPS}. Ritento autologin...`);
+      if (sessionState.loginDrops >= MAX_LOGIN_DROPS) {
         throw new SessionError('Sessione instabile: l\'accesso cade ripetutamente dopo il login (token autologin probabilmente scaduto/consumato).');
       }
       try {
@@ -161,6 +206,8 @@ async function runCourse(page, courseUrl, sessionState) {
       log(`Siamo in pagina MISSING_PERMISSION (tentativo ${missingPermissionCount}/${MAX_MISSING_PERMISSION}).`);
       if (missingPermissionCount >= MAX_MISSING_PERMISSION) {
         log(`Corso ${courseUrl} non accessibile: troppi MISSING_PERMISSION. Salto al prossimo corso.`);
+        courseState.markCourseNeedHelp(ROOT, state, courseUrl, 'missing_permission');
+        monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
         return;
       }
       try {
@@ -172,32 +219,73 @@ async function runCourse(page, courseUrl, sessionState) {
       continue;
     }
     missingPermissionCount = 0;
-    sessionState.loginDrops = 0; // siamo su una pagina valida: sessione sana
+    sessionState.loginDrops = 0;
+
+    // Gestione pagina informativa (privacy/condizioni) che precede alcuni corsi.
+    await handleCourseInformativa(page, log);
 
     let scoredLinks = [];
     try {
       scoredLinks = await page.evaluate(() => {
-        // Percorso validato sui 5 account reali: i bottoni "Apri" delle lezioni hanno classe
-        // "btn btn-sm btn-primary". Fallback per href se la classe dovesse cambiare.
-        let links = [...document.querySelectorAll('a.btn.btn-sm.btn-primary')];
+        const allLinks = [...document.querySelectorAll('a')];
+        const lessonOrQuiz = allLinks.filter(a => {
+          const href = a.href || '';
+          return href.includes('/lezione/show/') || href.includes('/questionario/');
+        });
+        let links = lessonOrQuiz.length > 0 ? lessonOrQuiz : [];
+        // Fallback sui bottoni "Apri" se non abbiamo trovato href diretti.
         if (links.length === 0) {
-          links = [...document.querySelectorAll('a[href*="/lezione/show/"], a[href*="/questionario/"]')];
+          links = [...document.querySelectorAll('a.btn.btn-sm.btn-primary, a.btn-primary, button.btn-primary')]
+            .filter(a => /apri|inizia|guarda|avvia|visualizza/i.test(a.innerText));
         }
         return links.map(a => {
           const block = (a.closest('tr, .row, li, .card-body, .card') || a.parentElement || a);
           const text = (block.innerText || '');
           const m = text.match(/(\d+[.,]\d+)\s*%/);
           const pct = m ? parseFloat(m[1].replace(',', '.')) : 100;
-          return { href: a.href, pct };
+          const href = a.href || '';
+          const linkText = (a.innerText || '').trim();
+          const kind = /\/lezione\/show\//.test(href) ? 'lezione' : (/\/questionario\//.test(href) ? 'questionario' : 'altro');
+          return { href, text: text.slice(0, 120), linkText, kind, pct };
         });
       });
+      const lessonCount = scoredLinks.filter(l => l.kind === 'lezione').length;
+      const quizCount = scoredLinks.filter(l => l.kind === 'questionario').length;
+      log(`Trovati ${scoredLinks.length} link nel corso (${lessonCount} lezioni, ${quizCount} quiz): ${JSON.stringify(scoredLinks)}`);
+      if (scoredLinks.length === 0) {
+        log('ATTENZIONE: nessun link lezione/questionario trovato. Salvo dump HTML per analisi.');
+        await monitor.recordError(page, new Error('No lesson/quiz links found'), 'courseParsing');
+      }
     } catch (e) {
       log(`Errore parsing link: ${e.message}`);
       await page.waitForTimeout(2000);
       continue;
     }
 
-    const availableLinks = scoredLinks.filter(l => !emptyUrls.has(l.href)).sort((x, y) => x.pct - y.pct);
+    // Rileva corsi PDF-only guardando il DOM globale: utile quando il corso apre una
+    // pagina informativa con solo link "Scarica il PDF" e nessuna lezione/quiz.
+    const pageHasPdfOnly = await page.evaluate(() => {
+      const anchors = [...document.querySelectorAll('a')];
+      const hasLessonOrQuiz = anchors.some(a => {
+        const h = a.href || '';
+        return h.includes('/lezione/show/') || h.includes('/questionario/');
+      });
+      if (hasLessonOrQuiz) return false;
+      return anchors.some(a => /scarica\s+il\s+pdf|\.pdf|data:application\/pdf/i.test((a.href || '') + ' ' + (a.innerText || '')));
+    });
+    const hasLessonsOrQuizzes = scoredLinks.some(l => l.kind === 'lezione' || l.kind === 'questionario');
+    if ((!hasLessonsOrQuizzes && pageHasPdfOnly) || (scoredLinks.length === 0 && pageHasPdfOnly)) {
+      log(`Corso ${courseUrl} contiene solo PDF (nessuna lezione/video/quiz). Lo marco come completato.`);
+      courseState.markCourseDone(ROOT, state, courseUrl);
+      monitor.update({ phase: 'done', courseStateSummary: courseState.summarize(state) });
+      return;
+    }
+
+    const c = courseState.getCourse(state, courseUrl);
+    const doneLessons = Array.isArray(c.completedLessons) ? c.completedLessons : [];
+    const availableLinks = scoredLinks
+      .filter(l => !emptyUrls.has(l.href) && !doneLessons.includes(l.href))
+      .sort((x, y) => x.pct - y.pct);
     const nextHref = (availableLinks.length > 0 && availableLinks[0].pct < 100) ? availableLinks[0].href : null;
 
     if (!nextHref) {
@@ -227,13 +315,33 @@ async function runCourse(page, courseUrl, sessionState) {
         });
         if (quizLink) {
           await page.goto(quizLink);
-          const solved = await solveQuizWrapper(page);
-          if (solved) {
-            log(`Quiz finale di ${courseUrl} risolto/completato.`);
+          const quizResult = await solveQuizWrapper(page, courseUrl);
+
+          if (quizResult.passed) {
+            log(`Quiz finale di ${courseUrl} superato.`);
+            courseState.markCourseDone(ROOT, state, courseUrl);
             saveSession({ courseUrl, phase: 'quiz_done' });
-            monitor.update({ phase: 'done' });
+            monitor.update({ phase: 'done', courseStateSummary: courseState.summarize(state) });
             return;
           }
+
+          // Quiz non superato: il wrapper ha già catturato le domande in data/need_answer.json.
+          // Segnalo il corso come "need_help" e passo al prossimo corso. L'AI/utente leggerà
+          // need_answer.json, aggiungerà le risposte a known_answers.json e riavvierà.
+          if (quizResult.outcome === 'need_help' || quizResult.outcome === 'failed' || quizResult.outcome === 'unknown') {
+            courseState.incrementQuizAttempt(ROOT, state, courseUrl, quizResult.resultText);
+            courseState.markCourseNeedHelp(ROOT, state, courseUrl, quizResult.reason || 'quiz non superato');
+            const needAnswerPath = path.join(ROOT, 'data', 'need_answer.json');
+            const needAnswerSaved = fs.existsSync(needAnswerPath);
+            if (needAnswerSaved) {
+              log(`Quiz finale di ${courseUrl} non superato (${quizResult.resultText}). Corso segnato come 'need_help'; domande salvate in data/need_answer.json. Passo al prossimo corso.`);
+            } else {
+              log(`Quiz finale di ${courseUrl} non superato (${quizResult.resultText}). Corso segnato come 'need_help'. ATTENZIONE: non sono riuscito a catturare le domande in data/need_answer.json; sarà necessario un intervento manuale/AI.`);
+            }
+            monitor.update({ phase: 'need_help', courseUrl, lastQuizResult: quizResult.resultText, courseStateSummary: courseState.summarize(state) });
+            return;
+          }
+
           continue;
         }
       } catch (e) {
@@ -242,8 +350,9 @@ async function runCourse(page, courseUrl, sessionState) {
       }
 
       log(`Corso ${courseUrl} TERMINATO.`);
+      courseState.markCourseDone(ROOT, state, courseUrl);
       saveSession({ courseUrl, phase: 'done' });
-      monitor.update({ phase: 'done' });
+      monitor.update({ phase: 'done', courseStateSummary: courseState.summarize(state) });
       return;
     }
 
@@ -274,7 +383,7 @@ async function runCourse(page, courseUrl, sessionState) {
       if (startUrl) {
         emptyUrls.clear();
         await page.goto(startUrl, { waitUntil: 'networkidle' });
-        await solveQuizWrapper(page);
+        await solveQuizWrapper(page, courseUrl);
       } else {
         emptyUrls.add(nextHref);
       }
@@ -285,7 +394,7 @@ async function runCourse(page, courseUrl, sessionState) {
     if (isQuiz) {
       monitor.update({ phase: 'quiz', lessonUrl: nextHref });
       emptyUrls.clear();
-      await solveQuizWrapper(page);
+      await solveQuizWrapper(page, courseUrl);
       continue;
     }
 
@@ -294,6 +403,7 @@ async function runCourse(page, courseUrl, sessionState) {
       monitor.update({ phase: 'video', lessonUrl: nextHref });
       emptyUrls.clear();
       await watchVideo(page, log, monitor);
+      courseState.addCompletedLesson(ROOT, state, courseUrl, nextHref);
       continue;
     }
 
@@ -313,6 +423,11 @@ async function runAutoplay() {
   log('Orario configurato:', describeSchedule());
   log('IGNORE_HOURS:', IGNORE_HOURS);
   log('========================================');
+
+  const state = courseState.readState(ROOT);
+  const initialSummary = courseState.summarize(state);
+  log(`Stato corsi caricato: ${JSON.stringify(initialSummary)}`);
+  monitor.update({ courseStateSummary: initialSummary });
 
   while (outerRetries < MAX_OUTER_RETRIES) {
     outerRetries++;
@@ -344,9 +459,6 @@ async function runAutoplay() {
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
       });
 
-      // Login con ritentativi: una pagina di login al primo tentativo può essere transitoria
-      // (redirect lento o token rate-limited momentaneamente) e NON significa link invalido.
-      // Verifichiamo l'accesso caricando la dashboard e ritentiamo prima di concludere.
       log('Sincronizzazione Login...');
       const MAX_LOGIN_ATTEMPTS = 3;
       let loggedIn = false;
@@ -359,7 +471,6 @@ async function runAutoplay() {
             await page.waitForTimeout(2000);
             attempts++;
           }
-          // Verifica reale dell'accesso: la dashboard non deve essere la pagina di login.
           await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
           await page.waitForTimeout(2500);
           if (await isLoginPage(page)) {
@@ -380,18 +491,16 @@ async function runAutoplay() {
         throw err;
       }
 
-      // Salva stato storage dopo login
       try {
         await ctx.storageState({ path: STATE_FILE });
       } catch (e) {
         log('Impossibile salvare storage state:', e.message);
       }
 
-      // Scoperta automatica corsi dalla dashboard (se non configurati in config.json)
       async function discoverCourses() {
         if (Array.isArray(config.courseUrls) && config.courseUrls.length > 0) {
           log('Corsi configurati manualmente in config.json.');
-          return config.courseUrls;
+          return config.courseUrls.filter(url => !courseState.isCourseDoneOrNeedHelp(state, url));
         }
         log('Scoperta automatica corsi dalla dashboard...');
         try {
@@ -408,16 +517,19 @@ async function runAutoplay() {
                 return true;
               });
           });
-          if (links.length === 0) {
-            // Distingue "sessione scaduta" (pagina login) da "account senza corsi assegnati".
+          const fresh = links.filter(url => !courseState.isCourseDoneOrNeedHelp(state, url));
+          if (fresh.length === 0 && links.length > 0) {
+            log('Tutti i corsi scoperti risultano completati o bloccati.');
+          }
+          if (fresh.length === 0) {
             if (await isLoginPage(page)) {
               throw new AutologinError('La dashboard mostra la pagina di login: autologin non valido o scaduto. Aggiorna il link in config.json.');
             }
-            log('Nessun corso trovato in dashboard (login valido ma nessun corso assegnato/visibile). Verifica i permessi dell\'account.');
+            log('Nessun corso attivo trovato in dashboard.');
             return [];
           }
-          log(`Trovati ${links.length} corsi: ${links.join(', ')}`);
-          return links;
+          log(`Trovati ${fresh.length} corsi attivi su ${links.length} totali.`);
+          return fresh;
         } catch (e) {
           if (e instanceof AutologinError) throw e;
           log(`Errore scoperta corsi: ${e.message}`);
@@ -427,13 +539,13 @@ async function runAutoplay() {
 
       let courseUrls = await discoverCourses();
       if (courseUrls.length === 0) {
+        if (courseState.allDoneOrNeedHelp(state, Object.keys(state))) {
+          throw new AllCoursesNeedHelpExit('Tutti i corsi sono completati o bloccati. Serve intervento manuale per i corsi bloccati.');
+        }
         throw new Error('Nessun corso disponibile dopo autologin. Verificare il link autologin e i permessi account.');
       }
 
-      // Loop corsi
-      // sessionState è condiviso tra i corsi della stessa sessione browser per contare i
-      // "drop" di sessione (cadute al login) e fermarsi prima di entrare in loop infiniti.
-      const sessionState = { loginDrops: 0, maxLoginDrops: 4 };
+      const sessionState = { loginDrops: 0, maxLoginDrops: MAX_LOGIN_DROPS };
       let lastHourCheck = 0;
       while (true) {
         if (!IGNORE_HOURS && Date.now() - lastHourCheck > CHECK_INTERVAL_MS) {
@@ -447,10 +559,20 @@ async function runAutoplay() {
           }
         }
 
+        let worked = false;
         for (const courseUrl of courseUrls) {
           log(`Controllo corso: ${courseUrl}`);
-          await runCourse(page, courseUrl, sessionState);
+          await runCourse(page, courseUrl, sessionState, state);
+          worked = true;
         }
+
+        // Riscopri corsi: potrebbero esserne stati aggiunti di nuovi, o lo stato potrebbe cambiare.
+        courseUrls = await discoverCourses();
+        monitor.update({ courseStateSummary: courseState.summarize(state) });
+        if (courseUrls.length === 0) {
+          throw new AllCoursesNeedHelpExit('Tutti i corsi risultano completati o bloccati.');
+        }
+
         log('Tutti i corsi controllati. Riparto dal primo tra 30 secondi...');
         await page.waitForTimeout(30000);
       }
@@ -460,21 +582,22 @@ async function runAutoplay() {
         monitor.update({ running: false, phase: 'off_hours' });
         process.exit(0);
       }
-      // Autologin non valido/scaduto: inutile ritentare. Esci subito con messaggio chiaro
-      // così il supervisore AID/lo status comunica al collega di aggiornare il link.
       if (e instanceof AutologinError || e.code === 'AUTOLOGIN_INVALID') {
         log('AUTOLOGIN NON VALIDO:', e.message);
         monitor.update({ running: false, phase: 'autologin_invalid', lastError: e.message });
         if (browser) { try { await browser.close(); } catch (_) {} }
         process.exit(3);
       }
-      // Sessione caduta a metà: scarta lo storage state salvato (può essere la causa) e lascia
-      // che il loop esterno riavvii il browser con un autologin pulito.
+      if (e instanceof AllCoursesNeedHelpExit || e.code === 'ALL_NEED_HELP') {
+        log('TUTTI I CORSI COMPLETATI O IN ATTESA DI AIUTO:', e.message);
+        monitor.update({ running: false, phase: 'need_help', lastError: e.message, courseStateSummary: courseState.summarize(state) });
+        if (browser) { try { await browser.close(); } catch (_) {} }
+        process.exit(0);
+      }
       if (e instanceof SessionError || e.code === 'SESSION_LOST') {
         log('SESSIONE PERSA:', e.message);
         try { if (fs.existsSync(STATE_FILE)) fs.unlinkSync(STATE_FILE); } catch (_) {}
         monitor.update({ phase: 'session_lost', lastError: e.message });
-        // non esce: il blocco finally riavvia il browser (fino a MAX_OUTER_RETRIES)
       } else {
         log('ERRORE CRITICO:', e);
         await monitor.recordError(null, e, 'outer');
@@ -494,7 +617,6 @@ async function runAutoplay() {
   log('Tentativi esauriti. Arresto.');
   monitor.update({ running: false, phase: 'stopped' });
   process.exit(1);
-
 }
 
 runAutoplay().catch(async (e) => {

@@ -98,7 +98,9 @@ if [ -f logs/status.json ]; then
       if (s.lessonTitle) lines.push(['Titolo', s.lessonTitle]);
       if (s.videoProgress) lines.push(['Video', s.videoProgress]);
       if (s.lastQuizResult) lines.push(['Esito quiz', s.lastQuizResult]);
+      if (s.courseStateSummary) lines.push(['Corsi', `done: ${s.courseStateSummary.done || 0}, need_help: ${s.courseStateSummary.needHelp || 0}, in_progress: ${s.courseStateSummary.inProgress || 0}`]);
       if (s.phase === 'autologin_invalid') lines.push(['ATTENZIONE', 'Autologin non valido/scaduto: aggiorna il link in config.json']);
+      if (s.phase === 'need_help') lines.push(['ATTENZIONE', 'Un o più corsi richiedono intervento: leggi data/need_answer.json, aggiungi risposte a data/known_answers.json, poi riavvia.']);
       if (s.phase === 'session_lost') lines.push(['ATTENZIONE', 'Sessione instabile: l\'accesso cade dopo il login (riavvio in corso; se persiste, link scaduto)']);
       if (s.lastError) lines.push(['Ultimo errore', s.lastError]);
       if (s.running !== undefined) lines.push(['Running', s.running ? 'sì' : 'no']);

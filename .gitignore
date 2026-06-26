@@ -4,6 +4,7 @@ node_modules
 logs/
 archive/
 backups/
+debug/
 debug/screenshots/*.png
 debug/dumps/*.html
 debug/exploration/
@@ -12,6 +13,7 @@ data/session_state.json
 data/need_answer.json
 data/storage_state.json
 data/pending_quiz_answers.json
+data/course_state.json
 data/extracted_full.json
 data/summary_dump.json
 data/quiz-domande.txt

@@ -59,6 +59,17 @@ Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
      - "non fare nulla" → non avviare nulla.
 4. Se il processo è attivo ma l'ultimo log/heartbeat è vecchio (più di 2 minuti) o c'è un errore, esegui `./stop.sh` poi `./start.sh` (o `--ignore-hours` se fuori orario e l'utente vuole forzare).
 5. **Autologin non valido/scaduto**: se `logs/status.json` ha `phase: "autologin_invalid"` (o vedi nel log "AUTOLOGIN NON VALIDO"), il link non autentica più. NON riavviare in loop: avvisa l'utente che il link autologin è scaduto/errato e chiedigli il link aggiornato; quando te lo fornisce, aggiorna tu `config.json` con il tool Edit e riavvia con `./start.sh`.
+6. **Quiz non superato / corso in `need_help`**: se `logs/status.json` mostra `phase: "need_help"` o lo stesso `courseUrl` con lo stesso `lastQuizResult` (es. `non superato (24/30)`) ripetuto, lo script ha già automaticamente:
+   - catturato le domande del quiz in `data/need_answer.json`;
+   - segnato il corso come `need_help` in `data/course_state.json`;
+   - passato al prossimo corso (se ce n'è uno).
+   Non serve fermare con `./stop.sh` a meno che l'utente non voglia intervenire subito. Devi invece:
+   1. Leggere `data/need_answer.json`.
+   2. Cercare la risposta corretta (online con `WebSearch`/`WebFetch`, oppure chiedendo all'utente).
+   3. Aggiungerla a `data/known_answers.json` con `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
+   4. Se vuoi far riprovare subito quel corso, cancella il suo stato con `node -e "require('./src/lib/course-state').resetCourse('.', require('./src/lib/course-state').readState('.'), 'URL_CORSO')"`.
+   5. Riavviare con `./start.sh` o `./start.sh --ignore-hours`.
+   Se tutti i corsi sono `done` o `need_help`, l'autoplay esce con codice 0 e `phase: "need_help"`; lo scheduler in `ignore-hours` aspetta 10 minuti prima di riavviare, dando tempo all'AI/utente di intervenire.
 
 ## Orario di lavoro
 
@@ -84,7 +95,7 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 ## Limiti
 
 - Non modificare file al di fuori di `~/gsdcampus-autoplay`.
-- Non cancellare `data/known_answers.json`, `data/storage_state.json` o `data/session_state.json`.
+- Non cancellare `data/known_answers.json`, `data/storage_state.json`, `data/session_state.json` o `data/course_state.json`.
 - Se devi correggere `config.json` (autologin o orari), usa il tool Edit e salva il JSON valido.
 - Non eseguire comandi distruttivi sul sistema.
 - Se lo script richiede una dipendenza mancante, suggerisci `./scripts/setup.sh` oppure eseguilo tu stesso se l'utente lo chiede.
@@ -95,6 +106,7 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 - Se una domanda non è presente in `known_answers.json`, lo script chiede a Ollama (`gemma4:31b-cloud`) la risposta in base alla conoscenza generale del modello.
 - Le risposte date da Ollama vengono salvate in `data/pending_quiz_answers.json`. **Solo se il quiz viene superato**, quelle risposte vengono promosse automaticamente nella banca condivisa `data/known_answers.json` (la banca cresce solo con risposte verificate dall'esito).
 - Se Ollama non riesce a rispondere, lo script si ferma e salva la domanda in `data/need_answer.json`: in quel caso puoi cercare la risposta online, aggiornare `known_answers.json` e riavviare.
+- Quando un quiz finale risulta non superato, lo script salva **tutte** le domande del quiz in `data/need_answer.json` e segnala il corso come `need_help` in `data/course_state.json`, in attesa di intervento AI/utente.
 - Strumenti manutenzione banca risposte: `node scripts/lib/answers-cli.js stats|list|merge` e `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
 
 ## Domande che l'utente può fare
@@ -116,6 +128,7 @@ Sii conciso. Riporta:
 - corso e lezione attuali
 - progresso video (se applicabile)
 - esito ultimo quiz (`lastQuizResult` in `logs/status.json`, se presente)
+- riepilogo corsi (`courseStateSummary` in `logs/status.json`, se presente)
 - ultimo errore (se presente)
 - azione che hai intrapreso
 

@@ -93,8 +93,16 @@ while true; do
   if [[ "$IGNORE_HOURS" = true ]]; then
     log "Avvio autoplay (modalità ignore-hours)..."
     node "$DIR/src/autoplay.js" --ignore-hours 2>&1 | tee -a "$LOG_FILE"
-    log "Autoplay terminato. Riavvio tra 60 secondi..."
-    sleep 60
+    EXIT_CODE=${PIPESTATUS[0]}
+    if [[ "$EXIT_CODE" -eq 0 ]]; then
+      # Uscita pulita: fine turno oppure tutti i corsi completati/in attesa di aiuto (need_help).
+      # Non riavviare subito a vuoto; attendi 10 minuti così l'AI/utente può intervenire.
+      log "Autoplay terminato con codice 0. Riavvio tra 10 minuti (evito loop a vuoto, need_help o fine turno)..."
+      wait_ms 600000
+    else
+      log "Autoplay terminato con codice $EXIT_CODE. Riavvio tra 60 secondi..."
+      sleep 60
+    fi
     continue
   fi
 

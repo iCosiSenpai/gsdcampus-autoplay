@@ -34,7 +34,8 @@ class Monitor {
       lastError: null,
       uptimeSec: 0,
       headless: true,
-      running: true
+      running: true,
+      courseStateSummary: null
     };
     this._tick();
   }

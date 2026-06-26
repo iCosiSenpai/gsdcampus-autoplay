@@ -117,18 +117,19 @@ async function exploreAccount(browser, autologinUrl, summary) {
 
     fs.writeFileSync(path.join(outDir, 'courses.json'), JSON.stringify(courseData, null, 2));
 
-    // 3. Apri il primo corso e analizza la struttura lezioni
-    if (courseData.courses.length > 0) {
-      const first = courseData.courses[0];
+    // 3. Esplora TUTTI i corsi e analizza la struttura lezioni/quiz
+    acct.coursesDetails = [];
+    for (const course of courseData.courses) {
       try {
-        await page.goto(first.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.goto(course.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForTimeout(2500);
-        await dump(page, outDir, 'course_first');
+        await dump(page, outDir, `course_${course.id}`);
 
         const lessonInfo = await page.evaluate(() => {
-          // Tutti i link "azione" della pagina corso, con % nel blocco circostante
+          // Tutti i link "azione" della pagina corso, con % nel blocco circostante.
+          // Non limitiamo il numero: alcuni corsi hanno 60+ lezioni e il quiz potrebbe essere in fondo.
           const links = [...document.querySelectorAll('a.btn, a[href*="/lezione/show/"], a[href*="/questionario/"]')];
-          const items = links.slice(0, 60).map(a => {
+          const items = links.map(a => {
             const block = (a.closest('tr, .row, li, .card, .card-body') || a.parentElement);
             const txt = block ? (block.innerText || '').replace(/\s+/g, ' ').trim() : '';
             const pct = (txt.match(/(\d+[.,]\d+)\s*%/) || [])[1] || null;
@@ -142,51 +143,64 @@ async function exploreAccount(browser, autologinUrl, summary) {
           });
           return items;
         });
-        acct.firstCourseId = first.id;
-        acct.firstCourseLinks = lessonInfo;
-        fs.writeFileSync(path.join(outDir, 'course_first_links.json'), JSON.stringify(lessonInfo, null, 2));
-        console.log(`  primo corso ${first.id}: ${lessonInfo.length} link (lezioni/quiz)`);
 
-        // 4. Apri una lezione video e ispeziona il player
-        const lessonLink = lessonInfo.find(l => l.kind === 'lezione');
-        if (lessonLink) {
-          await page.goto(lessonLink.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
-          await page.waitForTimeout(3000);
-          await dump(page, outDir, 'lesson_sample');
-          const videoInfo = await page.evaluate(() => {
-            const v = document.querySelector('video');
-            return {
-              hasVideo: !!v,
-              videoTag: v ? { class: v.className, src: v.currentSrc || v.src || null, duration: v.duration, hasControls: v.controls } : null,
-              iframeCount: document.querySelectorAll('iframe').length,
-              iframeSrcs: [...document.querySelectorAll('iframe')].map(f => f.src).slice(0, 5)
-            };
-          });
-          acct.videoSample = videoInfo;
-          console.log(`  lezione campione: video=${videoInfo.hasVideo} iframe=${videoInfo.iframeCount}`);
+        const courseDetail = {
+          id: course.id,
+          href: course.href,
+          totalLinks: lessonInfo.length,
+          lessonCount: lessonInfo.filter(l => l.kind === 'lezione').length,
+          quizCount: lessonInfo.filter(l => l.kind === 'questionario').length,
+          incompleteLessons: lessonInfo.filter(l => l.kind === 'lezione' && (!l.pct || parseFloat(l.pct.replace(',', '.')) < 100)).map(l => ({ href: l.href, pct: l.pct })),
+          links: lessonInfo
+        };
+        acct.coursesDetails.push(courseDetail);
+        fs.writeFileSync(path.join(outDir, `course_${course.id}_links.json`), JSON.stringify(lessonInfo, null, 2));
+        console.log(`  corso ${course.id}: ${lessonInfo.length} link (${courseDetail.lessonCount} lezioni, ${courseDetail.quizCount} quiz)`);
+
+        // 4. Per il primo corso con lezioni, apri una lezione video e ispeziona il player (una sola volta per account)
+        if (!acct.videoSample) {
+          const lessonLink = lessonInfo.find(l => l.kind === 'lezione');
+          if (lessonLink) {
+            await page.goto(lessonLink.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForTimeout(3000);
+            await dump(page, outDir, 'lesson_sample');
+            const videoInfo = await page.evaluate(() => {
+              const v = document.querySelector('video');
+              return {
+                hasVideo: !!v,
+                videoTag: v ? { class: v.className, src: v.currentSrc || v.src || null, duration: v.duration, hasControls: v.controls } : null,
+                iframeCount: document.querySelectorAll('iframe').length,
+                iframeSrcs: [...document.querySelectorAll('iframe')].map(f => f.src).slice(0, 5)
+              };
+            });
+            acct.videoSample = videoInfo;
+            console.log(`  lezione campione: video=${videoInfo.hasVideo} iframe=${videoInfo.iframeCount}`);
+          }
         }
 
-        // 5. Apri un quiz e raccogli le domande
-        const quizLink = lessonInfo.find(l => l.kind === 'questionario');
-        if (quizLink) {
-          await page.goto(quizLink.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
-          await page.waitForTimeout(2500);
-          await dump(page, outDir, 'quiz_dashboard');
-          const quizMeta = await page.evaluate(() => {
-            const startBtn = [...document.querySelectorAll('a.btn-primary, button.btn-primary')]
-              .find(b => /avvia compilazione/i.test(b.innerText || ''));
-            return {
-              startBtnFound: !!startBtn,
-              startHref: startBtn ? startBtn.href || null : null,
-              optionClassSample: [...document.querySelectorAll('.opzione-risposta')].length
-            };
-          });
-          acct.quizMeta = quizMeta;
-          console.log(`  quiz: avvia-compilazione=${quizMeta.startBtnFound}`);
+        // 5. Apri un quiz e raccogli metadati (una sola volta per account)
+        if (!acct.quizMeta) {
+          const quizLink = lessonInfo.find(l => l.kind === 'questionario');
+          if (quizLink) {
+            await page.goto(quizLink.href, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            await page.waitForTimeout(2500);
+            await dump(page, outDir, 'quiz_dashboard');
+            const quizMeta = await page.evaluate(() => {
+              const startBtn = [...document.querySelectorAll('a.btn-primary, button.btn-primary')]
+                .find(b => /avvia compilazione/i.test(b.innerText || ''));
+              return {
+                startBtnFound: !!startBtn,
+                startHref: startBtn ? startBtn.href || null : null,
+                optionClassSample: [...document.querySelectorAll('.opzione-risposta')].length
+              };
+            });
+            acct.quizMeta = quizMeta;
+            console.log(`  quiz: avvia-compilazione=${quizMeta.startBtnFound}`);
+          }
         }
       } catch (e) {
-        acct.errors.push('analisi corso: ' + e.message);
-        console.log(`  ! errore analisi corso: ${e.message}`);
+        acct.errors.push(`analisi corso ${course.id}: ${e.message}`);
+        console.log(`  ! errore analisi corso ${course.id}: ${e.message}`);
       }
     }
   } catch (e) {
