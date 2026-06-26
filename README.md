@@ -24,10 +24,13 @@ Rilanciandolo su un'installazione esistente compare un menu:
 2. **Cambia link autologin/orari** — reinserisci accesso e orari, poi avvia.
 3. **Reinstallazione pulita** — riallinea il codice e reinstalla tutte le dipendenze.
 4. **Solo avvia** — apre l'AI senza modificare nulla.
-5. **Disinstalla** — rimuove tutto (con conferma).
+5. **Disinstalla** — rimuove dipendenze, browser Playwright, Ollama, Claude Code, log e (opzionale) la cartella del progetto; ripulisce anche la riga `PATH` che lo script aveva aggiunto a `.zshrc`/`.bash_profile`.
 6. **Annulla**.
 
 In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e orari resta al suo posto.
+
+> Puoi avviare la disinstallazione anche da dentro la cartella del progetto con:  
+> `cd ~/gsdcampus-autoplay && ./scripts/setup.sh --uninstall`
 
 > **Nota sull'aggiornamento:** lo script confronta `package.json` e `package-lock.json` con lo stato di `node_modules`. Se sono cambiati (per esempio dopo un aggiornamento di Playwright), esegue automaticamente `npm install` e, se serve, reinstalla il browser Chromium. Se invece sono già allineati, salta tutto e parte subito.
 

@@ -75,7 +75,20 @@ rm -f "$DIR/.autoplay_pid"
 rm -f "$DIR/.ollama_pid"
 rm -f "$DIR/.scheduler_stop"
 
-# 7. Opzionale: rimozione cartella progetto
+# 7. Rimuovi la riga PATH che lo script aveva aggiunto ai file di configurazione
+#    dello shell, per non lasciare tracce (non tocca altre righe PATH).
+echo "-> Rimozione riga PATH aggiunta da setup.sh..."
+local_path_line='export PATH="$HOME/.local/bin:$PATH"'
+for f in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+  if [ -f "$f" ] && grep -qF "$local_path_line" "$f" 2>/dev/null; then
+    human="${f/#$HOME/~}"
+    echo "   Rimuovo da $human"
+    grep -vF "$local_path_line" "$f" > "$f.tmp"
+    mv "$f.tmp" "$f"
+  fi
+done
+
+# 8. Opzionale: rimozione cartella progetto
 echo ""
 read -q "REPLY?Rimuovere anche la cartella del progetto $DIR? [y/N] "
 echo ""

@@ -4,6 +4,11 @@ set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
+# Claude Code CLI installa il binario in ~/.local/bin; assicuriamo che sia
+# subito disponibile nel PATH di questo script, anche negli shell non interattivi
+# che non caricano .zshrc.
+export PATH="$HOME/.local/bin:$PATH"
+
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 
 # Colori per output interattivo
@@ -16,14 +21,21 @@ NC='\033[0m' # No Color
 
 AUTO_YES=false
 FORCE_UPDATE=false
+UNINSTALL=false
 
 # === Gestione argomenti (ordine libero) ===
 for arg in "$@"; do
   case "$arg" in
     --yes) AUTO_YES=true ;;
     --force-update) FORCE_UPDATE=true ;;
+    --uninstall) UNINSTALL=true ;;
   esac
 done
+
+# Modalità disinstallazione: esci subito dallo script di setup e passa a uninstall.sh
+if [ "$UNINSTALL" = true ]; then
+  exec "$DIR/scripts/uninstall.sh"
+fi
 
 info() {
   echo -e "${BLUE}${BOLD}[INFO]${NC} $1"
@@ -40,6 +52,22 @@ err() {
 step() {
   echo ""
   echo -e "${BOLD}▶ $1${NC}"
+}
+
+# Claude Code CLI installa in ~/.local/bin. Negli shell non interattivi .zshrc
+# non viene letto, quindi assicuriamo il PATH sia attivo qui e persistito nei
+# principali file di configurazione dello shell (zsh e bash).
+ensure_local_bin_in_path() {
+  export PATH="$HOME/.local/bin:$PATH"
+  local line='export PATH="$HOME/.local/bin:$PATH"'
+  local f human
+  for f in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+    if [ -f "$f" ] && ! grep -qF "$line" "$f" 2>/dev/null; then
+      human="${f/#$HOME/~}"
+      info "Aggiunta ~/.local/bin al PATH in $human"
+      echo "$line" >> "$f"
+    fi
+  done
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -694,19 +722,12 @@ fi
 
 # 7. Claude Code CLI
 step "7/7 - Claude Code CLI"
+ensure_local_bin_in_path
 if ! command -v claude &>/dev/null; then
   info "Claude Code CLI non trovato. Installazione in corso..."
   curl -fsSL https://claude.ai/install.sh | bash
+  ensure_local_bin_in_path
 fi
-
-# Assicurarsi che ~/.local/bin sia nel PATH in .zshrc e nel processo corrente
-if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-  info "Aggiunta ~/.local/bin al PATH in .zshrc..."
-  if [ -f "$HOME/.zshrc" ] && ! grep -qE 'export PATH=.*\$HOME/\.local/bin' "$HOME/.zshrc" 2>/dev/null; then
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc"
-  fi
-fi
-export PATH="$HOME/.local/bin:$PATH"
 
 if command -v claude &>/dev/null; then
   ok "Claude Code CLI pronto: $(claude --version 2>/dev/null | head -1)."
