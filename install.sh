@@ -46,6 +46,11 @@ echo "============================================"
 printf "${BOLD}  GSD Campus Autopilot — Installer${NC}\n"
 echo "============================================"
 echo ""
+echo -e "${BOLD}Comando principale:${NC}"
+echo "  curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash"
+echo ""
+echo "Questo comando vale sempre: installa, aggiorna il codice e, solo se necessario, le dipendenze."
+echo ""
 
 # 1. git
 if ! command -v git >/dev/null 2>&1; then
@@ -124,6 +129,16 @@ chmod +x ./scripts/*.sh 2>/dev/null || true
 case "$MODE" in
   update)
     update_repo
+    # Dopo l'aggiornamento del codice, controlla se anche le dipendenze sono allineate.
+    # Se package.json/package-lock.json sono cambiati, setup.sh le aggiornerà in modo
+    # automatico e solo se necessario.
+    if [ -f "$TARGET/scripts/check-requirements.sh" ] && ! "$TARGET/scripts/check-requirements.sh" >/dev/null 2>&1; then
+      info "Dipendenze da aggiornare dopo il pull. Avvio setup condizionale..."
+      sudo -v
+      "$TARGET/scripts/setup.sh" --yes
+    else
+      ok "Codice e dipendenze già allineati."
+    fi
     ;;
   reconfig)
     update_repo

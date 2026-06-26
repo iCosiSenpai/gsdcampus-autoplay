@@ -24,6 +24,8 @@ PROMPT-per-altra-AI.md
 .ollama_pid
 .scheduler_stop
 .supervisor_prompt.txt
+# stato hash dipendenze (rigenerato localmente da setup.sh)
+.package_hash
 .claude/
 .claude/plan.md
 

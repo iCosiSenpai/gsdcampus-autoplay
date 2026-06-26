@@ -42,6 +42,37 @@ step() {
   echo -e "${BOLD}▶ $1${NC}"
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers per aggiornamento condizionale delle dipendenze
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Calcola un hash stabile di package.json + package-lock.json.
+# Usato per capire se è necessario rieseguire npm install.
+calc_package_hash() {
+  if command -v sha256sum &>/dev/null; then
+    (sha256sum "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null || true) | sha256sum | awk '{print $1}'
+  elif command -v shasum &>/dev/null; then
+    (shasum -a 256 "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null || true) | shasum -a 256 | awk '{print $1}'
+  else
+    # Fallback per macOS senza shasum (improbabile): nome, dimensione e mtime.
+    stat -f "%N%z%m" "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null | md5
+  fi
+}
+
+# Salva l'hash attuale in .package_hash
+save_package_hash() {
+  calc_package_hash > "$DIR/.package_hash"
+}
+
+# True se package.json/package-lock.json sono cambiati rispetto all'ultimo hash salvato.
+package_hash_changed() {
+  [ ! -f "$DIR/.package_hash" ] && return 0
+  local current saved
+  current=$(calc_package_hash)
+  saved=$(cat "$DIR/.package_hash" 2>/dev/null || echo "")
+  [ "$current" != "$saved" ]
+}
+
 print_header() {
   echo ""
   echo "============================================"
@@ -578,34 +609,53 @@ else
   ok "Homebrew già installato: $(brew --version | head -1). Salto."
 fi
 
-# 2. Node.js
+# 2. Node.js (richiesto >= 18)
 step "2/7 - Node.js"
+NODE_MIN_MAJOR=18
 if command -v node &>/dev/null; then
-  ok "Node.js già installato: $(node -v). Salto."
+  NODE_MAJOR=$(node -v | sed 's/^v\([0-9]*\).*/\1/')
+  if [ "$NODE_MAJOR" -ge "$NODE_MIN_MAJOR" ] 2>/dev/null; then
+    ok "Node.js già installato: $(node -v). Salto."
+  else
+    info "Node.js trovato ma versione $NODE_MAJOR < $NODE_MIN_MAJOR. Aggiornamento in corso..."
+    brew install node 2>/dev/null || true
+    ok "Node.js pronto: $(node -v)"
+  fi
 else
   info "Node.js non trovato. Installazione in corso..."
   brew install node 2>/dev/null || true
   ok "Node.js pronto: $(node -v)"
 fi
 
-# 3. npm dependencies
+# 3. npm dependencies — solo se package.json/package-lock.json sono cambiati,
+# node_modules manca, oppure --force-update
 step "3/7 - Dipendenze npm"
-if [ "$FORCE_UPDATE" = true ] || [ ! -d "$DIR/node_modules" ]; then
+NEEDS_NPM=false
+if [ "$FORCE_UPDATE" = true ] || [ ! -d "$DIR/node_modules" ] || package_hash_changed; then
+  NEEDS_NPM=true
+fi
+
+if [ "$NEEDS_NPM" = true ]; then
   info "Installazione/aggiornamento dipendenze..."
   npm install
   ok "Dipendenze npm aggiornate."
 else
-  ok "Dipendenze npm già presenti. Salto."
+  ok "Dipendenze npm già aggiornate. Salto."
 fi
 
-# 4. Playwright browsers / Chrome
+# 4. Playwright browsers / Chrome — solo se necessario
 step "4/7 - Browser per Playwright"
-if [ "$FORCE_UPDATE" = true ] || [ ! -d "$HOME/Library/Caches/ms-playwright" ]; then
+if [ "$FORCE_UPDATE" = true ] || [ "$NEEDS_NPM" = true ] || [ ! -d "$HOME/Library/Caches/ms-playwright" ]; then
   info "Installazione/aggiornamento Chromium..."
   npx playwright install chromium
   ok "Browser Playwright pronto."
 else
   ok "Browser Playwright già presente. Salto."
+fi
+
+# Salva l'hash aggiornato solo se abbiamo toccato le dipendenze o se mancava
+if [ "$FORCE_UPDATE" = true ] || [ "$NEEDS_NPM" = true ] || [ ! -f "$DIR/.package_hash" ]; then
+  save_package_hash
 fi
 
 # 5. Ollama

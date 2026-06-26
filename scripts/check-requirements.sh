@@ -15,6 +15,21 @@ log_ok() {
   echo "✅ OK: $1"
 }
 
+# Verifica se package.json/package-lock.json sono allineati a node_modules
+package_hash_ok() {
+  local hash_file="$DIR/.package_hash"
+  [ -f "$hash_file" ] || return 1
+  local current=""
+  if command -v sha256sum &>/dev/null; then
+    current=$( (sha256sum "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null || true) | sha256sum | awk '{print $1}')
+  elif command -v shasum &>/dev/null; then
+    current=$( (shasum -a 256 "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null || true) | shasum -a 256 | awk '{print $1}')
+  else
+    current=$(stat -f "%N%z%m" "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null | md5)
+  fi
+  [ "$current" = "$(cat "$hash_file" 2>/dev/null)" ]
+}
+
 # 1. Homebrew (opzionale, serve per node/ollama su alcuni sistemi)
 if command -v brew &>/dev/null; then
   log_ok "Homebrew ($(brew --version | head -1))"
@@ -24,16 +39,23 @@ fi
 
 # 2. Node.js / npm
 if command -v node &>/dev/null; then
-  log_ok "Node ($(node -v))"
+  NODE_MAJOR=$(node -v | sed 's/^v\([0-9]*\).*/\1/')
+  if [ "$NODE_MAJOR" -ge 18 ] 2>/dev/null; then
+    log_ok "Node ($(node -v))"
+  else
+    log_missing "Node.js >= 18 (versione attuale: $(node -v))"
+  fi
 else
   log_missing "Node.js"
 fi
 
-# 3. npm dependencies (playwright)
-if [ -d "$DIR/node_modules/playwright" ]; then
-  log_ok "Playwright npm package"
+# 3. npm dependencies
+if [ ! -d "$DIR/node_modules" ]; then
+  log_missing "Dipendenze npm (esegui: npm install)"
+elif package_hash_ok; then
+  log_ok "Dipendenze npm allineate"
 else
-  log_missing "Playwright npm package (esegui: npm install)"
+  log_missing "Dipendenze npm obsolete (esegui: npm install o ./scripts/setup.sh)"
 fi
 
 # 4. Chromium / Chrome browser for Playwright

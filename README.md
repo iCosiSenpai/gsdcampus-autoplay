@@ -16,18 +16,20 @@ curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main
 
 È l'unico comando che ti serve e vale per **tutte** le occasioni:
 - **prima installazione** su un Mac nuovo: scarica il progetto in `~/gsdcampus-autoplay`, installa tutti i requisiti e apre l'AI;
-- **aggiornamenti** successivi: riallinea il codice (fix + banca risposte) senza toccare autologin e orari (`config.json`), poi apre l'AI;
+- **aggiornamenti** successivi: scarica fix e banca risposte aggiornate, **verifica le dipendenze e le aggiorna solo se necessario**, senza toccare autologin e orari (`config.json`), poi apre l'AI;
 - **avvio** quotidiano: apre l'AI.
 
 Rilanciandolo su un'installazione esistente compare un menu:
-1. **Aggiorna e avvia** — fix + banca risposte aggiornati, poi apre l'AI (consigliato).
+1. **Aggiorna e avvia** — pull del codice + check/aggiornamento condizionale delle dipendenze, poi apre l'AI (consigliato).
 2. **Cambia link autologin/orari** — reinserisci accesso e orari, poi avvia.
-3. **Reinstallazione pulita** — riallinea il codice e reinstalla le dipendenze.
+3. **Reinstallazione pulita** — riallinea il codice e reinstalla tutte le dipendenze.
 4. **Solo avvia** — apre l'AI senza modificare nulla.
 5. **Disinstalla** — rimuove tutto (con conferma).
 6. **Annulla**.
 
 In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e orari resta al suo posto.
+
+> **Nota sull'aggiornamento:** lo script confronta `package.json` e `package-lock.json` con lo stato di `node_modules`. Se sono cambiati (per esempio dopo un aggiornamento di Playwright), esegue automaticamente `npm install` e, se serve, reinstalla il browser Chromium. Se invece sono già allineati, salta tutto e parte subito.
 
 ## Prima installazione
 
