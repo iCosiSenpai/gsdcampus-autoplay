@@ -147,8 +147,60 @@ async function handleCourseInformativa(page, log) {
   }
 }
 
+// Gestisce il modal "Dichiarazione di fruizione" che appare direttamente sulla
+// pagina /corso/show/XXXX. La piattaforma non registra i progressi delle lezioni
+// (e non sblocca il quiz/attestato) finché l'utente non clicca "Confermo e proseguo".
+async function acceptUsageDeclaration(page, log) {
+  try {
+    const needsAcceptance = await page.evaluate(() => {
+      const bodyText = document.body ? document.body.innerText : '';
+      if (!/Dichiarazione di fruizione|Confermo e proseguo/i.test(bodyText)) return false;
+      const btn = [...document.querySelectorAll('button')].find(b => /confermo e proseguo/i.test(b.innerText));
+      return btn ? { found: true, text: btn.innerText.trim() } : { found: false };
+    }).catch(() => ({ found: false }));
+    if (!needsAcceptance.found) return false;
+    log(`Dichiarazione di fruizione rilevata. Accetto e proseguo...`);
+    const btn = page.locator('button:has-text("Confermo e proseguo")').first();
+    const form = page.locator('#conferma_vincolo_orario_form');
+    const checkboxes = await form.locator('input[type="checkbox"]').all();
+    for (const cb of checkboxes) {
+      await cb.check().catch(() => {});
+    }
+    await btn.click().catch(e => log(`Errore click 'Confermo e proseguo': ${e.message}`));
+    await page.waitForTimeout(4000);
+    log(`Dopo dichiarazione: URL = ${page.url()}`);
+    return true;
+  } catch (e) {
+    log(`Errore accettazione dichiarazione: ${e.message}`);
+    return false;
+  }
+}
+
+// Naviga sulla pagina del corso e restituisce la percentuale di completamento
+// riportata dalla piattaforma per una specifica lezione.
+async function getLessonProgressOnCoursePage(page, courseUrl, lessonHref) {
+  try {
+    await page.goto(courseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(3000);
+    const rows = await page.evaluate(() => {
+      const all = [...document.querySelectorAll('a[href*="/lezione/show/"]')];
+      return all.map(a => {
+        const block = (a.closest('tr, .row, li, .card, .card-body') || a.parentElement);
+        const txt = (block?.innerText || '').replace(/\s+/g, ' ').trim();
+        const m = txt.match(/(\d+[.,]\d+)\s*%/);
+        return { href: a.href, pct: m ? parseFloat(m[1].replace(',', '.')) : null };
+      });
+    });
+    const found = rows.find(r => r.href === lessonHref);
+    return found ? found.pct : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function runCourse(page, courseUrl, sessionState, state) {
   const emptyUrls = new Set();
+  const lessonAttempts = new Map();
   let missingPermissionCount = 0;
   let iter = 0;
 
@@ -172,7 +224,12 @@ async function runCourse(page, courseUrl, sessionState, state) {
       const courseLink = page.locator(`a[href*="/corso/show/${targetId}"]`).first();
       if (await courseLink.isVisible().catch(() => false)) {
         log(`Link corso trovato tramite href per ID ${targetId}. Clicco per entrare...`);
-        await courseLink.click();
+        try {
+          await courseLink.click({ timeout: 10000 });
+        } catch (clickErr) {
+          log(`Click corso non andato a buon fine (${clickErr.message}); provo click forzato.`);
+          await courseLink.click({ force: true, timeout: 10000 }).catch(() => {});
+        }
         await page.waitForTimeout(5000);
       } else {
         log(`Link corso per ID ${targetId} NON trovato in dashboard. Provo navigazione diretta...`);
@@ -223,6 +280,8 @@ async function runCourse(page, courseUrl, sessionState, state) {
 
     // Gestione pagina informativa (privacy/condizioni) che precede alcuni corsi.
     await handleCourseInformativa(page, log);
+    // Gestione modal "Dichiarazione di fruizione" sulla pagina del corso.
+    await acceptUsageDeclaration(page, log);
 
     let scoredLinks = [];
     try {
@@ -283,10 +342,14 @@ async function runCourse(page, courseUrl, sessionState, state) {
 
     const c = courseState.getCourse(state, courseUrl);
     const doneLessons = Array.isArray(c.completedLessons) ? c.completedLessons : [];
+    // Fonte di verità per l'avanzamento è la percentuale mostrata dalla piattaforma.
+    // Se una lezione era stata segnata come completata localmente ma la piattaforma
+    // mostra ancora < 100%, la riprendiamo. emptyUrls serve per saltare temporaneamente
+    // lezioni che non contengono video/quiz riconoscibili.
     const availableLinks = scoredLinks
-      .filter(l => !emptyUrls.has(l.href) && !doneLessons.includes(l.href))
+      .filter(l => l.pct < 100 && !emptyUrls.has(l.href))
       .sort((x, y) => x.pct - y.pct);
-    const nextHref = (availableLinks.length > 0 && availableLinks[0].pct < 100) ? availableLinks[0].href : null;
+    const nextHref = availableLinks.length > 0 ? availableLinks[0].href : null;
 
     if (!nextHref) {
       if (emptyUrls.size > 0) {
@@ -314,7 +377,17 @@ async function runCourse(page, courseUrl, sessionState, state) {
           return a ? a.href : null;
         });
         if (quizLink) {
-          await page.goto(quizLink);
+          // Clicca il link del quiz dalla pagina corso (il goto diretto può perdere la sessione).
+          const quizLocator = page.locator(`a[href="${quizLink}"]`).first();
+          try {
+            await quizLocator.click({ timeout: 10000 });
+          } catch (clickErr) {
+            log(`Click quiz non andato a buon fine (${clickErr.message}); provo click forzato/goto.`);
+            await quizLocator.click({ force: true, timeout: 10000 }).catch(async () => {
+              await page.goto(quizLink);
+            });
+          }
+          await page.waitForTimeout(4000);
           const quizResult = await solveQuizWrapper(page, courseUrl);
 
           if (quizResult.passed) {
@@ -360,11 +433,40 @@ async function runCourse(page, courseUrl, sessionState, state) {
     saveSession({ courseUrl, lessonUrl: nextHref, phase: 'lesson' });
 
     try {
-      await page.goto(nextHref, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(3000);
+      // Clicca il link dalla pagina corso: il goto diretto a /lezione/show/... può
+      // riportare alla pagina di login dopo aver accettato la dichiarazione di fruizione.
+      const lessonLink = page.locator(`a[href="${nextHref}"]`).first();
+      try {
+        await lessonLink.click({ timeout: 10000 });
+      } catch (clickErr) {
+        log(`Click lezione non andato a buon fine (${clickErr.message}); provo click forzato.`);
+        await lessonLink.click({ force: true, timeout: 10000 }).catch(() => {});
+      }
+      await page.waitForTimeout(4000);
     } catch (e) {
-      log(`Errore navigazione: ${e.message}`);
-      await monitor.recordError(page, e, 'navigateLesson');
+      log(`Errore apertura lezione via click: ${e.message}. Provo con goto diretto...`);
+      try {
+        await page.goto(nextHref, { waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(3000);
+      } catch (e2) {
+        log(`Errore navigazione: ${e2.message}`);
+        await monitor.recordError(page, e2, 'navigateLesson');
+        continue;
+      }
+    }
+
+    if (await isLoginPage(page)) {
+      log('Sessione persa durante apertura lezione. Ritento autologin...');
+      sessionState.loginDrops = (sessionState.loginDrops || 0) + 1;
+      if (sessionState.loginDrops >= MAX_LOGIN_DROPS) {
+        throw new SessionError('Troppi login drop durante apertura lezione.');
+      }
+      try {
+        await page.goto(config.autologinUrl, { waitUntil: 'networkidle' });
+        await page.waitForTimeout(5000);
+      } catch (e) {
+        log(`Errore re-login: ${e.message}`);
+      }
       continue;
     }
 
@@ -403,7 +505,23 @@ async function runCourse(page, courseUrl, sessionState, state) {
       monitor.update({ phase: 'video', lessonUrl: nextHref });
       emptyUrls.clear();
       await watchVideo(page, log, monitor);
-      courseState.addCompletedLesson(ROOT, state, courseUrl, nextHref);
+
+      // Verifica che la piattaforma abbia effettivamente registrato il progresso a 100%.
+      const lessonProgress = await getLessonProgressOnCoursePage(page, courseUrl, nextHref);
+      if (lessonProgress !== null && lessonProgress >= 99) {
+        log(`Lezione ${nextHref} verificata al ${lessonProgress}%: completata.`);
+        courseState.addCompletedLesson(ROOT, state, courseUrl, nextHref);
+      } else {
+        const attempts = (lessonAttempts.get(nextHref) || 0) + 1;
+        lessonAttempts.set(nextHref, attempts);
+        log(`Lezione ${nextHref} non risulta completata sulla piattaforma (progresso: ${lessonProgress}%). Tentativo ${attempts}.`);
+        if (attempts >= 3) {
+          courseState.markCourseNeedHelp(ROOT, state, courseUrl, `lezione ${nextHref} bloccata a ${lessonProgress}%`);
+          monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
+          return;
+        }
+        emptyUrls.add(nextHref);
+      }
       continue;
     }
 
