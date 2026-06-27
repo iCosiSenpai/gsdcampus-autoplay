@@ -17,6 +17,7 @@ data/course_state.json
 data/extracted_full.json
 data/summary_dump.json
 data/quiz-domande.txt
+# NOTA: known_answers_public.json è intenzionalmente tracciato da git come banca condivisa
 # dati personali
 config.json
 PROMPT-per-altra-AI.md

@@ -211,6 +211,21 @@ function nextShiftBoundary(date = new Date()) {
   return { nextStart: nextWorkStart(date), nextEnd: nextWorkEnd(date) };
 }
 
+// Ritorna i minuti mancanti alla fine del turno attuale, oppure null se non siamo in orario.
+function minutesUntilShiftEnd(date = new Date()) {
+  const day = date.getDay();
+  if (!WORK_DAYS.includes(day)) return null;
+  const total = date.getHours() * 60 + date.getMinutes();
+  for (const shift of SHIFTS) {
+    const start = shift.startHour * 60 + shift.startMin;
+    const end = shift.endHour * 60 + shift.endMin;
+    if (total >= start && total < end) {
+      return end - total;
+    }
+  }
+  return null;
+}
+
 function msUntil(date) {
   return date ? Math.max(0, date.getTime() - Date.now()) : 0;
 }
@@ -229,6 +244,7 @@ module.exports = {
   nextWorkEnd,
   nextWorkStart,
   msUntil,
+  minutesUntilShiftEnd,
   WORK_DAYS,
   SHIFTS,
 };

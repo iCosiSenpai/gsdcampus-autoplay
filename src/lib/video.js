@@ -33,10 +33,19 @@ async function watchVideo(page, log, monitor) {
       break;
     }
 
-    const status = await page.evaluate(() => {
+    const result = await page.evaluate(() => {
       const v = document.querySelector('video');
-      return v ? { ended: v.ended, t: v.currentTime, d: v.duration } : null;
-    }).catch(() => null);
+      // Cerca una percentuale di avanzamento nel DOM (player custom).
+      const bodyText = document.body ? document.body.innerText : '';
+      const pctMatch = bodyText.match(/(\d{1,3})\s*%/);
+      const pct = pctMatch ? parseInt(pctMatch[1], 10) : null;
+      return {
+        status: v ? { ended: v.ended, t: v.currentTime, d: v.duration } : null,
+        domPct: pct
+      };
+    }).catch(() => ({ status: null, domPct: null }));
+
+    const { status, domPct } = result;
 
     if (!status) {
       log('Video element scomparso, esco.');
@@ -44,11 +53,25 @@ async function watchVideo(page, log, monitor) {
     }
 
     monitor?.update({ phase: 'video', videoProgress: `${formatTime(status.t)} / ${formatTime(status.d)}` });
-    log(`Video: ${formatTime(status.t)} / ${formatTime(status.d)}`);
+    log(`Video: ${formatTime(status.t)} / ${formatTime(status.d)}` + (domPct !== null ? ` (DOM: ${domPct}%)` : ''));
 
-    // Se la durata è nota, considera finito anche quando si arriva a ridosso della fine
-    // (alcuni player non impostano subito v.ended).
+    // Fonte di verità 1: percentuale mostrata dal player nel DOM.
+    if (domPct !== null && domPct >= 99) {
+      log(`Video considerato completato dalla percentuale DOM (${domPct}%).`);
+      finished = true;
+      break;
+    }
+
+    // Fonte di verità 2: currentTime a ridosso della fine.
     if (Number.isFinite(status.d) && status.d > 0 && status.t >= status.d - 1.5) {
+      finished = true;
+      break;
+    }
+
+    // Fonte di verità 3: il video ha avanzato significativamente (almeno 95% della
+    // durata nota) anche se ended non scatta.
+    if (Number.isFinite(status.d) && status.d > 0 && status.t >= status.d * 0.95) {
+      log(`Video al ${(status.t / status.d * 100).toFixed(0)}%: considero completato.`);
       finished = true;
       break;
     }

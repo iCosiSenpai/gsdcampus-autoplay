@@ -2,7 +2,58 @@ const fs = require('fs');
 const path = require('path');
 const { askQuizQuestion } = require('./ollama-quiz');
 
-const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+const tokenize = (s) => normalize(s).split(/\s+/).filter(t => t.length > 2);
+
+// Similarità Jaccard normalizzata tra due stringhe (0..1). Ignora le stop word
+// italiane comuni per concentrarsi sulle parole semanticamente rilevanti.
+function similarity(a, b) {
+  const stopWords = new Set(['che','cui','del','della','dei','delle','il','la','lo','gli','le','un','una','uno','con','per','tra','fra','sul','sulla','su','di','a','da','in','e','o','ma','è','sono','come','non','si']);
+  const tokensA = new Set(tokenize(a).filter(t => !stopWords.has(t)));
+  const tokensB = new Set(tokenize(b).filter(t => !stopWords.has(t)));
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+  const intersection = new Set([...tokensA].filter(x => tokensB.has(x)));
+  const union = new Set([...tokensA, ...tokensB]);
+  return intersection.size / union.size;
+}
+
+// Cerca una risposta nota usando matching esatto, sottostringa e similarità.
+function findKnownAnswer(question, options, knownAnswers) {
+  const normQ = normalize(question);
+  const labels = ['A','B','C','D'];
+  let bestMatch = null;
+  let bestScore = 0;
+
+  for (const [knownQ, knownA] of Object.entries(knownAnswers)) {
+    const normKnownQ = normalize(knownQ);
+    // Match esatto o sottostringa: punteggio alto
+    let score = 0;
+    if (normQ === normKnownQ) {
+      score = 1;
+    } else if (normQ.includes(normKnownQ) || normKnownQ.includes(normQ)) {
+      score = 0.9;
+    } else {
+      score = similarity(question, knownQ);
+    }
+
+    if (score > bestScore) {
+      const normA = normalize(knownA);
+      const optIndex = options.findIndex(o =>
+        normalize(o.text).includes(normA) || normA.includes(normalize(o.text)) || similarity(o.text, knownA) > 0.85
+      );
+      if (optIndex !== -1) {
+        bestScore = score;
+        bestMatch = { question: knownQ, answer: knownA, optionIndex: optIndex, optionText: options[optIndex].text, score };
+      }
+    }
+  }
+
+  // Soglia minima di confidenza per evitare falsi positivi.
+  if (bestScore >= 0.75) {
+    return bestMatch;
+  }
+  return null;
+}
 
 // Promuove nella banca condivisa (known_answers.json) le risposte date in questo quiz,
 // ma solo se il quiz è stato superato.
@@ -220,25 +271,17 @@ async function solveActiveQuestions(page, root, log, monitor) {
       log('Attenzione: known_answers.json non leggibile', e.message);
     }
 
-    const normQ = normalize(q.text);
     let found = false;
     let selectedOptionText = null;
 
-    for (const [knownQ, knownA] of Object.entries(knownAnswers)) {
-      if (normQ.includes(normalize(knownQ)) || normalize(knownQ).includes(normQ)) {
-        const normA = normalize(knownA);
-        const optIndex = q.opts.findIndex(o => normalize(o.text).includes(normA) || normA.includes(normalize(o.text)));
-
-        if (optIndex !== -1) {
-          selectedOptionText = q.opts[optIndex].text;
-          log(`Risposta nota: ${selectedOptionText.slice(0, 50)}...`);
-          await page.locator('.opzione-risposta').nth(optIndex).click();
-          await page.waitForTimeout(500);
-          await clickNextButton(page, log);
-          found = true;
-          break;
-        }
-      }
+    const knownMatch = findKnownAnswer(q.text, q.opts, knownAnswers);
+    if (knownMatch) {
+      selectedOptionText = knownMatch.optionText;
+      log(`Risposta nota (confidenza ${(knownMatch.score * 100).toFixed(0)}%): ${selectedOptionText.slice(0, 50)}...`);
+      await page.locator('.opzione-risposta').nth(knownMatch.optionIndex).click();
+      await page.waitForTimeout(500);
+      await clickNextButton(page, log);
+      found = true;
     }
 
     if (!found) {

@@ -129,6 +129,10 @@ chmod +x ./scripts/*.sh 2>/dev/null || true
 case "$MODE" in
   update)
     update_repo
+    # Aggiorna la banca risposte pubblica (se presente sul repo) con quelle locali.
+    if [ -f "$TARGET/scripts/update-known-answers.sh" ]; then
+      "$TARGET/scripts/update-known-answers.sh" 2>/dev/null || true
+    fi
     # Dopo l'aggiornamento del codice, controlla se anche le dipendenze sono allineate.
     # Se package.json/package-lock.json sono cambiati, setup.sh le aggiornerà in modo
     # automatico e solo se necessario.

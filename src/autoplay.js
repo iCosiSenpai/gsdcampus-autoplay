@@ -6,7 +6,7 @@ const { createLogger } = require('./lib/logger');
 const { Monitor } = require('./lib/monitor');
 const { solveQuiz } = require('./lib/quiz');
 const { watchVideo } = require('./lib/video');
-const { isWorkTime, nextWorkEnd, nextWorkStart, describeSchedule } = require('./lib/schedule');
+const { isWorkTime, nextWorkEnd, nextWorkStart, describeSchedule, minutesUntilShiftEnd } = require('./lib/schedule');
 const courseState = require('./lib/course-state');
 
 const ROOT = path.join(__dirname, '..');
@@ -77,9 +77,66 @@ async function isDashboardLoaded(page) {
   return await page.evaluate(() => {
     const bodyText = document.body ? document.body.innerText : '';
     const hasCourseLinks = document.querySelectorAll('a[href*="/corso/show/"]').length > 0;
-    const hasDashboardMarkers = /i miei corsi|formazione|benvenut|dashboard|corsi disponibili/i.test(bodyText);
+    const hasDashboardMarkers = /i miei corsi|formazione|benvenut|dashboard|corsi disponibili|i miei piani formativi/i.test(bodyText);
     return hasCourseLinks || hasDashboardMarkers;
   }).catch(() => false);
+}
+
+// Gestisce eventuali pagine intermedie post-autologin, come:
+// - scelta utente/ruolo;
+// - accettazione termini/privacy;
+// - pop-up "Continua".
+async function handlePostLoginInterstitial(page, log) {
+  try {
+    const bodyText = await page.evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
+    const currentUrl = page.url();
+
+    // Pop-up o pagina con bottone "Continua", "Accedi", "Conferma", "Prosegui"
+    const proceedSelectors = [
+      'button:has-text("Continua")',
+      'button:has-text("Prosegui")',
+      'button:has-text("Conferma")',
+      'button:has-text("Accedi")',
+      'a:has-text("Continua")',
+      'a:has-text("Prosegui")',
+      'input[type="submit"]'
+    ];
+    for (const sel of proceedSelectors) {
+      const btn = page.locator(sel).first();
+      if (await btn.isVisible().catch(() => false)) {
+        log(`Pagina intermedia rilevata (${currentUrl}). Clicco '${sel}'...`);
+        await btn.click().catch(() => {});
+        await page.waitForTimeout(3000);
+        return true;
+      }
+    }
+
+    // Checkbox di accettazione privacy/termini
+    if (/accetto|termini|privacy|condizioni/i.test(bodyText)) {
+      const checkboxes = await page.locator('input[type="checkbox"]').all();
+      let checked = 0;
+      for (const cb of checkboxes) {
+        try {
+          await cb.check();
+          checked++;
+        } catch (_) {}
+      }
+      if (checked > 0) {
+        log(`Spuntate ${checked} checkbox di accettazione.`);
+        const submitBtn = page.locator('button[type="submit"], button.btn-primary, input[type="submit"]').first();
+        if (await submitBtn.isVisible().catch(() => false)) {
+          await submitBtn.click().catch(() => {});
+          await page.waitForTimeout(3000);
+        }
+        return true;
+      }
+    }
+
+    return false;
+  } catch (e) {
+    log(`Errore gestione pagina intermedia: ${e.message}`);
+    return false;
+  }
 }
 
 function saveSession(state) {
@@ -579,6 +636,22 @@ async function runAutoplay() {
       if (fs.existsSync(STATE_FILE)) {
         ctxOptions.storageState = STATE_FILE;
       }
+      // Pulizia preventiva: lo storage state locale può contenere cookie/sessioni
+      // vecchie che interferiscono con il nuovo autologin. Rimuoviamolo all'inizio
+      // di ogni run in modo che il browser parta pulito. Se il login ha successo,
+      // verrà riscritto con la nuova sessione valida.
+      try {
+        if (fs.existsSync(STATE_FILE)) {
+          fs.unlinkSync(STATE_FILE);
+          log('Storage state precedente rimosso per evitare conflitti di sessione.');
+        }
+        if (fs.existsSync(SESSION_FILE)) {
+          fs.unlinkSync(SESSION_FILE);
+        }
+      } catch (e) {
+        log('Impossibile rimuovere storage/session state precedente:', e.message);
+      }
+
       const ctx = await browser.newContext(ctxOptions);
 
       const page = await ctx.newPage();
@@ -601,14 +674,27 @@ async function runAutoplay() {
             await page.waitForTimeout(2000);
             attempts++;
           }
+          // Gestisci pagine intermedie post-autologin (termini, scelta ruolo, ecc.)
+          await handlePostLoginInterstitial(page, log);
+
           await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'networkidle', timeout: 60000 });
+          await handlePostLoginInterstitial(page, log);
+
           // Attendiamo che il DOM sia stabilizzato e la dashboard sia effettivamente caricata.
-          for (let w = 0; w < 15; w++) {
+          for (let w = 0; w < 30; w++) {
             if (await isDashboardLoaded(page)) break;
             if (await isLoginPage(page)) break;
             await page.waitForTimeout(500);
           }
           await page.waitForTimeout(1000);
+
+          // Test di salute: verifica che la dashboard contenga corsi. Se è vuota ma non è
+          // login, potrebbe esserci un problema di sessione; ritentiamo.
+          const dashboardLinks = await page.evaluate(() =>
+            [...document.querySelectorAll('a[href*="/corso/show/"]')].map(a => a.href)
+          ).catch(() => []);
+          log(`Link corsi rilevati in dashboard: ${dashboardLinks.length}`);
+
           if (await isLoginPage(page)) {
             log(`Login non riuscito al tentativo ${la} (la piattaforma mostra la pagina di login).`);
             await page.waitForTimeout(4000);
@@ -724,15 +810,33 @@ async function runAutoplay() {
 
       const sessionState = { loginDrops: 0, maxLoginDrops: MAX_LOGIN_DROPS };
       let lastHourCheck = 0;
+      let extraTimeUntil = 0; // timestamp entro cui completare il contenuto in corso
       while (true) {
-        if (!IGNORE_HOURS && Date.now() - lastHourCheck > CHECK_INTERVAL_MS) {
-          lastHourCheck = Date.now();
-          if (!isWorkTime()) {
-            const end = nextWorkEnd(new Date());
-            const start = nextWorkStart(new Date());
-            log(`Fuori orario lavorativo. Stop programmato: ${end ? end.toISOString() : 'N/A'}, prossimo avvio: ${start ? start.toISOString() : 'N/A'}`);
-            monitor.update({ phase: 'off_hours', nextStart: start ? start.toISOString() : null, nextEnd: end ? end.toISOString() : null, running: false });
-            throw new OffHoursExit('Fine turno lavorativo');
+        if (!IGNORE_HOURS) {
+          const now = Date.now();
+          if (now - lastHourCheck > CHECK_INTERVAL_MS) {
+            lastHourCheck = now;
+            if (!isWorkTime()) {
+              const end = nextWorkEnd(new Date());
+              const start = nextWorkStart(new Date());
+              // Tolleranza: se il turno è appena finito (meno di 15 min fa) e stavamo
+              // guardando un video o completando una lezione, concediamo extra-time per
+              // terminare il contenuto in corso. Altrimenti ci fermiamo regolarmente.
+              if (end) {
+                const minutesSinceEnd = (now - end.getTime()) / 60000;
+                if (minutesSinceEnd <= 15) {
+                  extraTimeUntil = now + 15 * 60000;
+                  log(`Turno appena terminato. Extra-time attivo fino alle ${new Date(extraTimeUntil).toISOString()} per completare il contenuto in corso.`);
+                }
+              }
+              if (now < extraTimeUntil) {
+                log('Sono fuori orario ma in extra-time per completare il contenuto in corso.');
+              } else {
+                log(`Fuori orario lavorativo. Stop programmato: ${end ? end.toISOString() : 'N/A'}, prossimo avvio: ${start ? start.toISOString() : 'N/A'}`);
+                monitor.update({ phase: 'off_hours', nextStart: start ? start.toISOString() : null, nextEnd: end ? end.toISOString() : null, running: false });
+                throw new OffHoursExit('Fine turno lavorativo');
+              }
+            }
           }
         }
 
