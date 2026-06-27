@@ -73,6 +73,15 @@ async function isLoginPage(page) {
   }).catch(() => false);
 }
 
+async function isDashboardLoaded(page) {
+  return await page.evaluate(() => {
+    const bodyText = document.body ? document.body.innerText : '';
+    const hasCourseLinks = document.querySelectorAll('a[href*="/corso/show/"]').length > 0;
+    const hasDashboardMarkers = /i miei corsi|formazione|benvenut|dashboard|corsi disponibili/i.test(bodyText);
+    return hasCourseLinks || hasDashboardMarkers;
+  }).catch(() => false);
+}
+
 function saveSession(state) {
   try {
     fs.writeFileSync(SESSION_FILE, JSON.stringify({ ...state, savedAt: new Date().toISOString() }, null, 2));
@@ -583,17 +592,31 @@ async function runAutoplay() {
       for (let la = 1; la <= MAX_LOGIN_ATTEMPTS && !loggedIn; la++) {
         try {
           log(`Navigazione verso autologin (tentativo ${la}/${MAX_LOGIN_ATTEMPTS})`);
+          // Pulisci eventuali cookie precedenti del dominio per evitare conflitti con
+          // sessioni vecchie salvate nello storage state.
+          await ctx.clearCookies({ domain: 'tecsial.gsdcampus.it' }).catch(() => {});
           await page.goto(config.autologinUrl, { waitUntil: 'networkidle', timeout: 60000 });
           let attempts = 0;
           while (page.url().includes('autologin') && attempts < 30) {
             await page.waitForTimeout(2000);
             attempts++;
           }
-          await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
-          await page.waitForTimeout(2500);
+          await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'networkidle', timeout: 60000 });
+          // Attendiamo che il DOM sia stabilizzato e la dashboard sia effettivamente caricata.
+          for (let w = 0; w < 15; w++) {
+            if (await isDashboardLoaded(page)) break;
+            if (await isLoginPage(page)) break;
+            await page.waitForTimeout(500);
+          }
+          await page.waitForTimeout(1000);
           if (await isLoginPage(page)) {
             log(`Login non riuscito al tentativo ${la} (la piattaforma mostra la pagina di login).`);
             await page.waitForTimeout(4000);
+            continue;
+          }
+          if (!(await isDashboardLoaded(page))) {
+            log(`Attenzione: la dashboard non sembra caricata al tentativo ${la}. Riprovo.`);
+            await page.waitForTimeout(3000);
             continue;
           }
           loggedIn = true;
@@ -604,6 +627,9 @@ async function runAutoplay() {
         }
       }
       if (!loggedIn) {
+        // Se il login non è riuscito, eliminiamo lo storage state in modo che il
+        // prossimo avvio parta senza cookie vecchi/invalidi.
+        try { if (fs.existsSync(STATE_FILE)) fs.unlinkSync(STATE_FILE); } catch (_) {}
         const err = new AutologinError('Autologin non valido o scaduto: il link non ha effettuato l\'accesso dopo più tentativi. Aggiorna il link autologin in config.json.');
         await monitor.recordError(page, err, 'autologin');
         throw err;
@@ -622,32 +648,65 @@ async function runAutoplay() {
         }
         log('Scoperta automatica corsi dalla dashboard...');
         try {
-          await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
-          await page.waitForTimeout(3000);
-          const links = await page.evaluate(() => {
-            const seen = new Set();
-            return [...document.querySelectorAll('a[href*="/corso/show/"]')]
-              .map(a => a.href)
-              .filter(href => {
-                const id = href.match(/\/corso\/show\/(\d+)/)?.[1];
-                if (!id || seen.has(id)) return false;
-                seen.add(id);
-                return true;
-              });
-          });
-          const fresh = links.filter(url => !courseState.isCourseDoneOrNeedHelp(state, url));
-          if (fresh.length === 0 && links.length > 0) {
-            log('Tutti i corsi scoperti risultano completati o bloccati.');
-          }
-          if (fresh.length === 0) {
+          // Se la dashboard finisce sulla pagina di login, ritenta una volta
+          // l'autologin: può capitare che la sessione cada tra il login iniziale
+          // e la scoperta corsi.
+          for (let dcAttempt = 1; dcAttempt <= 2; dcAttempt++) {
+            await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'networkidle', timeout: 60000 });
+            for (let w = 0; w < 15; w++) {
+              if (await isDashboardLoaded(page)) break;
+              if (await isLoginPage(page)) break;
+              await page.waitForTimeout(500);
+            }
+            await page.waitForTimeout(1000);
+            const links = await page.evaluate(() => {
+              const seen = new Set();
+              return [...document.querySelectorAll('a[href*="/corso/show/"]')]
+                .map(a => a.href)
+                .filter(href => {
+                  const id = href.match(/\/corso\/show\/(\d+)/)?.[1];
+                  if (!id || seen.has(id)) return false;
+                  seen.add(id);
+                  return true;
+                });
+            });
+            const fresh = links.filter(url => !courseState.isCourseDoneOrNeedHelp(state, url));
+            if (fresh.length === 0 && links.length > 0) {
+              log('Tutti i corsi scoperti risultano completati o bloccati.');
+            }
+            if (fresh.length > 0) {
+              log(`Trovati ${fresh.length} corsi attivi su ${links.length} totali.`);
+              return fresh;
+            }
+            if (links.length > 0) {
+              // Corsi trovati ma tutti done/need_help: non è un errore di login.
+              log('Nessun corso attivo trovato in dashboard.');
+              return [];
+            }
             if (await isLoginPage(page)) {
+              if (dcAttempt === 1) {
+                log('Dashboard mostra login durante la scoperta. Ritento autologin...');
+                await ctx.clearCookies({ domain: 'tecsial.gsdcampus.it' }).catch(() => {});
+                await page.goto(config.autologinUrl, { waitUntil: 'networkidle', timeout: 60000 });
+                let attempts = 0;
+                while (page.url().includes('autologin') && attempts < 30) {
+                  await page.waitForTimeout(2000);
+                  attempts++;
+                }
+                continue;
+              }
               throw new AutologinError('La dashboard mostra la pagina di login: autologin non valido o scaduto. Aggiorna il link in config.json.');
+            }
+            // Nessun link e nessun login: pagina vuota/errore. Riprova una volta.
+            if (dcAttempt === 1) {
+              log('Dashboard vuota durante la scoperta, riprovo...');
+              await page.waitForTimeout(3000);
+              continue;
             }
             log('Nessun corso attivo trovato in dashboard.');
             return [];
           }
-          log(`Trovati ${fresh.length} corsi attivi su ${links.length} totali.`);
-          return fresh;
+          return [];
         } catch (e) {
           if (e instanceof AutologinError) throw e;
           log(`Errore scoperta corsi: ${e.message}`);
