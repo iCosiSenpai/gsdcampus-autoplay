@@ -92,6 +92,37 @@ save_package_hash() {
   calc_package_hash > "$DIR/.package_hash"
 }
 
+# Attende che il server Ollama risponda su http://127.0.0.1:11434.
+# Se non risponde, tenta di avviarlo tramite il daemon interno o, in fallback,
+# con 'ollama serve' direttamente. Fallisce se il server non si avvia.
+ensure_ollama_server() {
+  if curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
+    return 0
+  fi
+
+  info "Server Ollama non attivo. Avvio in corso..."
+  if [ -f "$DIR/scripts/ollama-daemon.sh" ]; then
+    "$DIR/scripts/ollama-daemon.sh" start
+  else
+    warn "Daemon Ollama non trovato. Avvio 'ollama serve' manualmente..."
+    nohup ollama serve >> "$DIR/logs/ollama.log" 2>&1 &
+    for i in $(seq 1 30); do
+      if curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
+        break
+      fi
+      sleep 0.5
+    done
+  fi
+
+  if ! curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
+    err "Impossibile avviare il server Ollama."
+    info "Prova a eseguire manualmente in un altro terminale:  ollama serve"
+    info "Poi riesegui questo script."
+    exit 1
+  fi
+  ok "Server Ollama attivo."
+}
+
 # True se package.json/package-lock.json sono cambiati rispetto all'ultimo hash salvato.
 package_hash_changed() {
   [ ! -f "$DIR/.package_hash" ] && return 0
@@ -699,6 +730,9 @@ elif [ "$FORCE_UPDATE" = true ]; then
 else
   ok "Ollama già installato: $(ollama --version | head -1). Salto."
 fi
+
+# Prima di interrogare i modelli, assicurati che il server Ollama sia attivo.
+ensure_ollama_server
 
 # 6. Modello gemma4:31b-cloud (cloud, richiede login Ollama)
 step "6/7 - Modello Ollama gemma4:31b-cloud"

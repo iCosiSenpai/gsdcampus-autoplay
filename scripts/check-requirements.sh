@@ -78,7 +78,9 @@ fi
 
 # 6. Ollama modello gemma4:31b-cloud (richiede login cloud)
 if command -v ollama &>/dev/null; then
-  if ollama list 2>/dev/null | grep -q "gemma4:31b-cloud"; then
+  if ! curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
+    log_missing "Server Ollama attivo su 127.0.0.1:11434 (esegui: ollama serve oppure ./scripts/ollama-daemon.sh start)"
+  elif ollama list 2>/dev/null | grep -q "gemma4:31b-cloud"; then
     log_ok "Modello Ollama gemma4:31b-cloud"
   else
     log_missing "Modello Ollama gemma4:31b-cloud (modello cloud; esegui ./launch-ai-supervisor.sh oppure ollama login + ollama pull gemma4:31b-cloud)"
