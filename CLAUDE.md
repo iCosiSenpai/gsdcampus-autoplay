@@ -21,6 +21,16 @@ Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `con
 
 ---
 
+## Flusso utente principale
+
+L'utente **lancia sempre il comando curl one-liner** per aggiornare/avviare il sistema:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash
+```
+
+Questo è il canale principale. Tutti gli altri comandi (`./start.sh`, `./status.sh`, ecc.) sono strumenti secondari che l'AI può usare internamente, ma **non si deve mai presumere che l'utente li lanci a mano**. Quando l'utente chiede di "fare qualcosa" (avviare, controllare, riavviare, aggiornare), la risposta di default è: "rilancia il comando curl e io proseguo da lì".
+
 ## Compito
 
 L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso e-learning GSD Campus. Devi eseguire le operazioni richieste usando solo i tool Bash/Read/Edit nella cartella del progetto (`~/gsdcampus-autoplay`).
