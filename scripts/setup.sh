@@ -10,6 +10,8 @@ cd "$DIR"
 export PATH="$HOME/.local/bin:$PATH"
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
+MEMBERS_CLI="$DIR/scripts/lib/members-cli.js"
+IMPORT_MEMBERS="$DIR/scripts/import-members.js"
 
 # Colori per output interattivo
 BOLD='\033[1m'
@@ -222,6 +224,12 @@ is_config_valid() {
   if [[ ! "$url" =~ ^https://tecsial\.gsdcampus\.it/autologin/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/[A-Za-z0-9]+$ ]]; then
     return 1
   fi
+  # 3b. Se è presente codice_fiscale, verifica che il membro sia nel database.
+  local cf
+  cf=$(node -e "const c=require('$CONFIG_FILE'); console.log(c.codice_fiscale||'');" 2>/dev/null)
+  if [ -n "$cf" ] && [ -f "$DIR/data/members.db" ]; then
+    node -e "const {getMember}=require('./src/lib/db'); if(!getMember('.','$cf')) process.exit(1);" 2>/dev/null || return 1
+  fi
   # 4. Orario presente e con almeno un turno valido?
   node -e "
     const c = require('$CONFIG_FILE');
@@ -301,6 +309,81 @@ valid_autologin() {
     return 1
   fi
   return 0
+}
+
+# Estrae il codice fiscale da un URL autologin valido.
+cf_from_url() {
+  local url="$1"
+  [[ "$url" =~ autologin/([A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z])/ ]]
+  echo "${match[1]:-${match[1]}}"
+}
+
+# Assicura che il database membri esista e sia popolato. Se manca, offre di
+# importare il CSV. Ritorna 0 se il DB ha almeno un membro, 1 altrimenti.
+ensure_members_db() {
+  local n
+  n=$(node "$MEMBERS_CLI" stats 2>/dev/null | grep -oE 'Membri nel database\s*:\s*[0-9]+' | grep -oE '[0-9]+$' || echo 0)
+  if [ "${n:-0}" -gt 0 ]; then
+    return 0
+  fi
+  warn "Database membri vuoto o assente."
+  echo "Per selezionare il tuo account serve prima importare l'elenco membri (CSV)."
+  echo "Esporta da Numbers: File ▸ Esporta ▸ CSV."
+  local def_csv="$HOME/Downloads/elenco utenti FNC.csv"
+  local csv_path
+  read "csv_path?Percorso del CSV [${def_csv}]: "
+  csv_path="${csv_path:-$def_csv}"
+  if node "$IMPORT_MEMBERS" "$csv_path"; then
+    n=$(node "$MEMBERS_CLI" stats 2>/dev/null | grep -oE 'Membri nel database\s*:\s*[0-9]+' | grep -oE '[0-9]+$' || echo 0)
+    if [ "${n:-0}" -gt 0 ]; then
+      ok "Database membri popolato ($n membri)."
+      return 0
+    fi
+  fi
+  warn "Import non riuscito: si potrà incollare il link manualmente."
+  return 1
+}
+
+# Loop di ricerca+selezione di un membro dal database.
+# Riempie le variabili globali AUTOLOGIN, ACTIVE_CF, MEMBER_NAME.
+# Ritorna 0 se un membro è stato selezionato, 1 se l'utente sceglie 'manual'.
+select_member_from_db() {
+  while true; do
+    echo ""
+    read "Q?Cerca per nome, cognome o codice fiscale (oppure 'lista' per tutti, 'manual' per incollare il link): "
+    if [ "$Q" = "manual" ]; then
+      return 1
+    fi
+    local list
+    if [ "$Q" = "lista" ] || [ -z "$Q" ]; then
+      list=$(node "$MEMBERS_CLI" list 2>/dev/null)
+    else
+      list=$(node "$MEMBERS_CLI" search "$Q" 2>/dev/null)
+    fi
+    if [ -z "$list" ] || echo "$list" | grep -qi 'Nessun membro'; then
+      warn "Nessun membro trovato per \"$Q\". Riprova."
+      continue
+    fi
+    echo "$list"
+    echo ""
+    read "NUM?Numero del membro (0 per rifare la ricerca): "
+    if [ "$NUM" = "0" ] || [ -z "$NUM" ]; then
+      continue
+    fi
+    local json
+    json=$(node "$MEMBERS_CLI" select "$NUM" 2>/dev/null)
+    if [ -z "$json" ]; then
+      warn "Selezione non valida. Riprova."
+      continue
+    fi
+    AUTOLOGIN=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).autologin_url))")
+    ACTIVE_CF=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).codice_fiscale))")
+    MEMBER_NAME=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log([m.nome,m.cognome].filter(Boolean).join(' '))})")
+    if valid_autologin "$AUTOLOGIN" && [ -n "$ACTIVE_CF" ]; then
+      return 0
+    fi
+    warn "Link del membro non valido. Riprova."
+  done
 }
 
 parse_input_time() {
@@ -560,24 +643,40 @@ configure_shifts() {
 while true; do
   if [ "$MODIFY" = true ]; then
     echo ""
-    warn "Incolla il TUO link di autologin personale GSD Campus."
-    warn "Lo trovi nell'email di invito al corso o nella piattaforma."
+    echo -e "${BOLD}Selezione account membri${NC}"
+    echo "Invece di incollare il link, seleziona il tuo account dall'elenco membri."
     echo ""
 
-    while true; do
-      read "AUTOLOGIN?Link autologin: "
+    AUTOLOGIN=""
+    ACTIVE_CF=""
+    MEMBER_NAME=""
+
+    # Prova a usare il database membri; se non disponibile o l'utente sceglie
+    # 'manual', ricade sul copia-incolla classico del link.
+    if ensure_members_db && select_member_from_db; then
+      ok "Membro selezionato: $MEMBER_NAME (CF: $ACTIVE_CF)"
+    else
       echo ""
-      if [ -z "$AUTOLOGIN" ]; then
-        warn "Il link autologin è obbligatorio."
-      elif ! valid_autologin "$AUTOLOGIN"; then
-        warn "Link non valido."
-        echo "Formato atteso: https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN"
-        echo "Esempio:        https://tecsial.gsdcampus.it/autologin/CSOLSS95L23D862R/EbeavV6UwGUVXyVdsPqmTHWd1bWrGddQ"
-        echo "Riprova."
-      else
-        break
-      fi
-    done
+      warn "Incolla il TUO link di autologin personale GSD Campus."
+      warn "Lo trovi nell'email di invito al corso o nella piattaforma."
+      echo ""
+      while true; do
+        read "AUTOLOGIN?Link autologin: "
+        echo ""
+        if [ -z "$AUTOLOGIN" ]; then
+          warn "Il link autologin è obbligatorio."
+        elif ! valid_autologin "$AUTOLOGIN"; then
+          warn "Link non valido."
+          echo "Formato atteso: https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN"
+          echo "Esempio:        https://tecsial.gsdcampus.it/autologin/CSOLSS95L23D862R/EbeavV6UwGUVXyVdsPqmTHWd1bWrGddQ"
+          echo "Riprova."
+        else
+          ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
+          MEMBER_NAME="(configurazione manuale)"
+          break
+        fi
+      done
+    fi
 
     echo ""
     echo -e "${BOLD}Configurazione orari di lavoro${NC}"
@@ -612,6 +711,7 @@ while true; do
 
     echo ""
     echo -e "${BOLD}Riepilogo configurazione:${NC}"
+    echo "  Membro:    $MEMBER_NAME (CF: $ACTIVE_CF)"
     echo "  Autologin: $(mask_url "$AUTOLOGIN")"
     echo "  Giorni:    $(days_human "$DAYS_JSON")"
     echo "  Turni:     $shifts_summary"
@@ -627,6 +727,8 @@ while true; do
     if [[ "$REPLY" =~ ^[Yy]$ ]]; then
       cat > "$CONFIG_FILE" <<EOF
 {
+  "codice_fiscale": "$ACTIVE_CF",
+  "memberName": "$MEMBER_NAME",
   "autologinUrl": "$AUTOLOGIN",
   "baseUrl": "https://tecsial.gsdcampus.it/",
   "courseUrls": [],
@@ -637,6 +739,11 @@ while true; do
 }
 EOF
       ok "Configurazione salvata in config.json"
+      # Migra i file di stato legacy (data/*.json personali) nella cartella
+      # per-account data/accounts/<CF>/. Idempotente.
+      if [ -n "$ACTIVE_CF" ]; then
+        node "$MEMBERS_CLI" migrate-legacy 2>/dev/null && ok "Stato migrato in data/accounts/$ACTIVE_CF/"
+      fi
       ok "Autologin: $(mask_url "$AUTOLOGIN")"
       ok "Giorni: $(days_human "$DAYS_JSON")"
       ok "Turni: $shifts_summary"
