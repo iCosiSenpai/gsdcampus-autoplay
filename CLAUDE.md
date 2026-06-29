@@ -174,7 +174,7 @@ Il modello configurato in `config.json` (`ollamaModel`, default `gemma4:31b-clou
 ## Configurazione iniziale
 
 La prima volta che `./launch-ai-supervisor.sh` viene eseguito, `setup.sh` chiede interattivamente:
-1. La **selezione del proprio account** dall'elenco membri (ricerca per nome/cognome/CF nel database `data/members.db`, importato da CSV). Se il database è vuoto, propone di importare il CSV; in alternativa si può ancora incollare manualmente il link di autologin.
+1. La **schermata "Chi sei?"**: menu interattivo nel terminale navigabile con frecce ↑/↓ e Invio. Permette di cercare per nome/cognome/CF nel database `data/members.db`, vedere la lista completa, importare il CSV, incollare manualmente il link di autologin o mantenere l'account attuale.
 2. I giorni lavorativi (default lun-venerdì).
 3. La modalità oraria preferita (continuato, mezza giornata, classico o personalizzato) e gli orari.
 

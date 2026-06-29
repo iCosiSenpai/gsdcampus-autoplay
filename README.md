@@ -40,7 +40,7 @@ La prima volta il Terminale ti chiede alcune cose: rispondi con calma.
 - la **password del Mac (sudo)** — una sola volta, all'inizio; lo script la mantiene valida per tutta la sessione con un keepalive in background;
 - conferme di **installazione/aggiornamento/verifica dipendenze** (anche `y/n`) → rispondi **sempre sì**;
 - il **login Ollama** (modello AI configurabile, default `gemma4:31b-cloud`; consigliato per monitor/autoplay il modello cloud economico `gemma4:cloud`) → inserisci le credenziali;
-- la **selezione del tuo account** dall'elenco membri del corso: cerchi per nome, cognome o codice fiscale e scegli il numero corrispondente. Se il database membri è vuoto, lo script ti propone di importare il CSV (esportato da Numbers: *File ▸ Esporta ▸ CSV*); in alternativa puoi ancora incollare manualmente il link di autologin;
+- la **selezione del tuo account** con la schermata interattiva **"Chi sei?"**: nel terminale appare un menu navigabile con le frecce ↑/↓ e Invio; puoi cercare per nome, cognome o codice fiscale, vedere la lista completa, importare il CSV dei membri, incollare manualmente l'autologin o mantenere l'account attuale;
 - i **giorni lavorativi** (default lun–ven);
 - la **modalità oraria** preferita:
   1. **Continuato** — un solo turno (es. 09:00–18:00).
