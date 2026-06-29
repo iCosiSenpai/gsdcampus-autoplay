@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const account = require('./account');
 const { askQuizQuestion } = require('./ollama-quiz');
 
 const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
@@ -173,8 +174,9 @@ async function extractCorrectAnswers(page) {
 
 function saveNeedAnswer(root, questions, reason) {
   if (!questions || questions.length === 0) return;
-  const needPath = path.join(root, 'data', 'need_answer.json');
+  const needPath = account.stateFilePaths(root).needAnswer;
   try {
+    fs.mkdirSync(path.dirname(needPath), { recursive: true });
     fs.writeFileSync(needPath, JSON.stringify({ reason, questions, savedAt: new Date().toISOString() }, null, 2));
   } catch (e) { /* ignora */ }
 }
@@ -292,7 +294,8 @@ async function solveActiveQuestions(page, root, log, monitor) {
 
       if (ollamaAnswer) {
         selectedOptionText = ollamaAnswer.text;
-        log(`Ollama suggerisce: ${ollamaAnswer.letter}) ${selectedOptionText.slice(0, 50)}...`);
+        const conf = ollamaAnswer.confidence != null ? `${(ollamaAnswer.confidence * 100).toFixed(0)}%` : '?';
+        log(`Ollama suggerisce: ${ollamaAnswer.letter}) ${selectedOptionText.slice(0, 50)}... (confidenza ${conf}, strategia ${ollamaAnswer.strategy || '?'})`);
         await page.locator('.opzione-risposta').nth(q.opts.findIndex(o => o.text === ollamaAnswer.text)).click();
         await page.waitForTimeout(500);
         await clickNextButton(page, log);
@@ -300,7 +303,8 @@ async function solveActiveQuestions(page, root, log, monitor) {
         sessionAnswers[q.text] = selectedOptionText;
 
         try {
-          const pendingPath = path.join(root, 'data', 'pending_quiz_answers.json');
+          const pendingPath = account.stateFilePaths(root).pending;
+          fs.mkdirSync(path.dirname(pendingPath), { recursive: true });
           const pending = fs.existsSync(pendingPath) ? JSON.parse(fs.readFileSync(pendingPath, 'utf8')) : {};
           pending[q.text] = selectedOptionText;
           fs.writeFileSync(pendingPath, JSON.stringify(pending, null, 2));

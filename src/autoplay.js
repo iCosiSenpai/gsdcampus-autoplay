@@ -8,11 +8,11 @@ const { solveQuiz } = require('./lib/quiz');
 const { watchVideo } = require('./lib/video');
 const { isWorkTime, nextWorkEnd, nextWorkStart, describeSchedule, minutesUntilShiftEnd } = require('./lib/schedule');
 const courseState = require('./lib/course-state');
+const { writeDashboard } = require('./lib/dashboard');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'data');
-const SESSION_FILE = path.join(DATA_DIR, 'session_state.json');
-const STATE_FILE = path.join(DATA_DIR, 'storage_state.json');
+const account = require('./lib/account');
 
 const log = createLogger(ROOT);
 const monitor = new Monitor(ROOT, log);
@@ -24,6 +24,15 @@ try {
   log('FATAL: impossibile leggere config.json:', e.message);
   process.exit(1);
 }
+
+// Path di stato per l'account attivo (data/accounts/<CF>/). Fallback legacy
+// (file flat in data/) se il CF non è determinabile. session_state è solo un
+// path di cleanup; lo stato di sessione vero è in-memory.
+const _paths = account.stateFilePaths(ROOT);
+const SESSION_FILE = path.join(_paths.accountDir, 'session_state.json');
+const STATE_FILE = _paths.storageState;
+const ACTIVE_CF = _paths.codiceFiscale;
+if (ACTIVE_CF) log(`Account attivo: CF ${ACTIVE_CF} (stato in data/accounts/${ACTIVE_CF}/)`);
 
 const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -850,6 +859,7 @@ async function runAutoplay() {
         // Riscopri corsi: potrebbero esserne stati aggiunti di nuovi, o lo stato potrebbe cambiare.
         courseUrls = await discoverCourses();
         monitor.update({ courseStateSummary: courseState.summarize(state) });
+        try { writeDashboard(ROOT); } catch (_) {}
         if (courseUrls.length === 0) {
           throw new AllCoursesNeedHelpExit('Tutti i corsi risultano completati o bloccati.');
         }
@@ -861,6 +871,7 @@ async function runAutoplay() {
       if (e instanceof OffHoursExit || e.code === 'OFF_HOURS') {
         log('Uscita per fine turno lavorativo.');
         monitor.update({ running: false, phase: 'off_hours' });
+        try { writeDashboard(ROOT); } catch (_) {}
         process.exit(0);
       }
       if (e instanceof AutologinError || e.code === 'AUTOLOGIN_INVALID') {
@@ -873,6 +884,7 @@ async function runAutoplay() {
         log('TUTTI I CORSI COMPLETATI O IN ATTESA DI AIUTO:', e.message);
         monitor.update({ running: false, phase: 'need_help', lastError: e.message, courseStateSummary: courseState.summarize(state) });
         if (browser) { try { await browser.close(); } catch (_) {} }
+        try { writeDashboard(ROOT); } catch (_) {}
         process.exit(0);
       }
       if (e instanceof SessionError || e.code === 'SESSION_LOST') {

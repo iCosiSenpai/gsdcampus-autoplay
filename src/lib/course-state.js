@@ -8,11 +8,17 @@
 
 const fs = require('fs');
 const path = require('path');
+const account = require('./account');
 
 const STATE_FILE = 'course_state.json';
 
+function stateFile(root) {
+  // Per-account se il CF è noto; fallback al file flat legacy altrimenti.
+  return account.stateFilePaths(root).courseState;
+}
+
 function readState(root) {
-  const file = path.join(root, 'data', STATE_FILE);
+  const file = stateFile(root);
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (e) {
@@ -21,8 +27,11 @@ function readState(root) {
 }
 
 function writeState(root, state) {
-  const file = path.join(root, 'data', STATE_FILE);
+  const file = stateFile(root);
   try {
+    // Assicura che la cartella account esista.
+    const dir = path.dirname(file);
+    fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(file, JSON.stringify(state, null, 2));
   } catch (e) {
     // non bloccante: lo stato è un aiuto, non un requisito
