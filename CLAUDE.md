@@ -12,10 +12,10 @@ Prima di eseguire qualsiasi operazione, leggi `config.json` e mostra questa conf
 **Conferma configurazione**
 
 - **Corso da seguire**: GSD Campus — autologin e orari letti da `config.json`.
-  - Mostra l'URL di autologin (solo dominio/primi caratteri per privacy).
+  - Mostra il **membro attivo** (nome + codice fiscale) se `config.json` ha `codice_fiscale`/`memberName`; altrimenti mostra l'URL di autologin (solo dominio/primi caratteri per privacy).
   - Mostra i giorni e i turni lavorativi configurati.
 
-Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `config.json`**: usa il tool Edit per aggiornare tu stesso il file `config.json` con il link e/o gli orari corretti, poi chiedi conferma della modifica.
+Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `config.json`**: per cambiare account usa `node scripts/lib/members-cli.js set-active <CF>` (vedi sotto); per gli orari usa il tool Edit su `config.json` e poi chiedi conferma.
 
 **Nota su replicabilità su altri Mac**: gli ID dei corsi (`/corso/show/XXXX`) sono **personali** e variano da utente a utente. Per questo lo script `src/autoplay.js` scopre automaticamente i corsi dalla dashboard `https://tecsial.gsdcampus.it/corso/listAllByUser` dopo il login. `config.json` non deve più contenere `courseUrls` (o può contenerlo vuoto `[]`). L'URL di autologin è l'unico dato personale necessario.
 
@@ -54,6 +54,23 @@ L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso 
 - `node scripts/lib/schedule-cli.js is-work-time` — controlla se adesso è orario lavorativo.
 - `node scripts/lib/schedule-cli.js next-start` — prossimo inizio turno (ISO).
 
+### Membri e stato multi-utente
+
+- `node scripts/import-members.js [csv-path]` — importa l'elenco membri da CSV nel database `data/members.db` (default `~/Downloads/elenco utenti FNC.csv`).
+- `node scripts/lib/members-cli.js search <query>` — cerca membri per nome/cognome/CF (lista numerata).
+- `node scripts/lib/members-cli.js list` — elenco numerato di tutti i membri.
+- `node scripts/lib/members-cli.js active` — membro attualmente attivo (da `config.json`).
+- `node scripts/lib/members-cli.js set-active <CF>` — imposta il membro attivo in `config.json` (preserva orari). Poi riavvia con `./start.sh`.
+- `node scripts/lib/members-cli.js stats` — totale membri nel database e account con stato.
+- `node scripts/lib/members-cli.js migrate-legacy` — migra i vecchi file di stato flat nella cartella per-account.
+- `node scripts/lib/dashboard-cli.js summary` — stato aggregato di tutti i membri (done/in_progress/need_help/not_started).
+- `node scripts/lib/dashboard-cli.js list` — riga per membro con stato e avanzamento corsi.
+- `node scripts/lib/dashboard-cli.js json` — dump completo di `data/dashboard.json`.
+
+**Modello dati**: i membri vivono in `data/members.db` (SQLite). L'account attivo è in `config.json` (`codice_fiscale`). Lo stato personale (corsi, cookie, quiz pending) è in `data/accounts/<CF>/`, isolato per membro. `data/known_answers.json` è **condiviso** tra tutti i membri (banca risposte della classe).
+
+**Switchare membro**: `node scripts/lib/members-cli.js set-active <CF>` poi `./start.sh` (oppure `./start.sh --ignore-hours`). Lo stato dell'account precedente resta nella sua cartella e non viene toccato.
+
 ## Flusso consigliato
 
 Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
@@ -68,15 +85,18 @@ Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
      - "avvia subito" → esegui `./start.sh --ignore-hours`.
      - "non fare nulla" → non avviare nulla.
 4. Se il processo è attivo ma l'ultimo log/heartbeat è vecchio (più di 2 minuti) o c'è un errore, esegui `./stop.sh` poi `./start.sh` (o `--ignore-hours` se fuori orario e l'utente vuole forzare).
-5. **Autologin non valido/scaduto**: se `logs/status.json` ha `phase: "autologin_invalid"` (o vedi nel log "AUTOLOGIN NON VALIDO"), il link non autentica più. NON riavviare in loop: avvisa l'utente che il link autologin è scaduto/errato e chiedigli il link aggiornato; quando te lo fornisce, aggiorna tu `config.json` con il tool Edit e riavvia con `./start.sh`.
+5. **Autologin non valido/scaduto**: se `logs/status.json` ha `phase: "autologin_invalid"` (o vedi nel log "AUTOLOGIN NON VALIDO"), il link non autentica più. NON riavviare in loop. Procedi in questo ordine:
+   1. Se `data/members.db` esiste, è probabile che contenga un token aggiornato: offri all'utente di **re-selezionare il membro** dal database (`node scripts/lib/members-cli.js search <query>` per trovarlo, poi `node scripts/lib/members-cli.js set-active <CF>`).
+   2. Se il token nel database è anch'esso scaduto, l'utente deve fornire un nuovo elenco CSV: esegui `node scripts/import-members.js "<percorso csv>"` (esporta da Numbers: File ▸ Esporta ▸ CSV) e poi re-seleziona il membro.
+   3. Fallback manuale: chiedi all'utente il link aggiornato, aggiorna `config.json` con il tool Edit (mantenendo `codice_fiscale` coerente) e riavvia con `./start.sh`.
 6. **Quiz non superato / corso in `need_help`**: se `logs/status.json` mostra `phase: "need_help"` o lo stesso `courseUrl` con lo stesso `lastQuizResult` (es. `non superato (24/30)`) ripetuto, lo script ha già automaticamente:
-   - catturato le domande del quiz in `data/need_answer.json`;
-   - segnato il corso come `need_help` in `data/course_state.json`;
+   - catturato le domande del quiz in `data/accounts/<CF>/need_answer.json`;
+   - segnato il corso come `need_help` in `data/accounts/<CF>/course_state.json`;
    - passato al prossimo corso (se ce n'è uno).
    Non serve fermare con `./stop.sh` a meno che l'utente non voglia intervenire subito. Devi invece:
-   1. Leggere `data/need_answer.json`.
+   1. Leggere `data/accounts/<CF>/need_answer.json` (CF = `config.codice_fiscale`, o derivato dall'URL di autologin).
    2. Cercare la risposta corretta (online con `WebSearch`/`WebFetch`, oppure chiedendo all'utente).
-   3. Aggiungerla a `data/known_answers.json` con `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
+   3. Aggiungerla alla banca **condivisa** `data/known_answers.json` con `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
    4. Se vuoi far riprovare subito quel corso, cancella il suo stato con `node -e "require('./src/lib/course-state').resetCourse('.', require('./src/lib/course-state').readState('.'), 'URL_CORSO')"`.
    5. Riavviare con `./start.sh` o `./start.sh --ignore-hours`.
    Se tutti i corsi sono `done` o `need_help`, l'autoplay esce con codice 0 e `phase: "need_help"`; lo scheduler in `ignore-hours` aspetta 10 minuti prima di riavviare, dando tempo all'AI/utente di intervenire.
@@ -105,17 +125,18 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 ## Limiti
 
 - Non modificare file al di fuori di `~/gsdcampus-autoplay`.
-- Non cancellare `data/known_answers.json`, `data/storage_state.json`, `data/session_state.json` o `data/course_state.json`.
-- Se devi correggere `config.json` (autologin o orari), usa il tool Edit e salva il JSON valido.
+- Non cancellare `data/known_answers.json` (banca condivisa), `data/members.db` (elenco membri con credenziali) né i file sotto `data/accounts/<CF>/` (stato e cookie personali).
+- **Mai copiare `data/accounts/<CF>/storage_state.json` tra cartelle account diverse**: contiene i cookie di sessione di quel membro; mescolarli provoca accessi con l'identità sbagliata.
+- Se devi correggere `config.json` (autologin o orari), usa il tool Edit e salva il JSON valido. Per cambiare account preferisci `node scripts/lib/members-cli.js set-active <CF>`.
 - Non eseguire comandi distruttivi sul sistema.
 - Se lo script richiede una dipendenza mancante, suggerisci `./scripts/setup.sh` oppure eseguilo tu stesso se l'utente lo chiede.
 
 ## Quiz e domande sconosciute
 
-- `src/lib/quiz.js` risolve i quiz usando `data/known_answers.json`.
-- Se una domanda non è presente in `known_answers.json`, lo script chiede a Ollama (`gemma4:31b-cloud`) la risposta in base alla conoscenza generale del modello.
-- Le risposte date da Ollama vengono salvate in `data/pending_quiz_answers.json`. **Solo se il quiz viene superato**, quelle risposte vengono promosse automaticamente nella banca condivisa `data/known_answers.json` (la banca cresce solo con risposte verificate dall'esito).
-- Se Ollama non riesce a rispondere, lo script si ferma e salva la domanda in `data/need_answer.json`: in quel caso puoi cercare la risposta online, aggiornare `known_answers.json` e riavviare.
+- `src/lib/quiz.js` risolve i quiz usando prima `data/known_answers.json` (matching per similarità, soglia 0.75). Questa banca è **condivisa** tra tutti i membri.
+- Se una domanda non è presente in `known_answers.json`, lo script chiede a Ollama (`gemma4:31b-cloud`) la risposta in base alla conoscenza generale del modello. Il parsing della risposta è multi-strategia (prefisso "Risposta: X", frase, lettera isolata, markdown, match testo) e, se la confidenza è bassa, viene fatto **un tentativo di conferma** con un prompt che forza una singola lettera.
+- Le risposte date da Ollama vengono salvate in `data/accounts/<CF>/pending_quiz_answers.json` (per-account). **Solo se il quiz viene superato**, quelle risposte vengono promosse automaticamente nella banca condivisa `data/known_answers.json` (la banca cresce solo con risposte verificate dall'esito).
+- Se Ollama non riesce a rispondere, lo script si ferma e salva la domanda in `data/accounts/<CF>/need_answer.json`: in quel caso puoi cercare la risposta online, aggiornare `known_answers.json` e riavviare.
 - Quando un quiz finale risulta non superato, lo script salva **tutte** le domande del quiz in `data/need_answer.json` e segnala il corso come `need_help` in `data/course_state.json`, in attesa di intervento AI/utente.
 - Strumenti manutenzione banca risposte: `node scripts/lib/answers-cli.js stats|list|merge` e `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
 
@@ -153,16 +174,17 @@ Il modello `gemma4:31b-cloud` è un modello **cloud Ollama** e richiede l'autent
 ## Configurazione iniziale
 
 La prima volta che `./launch-ai-supervisor.sh` viene eseguito, `setup.sh` chiede interattivamente:
-1. Il link di autologin personale GSD Campus.
+1. La **selezione del proprio account** dall'elenco membri (ricerca per nome/cognome/CF nel database `data/members.db`, importato da CSV). Se il database è vuoto, propone di importare il CSV; in alternativa si può ancora incollare manualmente il link di autologin.
 2. I giorni lavorativi (default lun-venerdì).
 3. La modalità oraria preferita (continuato, mezza giornata, classico o personalizzato) e gli orari.
 
-Questi dati vengono salvati in `config.json`. In seguito, ogni avvio mostrerà solo una conferma dei dati configurati.
+Questi dati vengono salvati in `config.json` (con `codice_fiscale` + `memberName` + `autologinUrl` + `workSchedule`). Lo stato personale viene migrato in `data/accounts/<CF>/`. In seguito, ogni avvio mostrerà solo una conferma dei dati configurati.
 
 ## Note tecniche
 
 - Lo script principale è `src/autoplay.js`; usa Playwright in modalità headless.
 - `start.sh` controlla i requisiti e la configurazione prima di avviare.
+- L'elenco membri è in `data/members.db` (SQLite, richiede Node >=22 per `node:sqlite` built-in). Lo stato per-account è in `data/accounts/<CF>/`. La dashboard aggregata è rigenerata in `data/dashboard.json` alla fine di ogni run.
 - I log sono in `logs/`.
 - `backups/` contiene copie di sicurezza dello script (se presenti).
-- `scripts/lib/schedule-cli.js` fornisce helper per leggere e validare gli orari dagli script shell.
+- `scripts/lib/schedule-cli.js` fornisce helper per leggere e validare gli orari dagli script shell. `scripts/lib/members-cli.js` e `scripts/lib/dashboard-cli.js` gestiscono membri e stato cross-utente.
