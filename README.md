@@ -39,7 +39,7 @@ In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e ora
 La prima volta il Terminale ti chiede alcune cose: rispondi con calma.
 - la **password del Mac (sudo)** — una sola volta, all'inizio; lo script la mantiene valida per tutta la sessione con un keepalive in background;
 - conferme di **installazione/aggiornamento/verifica dipendenze** (anche `y/n`) → rispondi **sempre sì**;
-- il **login Ollama** (modello AI configurabile, default `gemma4:31b-cloud`; consigliato per monitor/autoplay il modello cloud economico `qwen3.5:4b`) → inserisci le credenziali;
+- il **login Ollama** (modello AI configurabile, default `gemma4:31b-cloud`; consigliato per monitor/autoplay il modello cloud economico `gemma4:cloud`) → inserisci le credenziali;
 - la **selezione del tuo account** dall'elenco membri del corso: cerchi per nome, cognome o codice fiscale e scegli il numero corrispondente. Se il database membri è vuoto, lo script ti propone di importare il CSV (esportato da Numbers: *File ▸ Esporta ▸ CSV*); in alternativa puoi ancora incollare manualmente il link di autologin;
 - i **giorni lavorativi** (default lun–ven);
 - la **modalità oraria** preferita:
@@ -184,7 +184,7 @@ I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i tu
 ## Quiz e banca risposte condivisa
 
 - La **banca risposte condivisa** è in `data/known_answers.json` (committata nel repo: uguale per tutti i colleghi).
-- Se una domanda non è nota, lo script chiede a Ollama (modello configurabile in `config.json` tramite `ollamaModel`) la risposta usando la conoscenza del modello; la salva in `data/pending_quiz_answers.json`. Per monitor/autoplay il modello cloud più economico e sufficiente per quiz in italiano è `qwen3.5:4b`.
+- Se una domanda non è nota, lo script chiede a Ollama (modello configurabile in `config.json` tramite `ollamaModel`) la risposta usando la conoscenza del modello; la salva in `data/pending_quiz_answers.json`. Per monitor/autoplay il modello cloud più economico e sufficiente per quiz in italiano è `gemma4:cloud`.
 - **Verifica dall'esito**: solo quando un quiz viene **superato**, le risposte nuove di Ollama vengono promosse automaticamente nella banca condivisa. Così la banca cresce solo con risposte verificate. L'esito (superato/non superato + punteggio) finisce in `logs/status.json` (`lastQuizResult`) ed è mostrato da `./status.sh`.
 - Se Ollama non sa rispondere, il quiz si ferma e salva la domanda in `data/need_answer.json`.
 - Manutenzione banca (per chi prepara i rilasci): `node scripts/lib/answers-cli.js stats|list|merge` e `... set "domanda" "risposta"`.
