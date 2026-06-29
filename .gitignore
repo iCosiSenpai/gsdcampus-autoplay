@@ -18,6 +18,17 @@ data/extracted_full.json
 data/summary_dump.json
 data/quiz-domande.txt
 # NOTA: known_answers_public.json è intenzionalmente tracciato da git come banca condivisa
+# database membri (contiene token di autologin → credenziali)
+data/members.db
+data/members.db-journal
+data/members.db-wal
+data/members.db-shm
+# stato aggregato cross-utente (rigenerato)
+data/dashboard.json
+# stato personale per-account (cookie compresi)
+data/accounts/
+# temp indice lista membri (per select interattiva)
+data/.members_last_list.json
 # dati personali
 config.json
 PROMPT-per-altra-AI.md

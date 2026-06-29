@@ -10,6 +10,12 @@
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "import-members": "node scripts/import-members.js"
+  },
   "dependencies": {
     "playwright": "^1.60.0"
   }
