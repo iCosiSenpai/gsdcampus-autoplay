@@ -4,10 +4,28 @@
  */
 
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 const OLLAMA_URL = 'http://127.0.0.1:11434/api/generate';
-const MODEL = 'gemma4:31b-cloud';
 const TIMEOUT_MS = 30000;
+
+/**
+ * Legge il modello Ollama da config.json (campo `ollamaModel`).
+ * Fallback: gemma4:31b-cloud per retrocompatibilità.
+ */
+function readOllamaModel() {
+  try {
+    const root = path.resolve(__dirname, '..', '..');
+    const cfg = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8'));
+    if (cfg.ollamaModel) return String(cfg.ollamaModel).trim();
+  } catch (e) {
+    // config.json potrebbe non esistere: usa il default.
+  }
+  return 'gemma4:31b-cloud';
+}
+
+const MODEL = readOllamaModel();
 
 function askOllama(prompt) {
   return new Promise((resolve, reject) => {

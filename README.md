@@ -39,7 +39,7 @@ In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e ora
 La prima volta il Terminale ti chiede alcune cose: rispondi con calma.
 - la **password del Mac (sudo)** — una sola volta, all'inizio; lo script la mantiene valida per tutta la sessione con un keepalive in background;
 - conferme di **installazione/aggiornamento/verifica dipendenze** (anche `y/n`) → rispondi **sempre sì**;
-- il **login Ollama** (modello AI `gemma4:31b-cloud`) → inserisci le credenziali;
+- il **login Ollama** (modello AI configurabile, default `gemma4:31b-cloud`; consigliato per monitor/autoplay il modello cloud economico `qwen3.5:4b`) → inserisci le credenziali;
 - il **tuo link di autologin personale** GSD Campus → incollalo (lo trovi nell'email del corso);
 - i **giorni lavorativi** (default lun–ven);
 - la **modalità oraria** preferita:
@@ -159,7 +159,7 @@ I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i tu
 ## Quiz e banca risposte condivisa
 
 - La **banca risposte condivisa** è in `data/known_answers.json` (committata nel repo: uguale per tutti i colleghi).
-- Se una domanda non è nota, lo script chiede a Ollama (`gemma4:31b-cloud`) la risposta usando la conoscenza del modello; la salva in `data/pending_quiz_answers.json`.
+- Se una domanda non è nota, lo script chiede a Ollama (modello configurabile in `config.json` tramite `ollamaModel`) la risposta usando la conoscenza del modello; la salva in `data/pending_quiz_answers.json`. Per monitor/autoplay il modello cloud più economico e sufficiente per quiz in italiano è `qwen3.5:4b`.
 - **Verifica dall'esito**: solo quando un quiz viene **superato**, le risposte nuove di Ollama vengono promosse automaticamente nella banca condivisa. Così la banca cresce solo con risposte verificate. L'esito (superato/non superato + punteggio) finisce in `logs/status.json` (`lastQuizResult`) ed è mostrato da `./status.sh`.
 - Se Ollama non sa rispondere, il quiz si ferma e salva la domanda in `data/need_answer.json`.
 - Manutenzione banca (per chi prepara i rilasci): `node scripts/lib/answers-cli.js stats|list|merge` e `... set "domanda" "risposta"`.

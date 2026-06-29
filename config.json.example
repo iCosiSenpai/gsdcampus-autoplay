@@ -1,6 +1,7 @@
 {
   "autologinUrl": "https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN",
   "baseUrl": "https://tecsial.gsdcampus.it/",
+  "ollamaModel": "qwen3.5:4b",
   "courseUrls": [],
   "workSchedule": {
     "days": [1, 2, 3, 4, 5, 6],
