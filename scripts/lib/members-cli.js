@@ -1,0 +1,188 @@
+#!/usr/bin/env node
+/**
+ * members-cli.js — gestione del database membri (data/members.db) per setup.sh
+ * e per il supervisore AI.
+ *
+ * Comandi:
+ *   node scripts/lib/members-cli.js search <query>
+ *       Lista numerata di membri che corrispondono (nome/cognome/CF). Salva
+ *       l'indice numerato in data/.members_last_list.json per il `select`.
+ *   node scripts/lib/members-cli.js list
+ *       Lista numerata di tutti i membri (salva l'indice come sopra).
+ *   node scripts/lib/members-cli.js select <N>
+ *       Dato il numero di una riga di search/list, stampa il JSON del membro.
+ *   node scripts/lib/members-cli.js active
+ *       Mostra il membro attivo (da config.json).
+ *   node scripts/lib/members-cli.js set-active <CF>
+ *       Imposta il membro attivo in config.json (codice_fiscale + memberName +
+ *       autologinUrl) PRESERVANDO baseUrl/courseUrls/workSchedule.
+ *   node scripts/lib/members-cli.js stats
+ *       Totale membri e quanti hanno già uno stato per-account.
+ *   node scripts/lib/members-cli.js migrate-legacy
+ *       Sposta i file di stato legacy (data/*.json personali) nella cartella
+ *       data/accounts/<CF>/ del membro attivo. Idempotente, non sovrascrive.
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+const ROOT = path.join(__dirname, '..', '..');
+const DATA = path.join(ROOT, 'data');
+const CONFIG = path.join(ROOT, 'config.json');
+const LAST_LIST = path.join(DATA, '.members_last_list.json');
+
+const db = require(path.join(ROOT, 'src', 'lib', 'db'));
+const importCsv = require(path.join(ROOT, 'src', 'lib', 'import-csv'));
+
+const CF_FROM_URL_RE = /\/autologin\/([A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z])\//;
+
+function readJson(p, fallback) {
+  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { return fallback; }
+}
+function writeJson(p, obj) {
+  fs.writeFileSync(p, JSON.stringify(obj, null, 2));
+}
+
+function readConfig() { return readJson(CONFIG, {}); }
+function writeConfig(cfg) { writeJson(CONFIG, cfg); }
+
+function activeCodiceFiscale() {
+  const cfg = readConfig();
+  if (cfg.codice_fiscale) return String(cfg.codice_fiscale).toUpperCase();
+  if (cfg.autologinUrl) {
+    const m = String(cfg.autologinUrl).match(CF_FROM_URL_RE);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+function saveListIndex(members) {
+  try { fs.mkdirSync(DATA, { recursive: true }); } catch (e) { /* ok */ }
+  writeJson(LAST_LIST, members);
+}
+
+function loadListIndex() {
+  return readJson(LAST_LIST, []);
+}
+
+function printNumberedList(members) {
+  members.forEach((m, i) => {
+    const name = [m.cognome, m.nome].filter(Boolean).join(' ').trim() || '(senza nome)';
+    console.log(`${String(i + 1).padStart(4)}) ${m.codice_fiscale} — ${name}`);
+  });
+  console.log(`\n${members.length} membro/i.`);
+}
+
+const cmd = process.argv[2] || 'stats';
+
+if (cmd === 'search') {
+  const q = process.argv[3];
+  if (!q) { console.error('Uso: members-cli.js search <query>'); process.exit(1); }
+  const members = db.searchMembers(ROOT, q);
+  saveListIndex(members);
+  if (members.length === 0) { console.log('Nessun membro trovato.'); process.exit(0); }
+  printNumberedList(members);
+
+} else if (cmd === 'list') {
+  const members = db.listMembers(ROOT);
+  saveListIndex(members);
+  if (members.length === 0) {
+    console.log('Database vuoto. Importa prima un CSV con: node scripts/import-members.js <path>');
+    process.exit(1);
+  }
+  printNumberedList(members);
+
+} else if (cmd === 'select') {
+  const n = parseInt(process.argv[3], 10);
+  if (!Number.isInteger(n)) { console.error('Uso: members-cli.js select <N>'); process.exit(1); }
+  const list = loadListIndex();
+  const m = list[n - 1];
+  if (!m) {
+    console.error(`Numero ${n} non valido. Usa prima search/list, poi select con un numero tra 1 e ${list.length}.`);
+    process.exit(1);
+  }
+  console.log(JSON.stringify({
+    codice_fiscale: m.codice_fiscale,
+    nome: m.nome,
+    cognome: m.cognome,
+    autologin_url: m.autologin_url
+  }));
+
+} else if (cmd === 'active') {
+  const cf = activeCodiceFiscale();
+  if (!cf) { console.log('Nessun membro attivo (config.json non configurato).'); process.exit(0); }
+  const m = db.getMember(ROOT, cf);
+  if (!m) {
+    console.log(`Membro attivo: CF=${cf} (non presente nel database membri; probabilmente configurato manualmente).`);
+  } else {
+    const name = [m.cognome, m.nome].filter(Boolean).join(' ');
+    console.log(`Membro attivo: ${name} (CF: ${m.codice_fiscale})`);
+    console.log(`  autologin: ${m.autologin_url}`);
+  }
+
+} else if (cmd === 'set-active') {
+  const cf = String(process.argv[3] || '').toUpperCase();
+  if (!cf) { console.error('Uso: members-cli.js set-active <CF>'); process.exit(1); }
+  const m = db.getMember(ROOT, cf);
+  if (!m) { console.error(`Nessun membro con codice fiscale ${cf} nel database.`); process.exit(1); }
+  const cfg = readConfig();
+  cfg.codice_fiscale = m.codice_fiscale;
+  cfg.memberName = [m.nome, m.cognome].filter(Boolean).join(' ').trim();
+  cfg.autologinUrl = m.autologin_url;
+  if (!cfg.baseUrl) cfg.baseUrl = 'https://tecsial.gsdcampus.it/';
+  if (!Array.isArray(cfg.courseUrls)) cfg.courseUrls = [];
+  if (!cfg.workSchedule) {
+    cfg.workSchedule = {
+      days: [1, 2, 3, 4, 5],
+      shifts: [
+        { startHour: 9, startMin: 30, endHour: 13, endMin: 0 },
+        { startHour: 16, startMin: 30, endHour: 20, endMin: 0 }
+      ]
+    };
+  }
+  writeConfig(cfg);
+  console.log(`Membro attivo impostato: ${cfg.memberName} (CF: ${m.codice_fiscale})`);
+  console.log(`  autologin: ${m.autologin_url}`);
+
+} else if (cmd === 'stats') {
+  const total = db.countMembers(ROOT);
+  const accountsDir = path.join(DATA, 'accounts');
+  let accounts = 0;
+  try { accounts = fs.readdirSync(accountsDir).filter(f =>
+    fs.statSync(path.join(accountsDir, f)).isDirectory()).length; } catch (e) { accounts = 0; }
+  console.log(`Membri nel database : ${total}`);
+  console.log(`Account con stato   : ${accounts}`);
+
+} else if (cmd === 'migrate-legacy') {
+  const cf = activeCodiceFiscale();
+  if (!cf) {
+    console.error('Nessun membro attivo in config.json: impossibile determinare la cartella account.');
+    process.exit(1);
+  }
+  const dest = path.join(DATA, 'accounts', cf);
+  try { fs.mkdirSync(dest, { recursive: true }); } catch (e) { /* ok */ }
+  const legacyFiles = ['course_state.json', 'storage_state.json', 'pending_quiz_answers.json', 'need_answer.json'];
+  let moved = 0;
+  for (const f of legacyFiles) {
+    const src = path.join(DATA, f);
+    const dst = path.join(dest, f);
+    if (fs.existsSync(src) && !fs.existsSync(dst)) {
+      try {
+        fs.renameSync(src, dst);
+        console.log(`  spostato: data/${f} → data/accounts/${cf}/${f}`);
+        moved++;
+      } catch (e) {
+        console.error(`  impossibile spostare data/${f}: ${e.message}`);
+      }
+    }
+  }
+  if (moved === 0) {
+    console.log(`Nessun file legacy da migrare per ${cf} (già migrato o assente).`);
+  } else {
+    console.log(`Migrati ${moved} file in data/accounts/${cf}/`);
+  }
+
+} else {
+  console.error(`Comando sconosciuto: ${cmd}\nComandi: search | list | select | active | set-active | stats | migrate-legacy`);
+  process.exit(1);
+}
