@@ -11,6 +11,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 MEMBERS_CLI="$DIR/scripts/lib/members-cli.js"
+WHOAREYOU_CLI="$DIR/scripts/lib/whoareyou-cli.js"
 IMPORT_MEMBERS="$DIR/scripts/import-members.js"
 
 # Colori per output interattivo
@@ -330,303 +331,78 @@ cf_from_url() {
   echo "${match[1]:-${match[1]}}"
 }
 
-# Assicura che il database membri esista e sia popolato. Se manca, offre di
-# importare il CSV. Ritorna 0 se il DB ha almeno un membro, 1 altrimenti.
-ensure_members_db() {
-  local n
-  n=$(node "$MEMBERS_CLI" stats 2>/dev/null | grep -oE 'Membri nel database\s*:\s*[0-9]+' | grep -oE '[0-9]+$' || echo 0)
-  if [ "${n:-0}" -gt 0 ]; then
-    return 0
-  fi
-  warn "Database membri vuoto o assente."
-  echo "Per selezionare il tuo account serve prima importare l'elenco membri (CSV)."
-  echo "Esporta da Numbers: File ▸ Esporta ▸ CSV."
-  local def_csv="$HOME/Downloads/elenco utenti FNC.csv"
-  local csv_path
-  read "csv_path?Percorso del CSV [${def_csv}]: "
-  csv_path="${csv_path:-$def_csv}"
-  if node "$IMPORT_MEMBERS" "$csv_path"; then
-    n=$(node "$MEMBERS_CLI" stats 2>/dev/null | grep -oE 'Membri nel database\s*:\s*[0-9]+' | grep -oE '[0-9]+$' || echo 0)
-    if [ "${n:-0}" -gt 0 ]; then
-      ok "Database membri popolato ($n membri)."
-      return 0
-    fi
-  fi
-  warn "Import non riuscito: si potrà incollare il link manualmente."
-  return 1
-}
-
-# Loop di ricerca+selezione di un membro dal database.
-# Riempie le variabili globali AUTOLOGIN, ACTIVE_CF, MEMBER_NAME.
-# Ritorna 0 se un membro è stato selezionato, 1 se l'utente sceglie 'manual'.
-select_member_from_db() {
-  while true; do
-    echo ""
-    read "Q?Cerca per nome, cognome o codice fiscale (oppure 'lista' per tutti, 'manual' per incollare il link): "
-    if [ "$Q" = "manual" ]; then
-      return 1
-    fi
-    local list
-    if [ "$Q" = "lista" ] || [ -z "$Q" ]; then
-      list=$(node "$MEMBERS_CLI" list 2>/dev/null)
-    else
-      list=$(node "$MEMBERS_CLI" search "$Q" 2>/dev/null)
-    fi
-    if [ -z "$list" ] || echo "$list" | grep -qi 'Nessun membro'; then
-      warn "Nessun membro trovato per \"$Q\". Riprova."
-      continue
-    fi
-    echo "$list"
-    echo ""
-    read "NUM?Numero del membro (0 per rifare la ricerca): "
-    if [ "$NUM" = "0" ] || [ -z "$NUM" ]; then
-      continue
-    fi
-    local json
-    json=$(node "$MEMBERS_CLI" select "$NUM" 2>/dev/null)
-    if [ -z "$json" ]; then
-      warn "Selezione non valida. Riprova."
-      continue
-    fi
-    AUTOLOGIN=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).autologin_url))")
-    ACTIVE_CF=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).codice_fiscale))")
-    MEMBER_NAME=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log([m.nome,m.cognome].filter(Boolean).join(' '))})")
-    if valid_autologin "$AUTOLOGIN" && [ -n "$ACTIVE_CF" ]; then
-      return 0
-    fi
-    warn "Link del membro non valido. Riprova."
-  done
-}
-
-# Schermata iniziale "Chi sei?" — mostrata all'avvio del setup, prima di ogni
-# altra scelta. Permette di selezionare l'account dal database membri per CF o
-# nome/cognome, oppure di incollare manualmente l'autologin.
+# Schermata interattiva "CHI SEI?" — mostrata all'avvio del setup, prima di ogni
+# altra scelta. Usa scripts/lib/whoareyou-cli.js che offre:
+#   • su TTY: menu navigabile con frecce ↑/↓ e Invio, come una app nel terminale
+#   • su non-TTY: menu numerico classico (per pipe/redirezioni)
 who_are_you() {
-  # Legge account attuale da config.json (se esiste e valido)
-  local current_name current_cf current_url
-  current_name=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.memberName||'');}catch(e){console.log('')}" 2>/dev/null)
-  current_cf=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.codice_fiscale||'');}catch(e){console.log('')}" 2>/dev/null)
-  current_url=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.autologinUrl||'');}catch(e){console.log('')}" 2>/dev/null)
+  local result_file="$DIR/.whoareyou_result.json"
+  rm -f "$result_file"
 
-  echo ""
-  echo "============================================"
-  echo -e "${BOLD}CHI SEI?${NC}"
-  echo "============================================"
-
-  if [ -n "$current_name" ] && [ -n "$current_cf" ]; then
-    echo "Account attuale: $current_name (CF: $current_cf)"
-  elif [ -n "$current_url" ]; then
-    echo "Account attuale: $(mask_url "$current_url")"
-  fi
-
-  # Se --yes è attivo, mantieni l'account attuale se presente
-  if [ "$AUTO_YES" = true ]; then
-    if [ -n "$current_url" ] && valid_autologin "$current_url"; then
-      AUTOLOGIN="$current_url"
-      ACTIVE_CF="$current_cf"
-      if [ -z "$ACTIVE_CF" ]; then
-        ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
-      fi
-      MEMBER_NAME="$current_name"
-      return 0
-    fi
-    # Se non c'è un account valido in --yes, lascia che il chiamante fallisca
+  if ! AUTO_YES="$AUTO_YES" node "$WHOAREYOU_CLI" "$result_file"; then
     return 1
   fi
 
-  # Costruisce le opzioni in base a disponibilità database
-  local db_available=false
-  if ensure_members_db 2>/dev/null; then
-    db_available=true
+  # Se il risultato non c'è (es. keep in --yes senza file), leggi da config.json
+  if [ ! -f "$result_file" ]; then
+    AUTOLOGIN=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.autologinUrl||'');}catch(e){console.log('')}" 2>/dev/null)
+    ACTIVE_CF=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.codice_fiscale||'');}catch(e){console.log('')}" 2>/dev/null)
+    MEMBER_NAME=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.memberName||'');}catch(e){console.log('')}" 2>/dev/null)
+    if [ -z "$ACTIVE_CF" ] && [ -n "$AUTOLOGIN" ]; then
+      ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
+    fi
+    return 0
   fi
 
-  echo ""
-  echo "Scegli come identificarti:"
-  if [ "$db_available" = true ]; then
-    echo "  [1] Cerca per codice fiscale"
-    echo "  [2] Cerca per nome e cognome"
-    echo "  [3] Mostra lista completa dei membri"
-  fi
-  echo "  [m] Inserisci autologin manualmente"
-  if [ -n "$current_url" ] && valid_autologin "$current_url"; then
-    echo "  [k] Mantieni account attuale"
-  fi
-  echo ""
+  # Legge i dati dal JSON prodotto da whoareyou-cli.js
+  local action
+  action=$(node -e "
+    const fs=require('fs');
+    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
+    console.log(r.action||'');
+  " 2>/dev/null)
 
-  while true; do
-    read "CHOICE?Scelta: "
-    case "$CHOICE" in
-      1)
-        if [ "$db_available" != true ]; then
-          warn "Database membri non disponibile."
-          continue
-        fi
-        echo ""
-        read "Q?Codice fiscale: "
-        if [ -z "$Q" ]; then
-          warn "Inserisci un codice fiscale."
-          continue
-        fi
-        local list
-        list=$(node "$MEMBERS_CLI" search "$Q" 2>/dev/null)
-        if [ -z "$list" ] || echo "$list" | grep -qi 'Nessun membro'; then
-          warn "Nessun membro trovato per \"$Q\"."
-          continue
-        fi
-        echo "$list"
-        echo ""
-        read "NUM?Numero del membro (0 per rifare): "
-        if [ "$NUM" = "0" ] || [ -z "$NUM" ]; then continue; fi
-        local json
-        json=$(node "$MEMBERS_CLI" select "$NUM" 2>/dev/null)
-        if [ -z "$json" ]; then
-          warn "Selezione non valida."
-          continue
-        fi
-        AUTOLOGIN=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).autologin_url))")
-        ACTIVE_CF=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).codice_fiscale))")
-        MEMBER_NAME=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log([m.nome,m.cognome].filter(Boolean).join(' '))})")
-        if valid_autologin "$AUTOLOGIN" && [ -n "$ACTIVE_CF" ]; then
-          return 0
-        fi
-        warn "Link del membro non valido."
-        ;;
-      2)
-        if [ "$db_available" != true ]; then
-          warn "Database membri non disponibile."
-          continue
-        fi
-        echo ""
-        read "Q?Nome e cognome: "
-        if [ -z "$Q" ]; then
-          warn "Inserisci un nome o cognome."
-          continue
-        fi
-        local list
-        list=$(node "$MEMBERS_CLI" search "$Q" 2>/dev/null)
-        if [ -z "$list" ] || echo "$list" | grep -qi 'Nessun membro'; then
-          warn "Nessun membro trovato per \"$Q\"."
-          continue
-        fi
-        echo "$list"
-        echo ""
-        read "NUM?Numero del membro (0 per rifare): "
-        if [ "$NUM" = "0" ] || [ -z "$NUM" ]; then continue; fi
-        local json
-        json=$(node "$MEMBERS_CLI" select "$NUM" 2>/dev/null)
-        if [ -z "$json" ]; then
-          warn "Selezione non valida."
-          continue
-        fi
-        AUTOLOGIN=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).autologin_url))")
-        ACTIVE_CF=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).codice_fiscale))")
-        MEMBER_NAME=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log([m.nome,m.cognome].filter(Boolean).join(' '))})")
-        if valid_autologin "$AUTOLOGIN" && [ -n "$ACTIVE_CF" ]; then
-          return 0
-        fi
-        warn "Link del membro non valido."
-        ;;
-      3)
-        if [ "$db_available" != true ]; then
-          warn "Database membri non disponibile."
-          continue
-        fi
-        local list
-        list=$(node "$MEMBERS_CLI" list 2>/dev/null)
-        if [ -z "$list" ] || echo "$list" | grep -qi 'Nessun membro'; then
-          warn "Nessun membro nel database."
-          continue
-        fi
-        echo "$list"
-        echo ""
-        read "NUM?Numero del membro (0 per annullare): "
-        if [ "$NUM" = "0" ] || [ -z "$NUM" ]; then continue; fi
-        local json
-        json=$(node "$MEMBERS_CLI" select "$NUM" 2>/dev/null)
-        if [ -z "$json" ]; then
-          warn "Selezione non valida."
-          continue
-        fi
-        AUTOLOGIN=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).autologin_url))")
-        ACTIVE_CF=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).codice_fiscale))")
-        MEMBER_NAME=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log([m.nome,m.cognome].filter(Boolean).join(' '))})")
-        if valid_autologin "$AUTOLOGIN" && [ -n "$ACTIVE_CF" ]; then
-          return 0
-        fi
-        warn "Link del membro non valido."
-        ;;
-      m|M)
-        echo ""
-        warn "Incolla il TUO link di autologin personale GSD Campus."
-        warn "Lo trovi nell'email di invito al corso o nella piattaforma."
-        echo ""
-        while true; do
-          read "AUTOLOGIN?Link autologin: "
-          echo ""
-          if [ -z "$AUTOLOGIN" ]; then
-            warn "Il link autologin è obbligatorio."
-          elif ! valid_autologin "$AUTOLOGIN"; then
-            warn "Link non valido."
-            echo "Formato atteso: https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN"
-            echo "Esempio:        https://tecsial.gsdcampus.it/autologin/CSOLSS95L23D862R/EbeavV6UwGUVXyVdsPqmTHWd1bWrGddQ"
-            echo "Riprova."
-          else
-            ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
-            MEMBER_NAME="(configurazione manuale)"
-            return 0
-          fi
-        done
-        ;;
-      k|K)
-        if [ -n "$current_url" ] && valid_autologin "$current_url"; then
-          AUTOLOGIN="$current_url"
-          ACTIVE_CF="$current_cf"
-          if [ -z "$ACTIVE_CF" ]; then
-            ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
-          fi
-          MEMBER_NAME="$current_name"
-          return 0
-        fi
-        warn "Nessun account attuale valido da mantenere."
-        ;;
-      *)
-        warn "Scelta non valida."
-        ;;
-    esac
-  done
+  if [ "$action" = "cancel" ]; then
+    rm -f "$result_file"
+    return 1
+  fi
+
+  AUTOLOGIN=$(node -e "
+    const fs=require('fs');
+    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
+    console.log(r.autologinUrl||'');
+  " 2>/dev/null)
+  ACTIVE_CF=$(node -e "
+    const fs=require('fs');
+    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
+    console.log(r.codice_fiscale||'');
+  " 2>/dev/null)
+  MEMBER_NAME=$(node -e "
+    const fs=require('fs');
+    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
+    console.log(r.memberName||'');
+  " 2>/dev/null)
+
+  rm -f "$result_file"
+
+  if [ "$action" != "keep" ] && [ -z "$AUTOLOGIN" ] && [ -z "$ACTIVE_CF" ]; then
+    warn "whoareyou-cli non ha restituito un account valido."
+    return 1
+  fi
+
+  return 0
 }
 
-# Aggiorna config.json con l'account selezionato preservando orari e altre
-# impostazioni esistenti.
+# Logga l'account attivo/aggiornato. Il file config.json viene già scritto
+# direttamente da whoareyou-cli.js per le azioni select/manual.
 apply_selected_account() {
-  local current_cf
-  current_cf=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.codice_fiscale||'');}catch(e){console.log('')}" 2>/dev/null)
-
-  # Se è lo stesso account già in config, non serve riscrivere nulla
-  if [ -n "$ACTIVE_CF" ] && [ "$ACTIVE_CF" = "$current_cf" ]; then
-    return 0
+  if [ -n "$MEMBER_NAME" ] && [ -n "$ACTIVE_CF" ] && [ "$MEMBER_NAME" != "(configurazione manuale)" ]; then
+    ok "Account selezionato: $MEMBER_NAME (CF: $ACTIVE_CF)"
+  elif [ -n "$ACTIVE_CF" ] && [ -n "$AUTOLOGIN" ]; then
+    ok "Account configurato: CF $ACTIVE_CF — $(mask_url "$AUTOLOGIN")"
+  elif [ -n "$AUTOLOGIN" ]; then
+    ok "Account configurato: $(mask_url "$AUTOLOGIN")"
   fi
-
-  # Se il membro è nel database, usa set-active per mantenere baseUrl/courseUrls/workSchedule
-  if node "$MEMBERS_CLI" set-active "$ACTIVE_CF" 2>/dev/null; then
-    ok "Account aggiornato: $MEMBER_NAME (CF: $ACTIVE_CF)"
-    return 0
-  fi
-
-  # Altrimenti aggiorna solo autologinUrl/codice_fiscale/memberName via node
-  node -e "
-    const fs = require('fs');
-    const p = '$CONFIG_FILE';
-    let cfg = {};
-    try { cfg = JSON.parse(fs.readFileSync(p, 'utf8')); } catch(e) {}
-    cfg.autologinUrl = '$AUTOLOGIN';
-    cfg.codice_fiscale = '$ACTIVE_CF';
-    cfg.memberName = '$MEMBER_NAME';
-    if (!cfg.baseUrl) cfg.baseUrl = 'https://tecsial.gsdcampus.it/';
-    if (!Array.isArray(cfg.courseUrls)) cfg.courseUrls = [];
-    fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
-  " 2>/dev/null || true
-  ok "Account aggiornato: $MEMBER_NAME (CF: $ACTIVE_CF)"
 }
 
 parse_input_time() {
@@ -937,19 +713,21 @@ while true; do
 
     if [[ "$REPLY" =~ ^[Yy]$ ]]; then
       # Scrive config.json via JSON.stringify per evitare problemi di escaping
-      # con nomi contenenti virgolette o backslash.
+      # con nomi contenenti virgolette o backslash. Preserva campi esistenti
+      # come baseUrl, courseUrls e ollamaModel.
       ACTIVE_CF="$ACTIVE_CF" MEMBER_NAME="$MEMBER_NAME" AUTOLOGIN="$AUTOLOGIN" DAYS_JSON="$DAYS_JSON" SHIFTS_JSON="$SHIFTS_JSON" node -e "
         const fs = require('fs');
-        const cfg = {
-          codice_fiscale: process.env.ACTIVE_CF,
-          memberName: process.env.MEMBER_NAME,
-          autologinUrl: process.env.AUTOLOGIN,
-          baseUrl: 'https://tecsial.gsdcampus.it/',
-          courseUrls: [],
-          workSchedule: {
-            days: process.env.DAYS_JSON.split(',').map(Number).filter(Boolean),
-            shifts: JSON.parse('[' + process.env.SHIFTS_JSON + ']')
-          }
+        let cfg = {};
+        try { cfg = JSON.parse(fs.readFileSync('$CONFIG_FILE', 'utf8')); } catch(e) {}
+        cfg.codice_fiscale = process.env.ACTIVE_CF;
+        cfg.memberName = process.env.MEMBER_NAME;
+        cfg.autologinUrl = process.env.AUTOLOGIN;
+        if (!cfg.baseUrl) cfg.baseUrl = 'https://tecsial.gsdcampus.it/';
+        if (!Array.isArray(cfg.courseUrls)) cfg.courseUrls = [];
+        if (!cfg.ollamaModel) cfg.ollamaModel = '${OLLAMA_MODEL}';
+        cfg.workSchedule = {
+          days: process.env.DAYS_JSON.split(',').map(Number).filter(Boolean),
+          shifts: JSON.parse('[' + process.env.SHIFTS_JSON + ']')
         };
         fs.writeFileSync('$CONFIG_FILE', JSON.stringify(cfg, null, 2));
       " 2>/dev/null || {
@@ -960,6 +738,7 @@ while true; do
   "memberName": "$MEMBER_NAME",
   "autologinUrl": "$AUTOLOGIN",
   "baseUrl": "https://tecsial.gsdcampus.it/",
+  "ollamaModel": "${OLLAMA_MODEL}",
   "courseUrls": [],
   "workSchedule": {
     "days": [$DAYS_JSON],
