@@ -113,7 +113,7 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 ## Quiz e domande sconosciute
 
 - `src/lib/quiz.js` risolve i quiz usando `data/known_answers.json`.
-- Se una domanda non è presente in `known_answers.json`, lo script chiede a Ollama la risposta in base alla conoscenza generale del modello. Il modello è configurabile in `config.json` (`ollamaModel`, default `gemma4:31b-cloud`); per il monitor/autoplay consigliato il modello cloud più economico e sufficiente per quiz in italiano è `qwen3.5:4b`.
+- Se una domanda non è presente in `known_answers.json`, lo script chiede a Ollama la risposta in base alla conoscenza generale del modello. Il modello è configurabile in `config.json` (`ollamaModel`, default `gemma4:31b-cloud`); per il monitor/autoplay consigliato il modello cloud più economico e sufficiente per quiz in italiano è `gemma4:cloud`.
 - Le risposte date da Ollama vengono salvate in `data/pending_quiz_answers.json`. **Solo se il quiz viene superato**, quelle risposte vengono promosse automaticamente nella banca condivisa `data/known_answers.json` (la banca cresce solo con risposte verificate dall'esito).
 - Se Ollama non riesce a rispondere, lo script si ferma e salva la domanda in `data/need_answer.json`: in quel caso puoi cercare la risposta online, aggiornare `known_answers.json` e riavviare.
 - Quando un quiz finale risulta non superato, lo script salva **tutte** le domande del quiz in `data/need_answer.json` e segnala il corso come `need_help` in `data/course_state.json`, in attesa di intervento AI/utente.
