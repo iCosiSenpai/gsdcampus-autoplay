@@ -15,6 +15,12 @@ log_ok() {
   echo "✅ OK: $1"
 }
 
+# Legge il modello Ollama da config.json (campo `ollamaModel`).
+get_ollama_model() {
+  node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${OLLAMA_MODEL}'); } catch(e){ console.log('${OLLAMA_MODEL}'); }" 2>/dev/null || echo '${OLLAMA_MODEL}'
+}
+OLLAMA_MODEL=$(get_ollama_model)
+
 # Verifica se package.json/package-lock.json sono allineati a node_modules
 package_hash_ok() {
   local hash_file="$DIR/.package_hash"
@@ -76,14 +82,14 @@ else
   log_missing "Ollama"
 fi
 
-# 6. Ollama modello gemma4:31b-cloud (richiede login cloud)
+# 6. Ollama modello ${OLLAMA_MODEL} (richiede login cloud)
 if command -v ollama &>/dev/null; then
   if ! curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
     log_missing "Server Ollama attivo su 127.0.0.1:11434 (esegui: ollama serve oppure ./scripts/ollama-daemon.sh start)"
-  elif ollama list 2>/dev/null | grep -q "gemma4:31b-cloud"; then
-    log_ok "Modello Ollama gemma4:31b-cloud"
+  elif ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
+    log_ok "Modello Ollama ${OLLAMA_MODEL}"
   else
-    log_missing "Modello Ollama gemma4:31b-cloud (modello cloud; esegui ./launch-ai-supervisor.sh oppure ollama login + ollama pull gemma4:31b-cloud)"
+    log_missing "Modello Ollama ${OLLAMA_MODEL} (modello cloud; esegui ./launch-ai-supervisor.sh oppure ollama login + ollama pull ${OLLAMA_MODEL})"
   fi
 fi
 
