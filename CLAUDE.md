@@ -134,7 +134,7 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 ## Quiz e domande sconosciute
 
 - `src/lib/quiz.js` risolve i quiz usando prima `data/known_answers.json` (matching per similarità, soglia 0.75). Questa banca è **condivisa** tra tutti i membri.
-- Se una domanda non è presente in `known_answers.json`, lo script chiede a Ollama (`gemma4:31b-cloud`) la risposta in base alla conoscenza generale del modello. Il parsing della risposta è multi-strategia (prefisso "Risposta: X", frase, lettera isolata, markdown, match testo) e, se la confidenza è bassa, viene fatto **un tentativo di conferma** con un prompt che forza una singola lettera.
+- Se una domanda non è presente in `known_answers.json`, lo script chiede a Ollama la risposta in base alla conoscenza generale del modello. Il modello è configurabile in `config.json` (`ollamaModel`, default `gemma4:31b-cloud`); per il monitor/autoplay consigliato il modello cloud più economico e sufficiente per quiz in italiano è `qwen3.5:4b`. Il parsing della risposta è multi-strategia (prefisso "Risposta: X", frase, lettera isolata, markdown, match testo) e, se la confidenza è bassa, viene fatto **un tentativo di conferma** con un prompt che forza una singola lettera.
 - Le risposte date da Ollama vengono salvate in `data/accounts/<CF>/pending_quiz_answers.json` (per-account). **Solo se il quiz viene superato**, quelle risposte vengono promosse automaticamente nella banca condivisa `data/known_answers.json` (la banca cresce solo con risposte verificate dall'esito).
 - Se Ollama non riesce a rispondere, lo script si ferma e salva la domanda in `data/accounts/<CF>/need_answer.json`: in quel caso puoi cercare la risposta online, aggiornare `known_answers.json` e riavviare.
 - Quando un quiz finale risulta non superato, lo script salva **tutte** le domande del quiz in `data/need_answer.json` e segnala il corso come `need_help` in `data/course_state.json`, in attesa di intervento AI/utente.
@@ -169,7 +169,7 @@ Sii conciso. Riporta:
 
 ## Requisito login Ollama
 
-Il modello `gemma4:31b-cloud` è un modello **cloud Ollama** e richiede l'autenticazione. `./launch-ai-supervisor.sh` e `./scripts/setup.sh` gestiscono automaticamente il login: aprono `ollama login` in modo interattivo, aspettano che l'utente inserisca le credenziali, poi procedono con il download del modello e l'avvio di Claude. Non devi fare altro.
+Il modello configurato in `config.json` (`ollamaModel`, default `gemma4:31b-cloud`) è un modello **cloud Ollama** e richiede l'autenticazione. Per il monitor/autoplay il modello cloud più economico e sufficiente per quiz in italiano è `qwen3.5:4b`. `./launch-ai-supervisor.sh` e `./scripts/setup.sh` gestiscono automaticamente il login: aprono `ollama login` in modo interattivo, aspettano che l'utente inserisca le credenziali, poi procedono con il download del modello e l'avvio di Claude. Non devi fare altro.
 
 ## Configurazione iniziale
 
