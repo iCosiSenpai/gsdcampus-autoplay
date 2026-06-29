@@ -45,7 +45,7 @@ Durante la prima installazione il Terminale ti chiederà alcune cose: rispondi c
 - La **password del Mac (sudo)**: una sola volta, all'inizio.
 - Eventuali conferme di **installazione/aggiornamento** (anche `y/n`) → rispondi **sempre sì**.
 - Il **login Ollama** (per il modello AI) → inserisci le credenziali.
-- Il **tuo link di autologin personale** GSD Campus → incollalo (lo trovi nell'email del corso).
+- La **selezione del tuo account** dall'elenco membri del corso: cerchi per nome, cognome o codice fiscale e scegli il numero corrispondente (niente più link da incollare). Se l'elenco non è ancora stato importato, lo script ti propone di importare il CSV; in alternativa puoi ancora incollare manualmente il link di autologin.
 - I **giorni lavorativi** dello store (es. lun–ven).
 - La **modalità oraria**:
   1. **Continuato** — un solo turno (es. 09:00–18:00).
@@ -160,6 +160,10 @@ cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-a
   nota risponde da sola; se è nuova chiede al modello AI. **Solo se il quiz viene superato**, le
   risposte nuove entrano nella banca condivisa, che così cresce solo con risposte verificate.
   L'esito (superato/non superato + punteggio) compare in `./status.sh`.
+- **Stato personale**: ogni Mac tiene i propri progressi in `data/accounts/<tuo codice fiscale>/`
+  (corsi, cookie di sessione, risposte quiz in attesa). La banca risposte `data/known_answers.json`
+  è condivisa. Per cambiare utente basta rilanciare `./scripts/setup.sh` e selezionare un altro
+  membro dall'elenco (non serve un nuovo link): lo stato del membro precedente resta salvato.
 
 ---
 

@@ -40,7 +40,7 @@ La prima volta il Terminale ti chiede alcune cose: rispondi con calma.
 - la **password del Mac (sudo)** — una sola volta, all'inizio; lo script la mantiene valida per tutta la sessione con un keepalive in background;
 - conferme di **installazione/aggiornamento/verifica dipendenze** (anche `y/n`) → rispondi **sempre sì**;
 - il **login Ollama** (modello AI `gemma4:31b-cloud`) → inserisci le credenziali;
-- il **tuo link di autologin personale** GSD Campus → incollalo (lo trovi nell'email del corso);
+- la **selezione del tuo account** dall'elenco membri del corso: cerchi per nome, cognome o codice fiscale e scegli il numero corrispondente. Se il database membri è vuoto, lo script ti propone di importare il CSV (esportato da Numbers: *File ▸ Esporta ▸ CSV*); in alternativa puoi ancora incollare manualmente il link di autologin;
 - i **giorni lavorativi** (default lun–ven);
 - la **modalità oraria** preferita:
   1. **Continuato** — un solo turno (es. 09:00–18:00).
@@ -52,6 +52,8 @@ La prima volta il Terminale ti chiede alcune cose: rispondi con calma.
 Gli orari si possono scrivere come vuoi: `9:30`, `09:30`, `9.30`, `0930`, `930`.
 
 Non avere paura di confermare: serve tutto per automatizzare il corso.
+
+> **Requisito**: Node.js >= 22 (per il database membri SQLite built-in). Lo script di setup installa/aggiorna Node se necessario.
 
 In alternativa, manualmente con git:
 
@@ -69,6 +71,29 @@ cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
 
 Salta l'installazione e apre subito l'AI. Una volta aperta, **non ricordare comandi tecnici: parlane in italiano**, per esempio `controlla il corso`, `come sta andando?`, `avvia il corso`, `ferma tutto`. L'AI avvia, ferma e controlla lo script al posto tuo e ti dice come sta andando.
 
+## Gestione membri e stato multi-utente
+
+L'elenco di tutti i membri del corso è in un database SQLite (`data/members.db`), importato dal CSV esportato da Numbers. Ogni Mac tiene lo **stato personale** (corsi completati, cookie di sessione, risposte quiz in attesa) nella propria cartella `data/accounts/<codice fiscale>/`. La banca delle risposte `data/known_answers.json` è **condivisa** tra tutti i membri della classe.
+
+Comandi utili (da dentro `~/gsdcampus-autoplay`):
+
+```bash
+# Importa/aggiorna l'elenco membri da CSV (default ~/Downloads/elenco utenti FNC.csv)
+node scripts/import-members.js
+
+# Cerca un membro e vedi il codice fiscale
+node scripts/lib/members-cli.js search "Mario"
+
+# Cambia account attivo (poi riavvia con ./start.sh)
+node scripts/lib/members-cli.js set-active <CODICE_FISCALE>
+
+# Stato aggregato di tutti i membri (chi ha finito, chi è bloccato, chi non ha iniziato)
+node scripts/lib/dashboard-cli.js summary
+node scripts/lib/dashboard-cli.js list
+```
+
+Per cambiare utente basta rilanciare `./scripts/setup.sh` e selezionare un altro membro (non serve incollare un nuovo link): lo stato del membro precedente resta salvato nella sua cartella.
+
 ## Aggiornamento forzato
 
 Se vuoi davvero reinstallare/aggiornare tutto (Homebrew, npm, browser, Ollama, ecc.), poi apri Claude Code:
@@ -77,9 +102,9 @@ Se vuoi davvero reinstallare/aggiornare tutto (Homebrew, npm, browser, Ollama, e
 cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update && ./launch-ai-supervisor.sh
 ```
 
-## Ricominciare da zero (cancella autologin e orari)
+## Ricominciare da zero (cancella membro attivo e orari)
 
-Se vuoi reinserire autologin e orari da capo:
+Se vuoi reinserire account e orari da capo:
 
 ```bash
 cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-ai-supervisor.sh
