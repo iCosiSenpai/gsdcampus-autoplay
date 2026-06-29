@@ -10,7 +10,7 @@
 #   2. PRIMA installazione: clona il progetto in ~/gsdcampus-autoplay e apre l'AI (con setup).
 #      Se l'installazione ESISTE GIÀ, chiede COSA vuoi fare con un menu:
 #        - Aggiorna e avvia
-#        - Cambia link autologin e/o orari
+#        - Cambia account e/o orari
 #        - Reinstallazione pulita (riallinea codice + reinstalla dipendenze)
 #        - Solo avvia
 #        - Disinstalla
@@ -82,7 +82,7 @@ if [ -d "$TARGET/.git" ]; then
     echo ""
     printf "${BOLD}Perché stai rilanciando l'installer?${NC}\n"
     echo "  1) Aggiorna e avvia          — scarica fix e risposte quiz aggiornate, poi apre l'AI (consigliato)"
-    echo "  2) Cambia link autologin/orari — riconfigura accesso e orari, poi avvia"
+    echo "  2) Cambia account/orari        — riconfigura account (elenco membri) e orari, poi avvia"
     echo "  3) Reinstallazione pulita     — riallinea il codice e reinstalla tutte le dipendenze"
     echo "  4) Solo avvia                 — apre l'AI senza modificare nulla"
     echo "  5) Disinstalla                — rimuove dipendenze, modello, CLI (con conferma)"
@@ -113,7 +113,7 @@ else
   info "Scarico il progetto in $TARGET..."
   git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$TARGET"
   ok "Progetto scaricato."
-  MODE="install"   # prima volta: il launcher avvierà il setup interattivo (autologin + orari)
+  MODE="install"   # prima volta: il launcher avvierà il setup interattivo (selezione account + orari)
 fi
 
 if [ "$MODE" = "cancel" ]; then
@@ -146,7 +146,7 @@ case "$MODE" in
     ;;
   reconfig)
     update_repo
-    warn "Riconfigurazione: ti verranno richiesti di nuovo il link autologin e gli orari."
+    warn "Riconfigurazione: ti verrà richiesto di selezionare l'account dall'elenco membri e di configurare gli orari."
     rm -f config.json
     ;;
   clean)
