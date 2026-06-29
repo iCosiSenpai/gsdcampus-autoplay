@@ -32,7 +32,11 @@ const _paths = account.stateFilePaths(ROOT);
 const SESSION_FILE = path.join(_paths.accountDir, 'session_state.json');
 const STATE_FILE = _paths.storageState;
 const ACTIVE_CF = _paths.codiceFiscale;
-if (ACTIVE_CF) log(`Account attivo: CF ${ACTIVE_CF} (stato in data/accounts/${ACTIVE_CF}/)`);
+if (ACTIVE_CF) {
+  log(`Account attivo: CF ${ACTIVE_CF} (stato in data/accounts/${ACTIVE_CF}/)`);
+  const mig = account.migrateLegacyState(ROOT, log);
+  if (mig.moved > 0) log(`Stato legacy migrato in data/accounts/${ACTIVE_CF}/ (${mig.moved} file).`);
+}
 
 const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -479,12 +483,12 @@ async function runCourse(page, courseUrl, sessionState, state) {
           if (quizResult.outcome === 'need_help' || quizResult.outcome === 'failed' || quizResult.outcome === 'unknown') {
             courseState.incrementQuizAttempt(ROOT, state, courseUrl, quizResult.resultText);
             courseState.markCourseNeedHelp(ROOT, state, courseUrl, quizResult.reason || 'quiz non superato');
-            const needAnswerPath = path.join(ROOT, 'data', 'need_answer.json');
+            const needAnswerPath = _paths.needAnswer;
             const needAnswerSaved = fs.existsSync(needAnswerPath);
             if (needAnswerSaved) {
-              log(`Quiz finale di ${courseUrl} non superato (${quizResult.resultText}). Corso segnato come 'need_help'; domande salvate in data/need_answer.json. Passo al prossimo corso.`);
+              log(`Quiz finale di ${courseUrl} non superato (${quizResult.resultText}). Corso segnato come 'need_help'; domande salvate in ${needAnswerPath}. Passo al prossimo corso.`);
             } else {
-              log(`Quiz finale di ${courseUrl} non superato (${quizResult.resultText}). Corso segnato come 'need_help'. ATTENZIONE: non sono riuscito a catturare le domande in data/need_answer.json; sarà necessario un intervento manuale/AI.`);
+              log(`Quiz finale di ${courseUrl} non superato (${quizResult.resultText}). Corso segnato come 'need_help'. ATTENZIONE: non sono riuscito a catturare le domande in ${needAnswerPath}; sarà necessario un intervento manuale/AI.`);
             }
             monitor.update({ phase: 'need_help', courseUrl, lastQuizResult: quizResult.resultText, courseStateSummary: courseState.summarize(state) });
             return;

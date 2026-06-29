@@ -82,20 +82,32 @@ function parseAnswerLetter(response, options) {
 
   // 1. Prefisso esplicito: "Risposta: A", "Risposta- A", "Risposta A"
   let m = clean.match(/risposta\s*(?:corretta)?\s*[:\-]?\s*([A-D])\b/i);
-  if (m && labels.includes(m[1])) return { letter: m[1], strategy: 'explicit', confidence: 1.0 };
+  if (m) {
+    const letter = m[1].toUpperCase();
+    if (labels.includes(letter)) return { letter, strategy: 'explicit', confidence: 1.0 };
+  }
 
   // 2. Frase: "la risposta è A", "l'opzione corretta è A"
   m = low.match(/(?:risposta|opzione)\s+(?:corretta\s+)?(?:è|e|sarà)?\s*([A-D])\b/);
-  if (m && labels.includes(m[1].toUpperCase())) return { letter: m[1].toUpperCase(), strategy: 'phrase', confidence: 1.0 };
+  if (m) {
+    const letter = m[1].toUpperCase();
+    if (labels.includes(letter)) return { letter, strategy: 'phrase', confidence: 1.0 };
+  }
 
   // 3. Markdown bold/backtick esplicito: **A** o `A`
   m = raw.match(/\*\*([A-D])\*\*/) || raw.match(/`([A-D])`/);
-  if (m && labels.includes(m[1])) return { letter: m[1], strategy: 'markdown', confidence: 0.95 };
+  if (m) {
+    const letter = m[1].toUpperCase();
+    if (labels.includes(letter)) return { letter, strategy: 'markdown', confidence: 0.95 };
+  }
 
   // 4. Lettera isolata, solo se la risposta è breve (evita match di una A casuale in testo lungo)
   if (short) {
     m = clean.match(/\b([A-D])\b/);
-    if (m && labels.includes(m[1])) return { letter: m[1], strategy: 'short_letter', confidence: 0.9 };
+    if (m) {
+      const letter = m[1].toUpperCase();
+      if (labels.includes(letter)) return { letter, strategy: 'short_letter', confidence: 0.9 };
+    }
   }
 
   // 5. Match sul testo dell'opzione (confidenza più bassa)

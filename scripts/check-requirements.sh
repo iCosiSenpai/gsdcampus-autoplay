@@ -40,10 +40,10 @@ fi
 # 2. Node.js / npm
 if command -v node &>/dev/null; then
   NODE_MAJOR=$(node -v | sed 's/^v\([0-9]*\).*/\1/')
-  if [ "$NODE_MAJOR" -ge 18 ] 2>/dev/null; then
+  if [ "$NODE_MAJOR" -ge 22 ] 2>/dev/null; then
     log_ok "Node ($(node -v))"
   else
-    log_missing "Node.js >= 18 (versione attuale: $(node -v))"
+    log_missing "Node.js >= 22 (versione attuale: $(node -v))"
   fi
 else
   log_missing "Node.js"

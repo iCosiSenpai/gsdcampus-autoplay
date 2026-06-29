@@ -31,16 +31,28 @@ function readConfig(root) {
 function invalidateConfigCache() { _cfgCache = null; }
 
 /**
- * Codice fiscale dell'account attivo: da config.codice_fiscale, oppure derivato
- * dall'URL di autologin (back-compat). null se non determinabile.
+ * Codice fiscale dell'account attivo: derivato PRIMARIAMENTE dall'URL di
+ * autologin (fonte di verità), con fallback a config.codice_fiscale per
+ * backward-compat. Se i due valori divergono, logga un warning e usa quello
+ * dell'URL per evitare che cookie/corsi finiscano nella cartella sbagliata.
  */
-function activeCodiceFiscale(root) {
+function activeCodiceFiscale(root, log) {
   const cfg = readConfig(root);
-  if (cfg.codice_fiscale) return String(cfg.codice_fiscale).toUpperCase();
-  if (cfg.autologinUrl) {
-    const m = String(cfg.autologinUrl).match(CF_FROM_URL_RE);
-    if (m) return m[1];
+  const urlCf = cfg.autologinUrl
+    ? (String(cfg.autologinUrl).match(CF_FROM_URL_RE) || [])[1]
+    : null;
+  const cfgCf = cfg.codice_fiscale
+    ? String(cfg.codice_fiscale).toUpperCase()
+    : null;
+
+  if (urlCf) {
+    if (cfgCf && cfgCf !== urlCf) {
+      (log || console.warn)(`Attenzione: config.codice_fiscale (${cfgCf}) diverso da quello nell'autologinUrl (${urlCf}). Uso ${urlCf}.`);
+    }
+    return urlCf;
   }
+
+  if (cfgCf) return cfgCf;
   return null;
 }
 
@@ -72,7 +84,7 @@ function accountFile(root, cf, name) {
  * flat in data/ → back-compat.
  */
 function stateFilePaths(root) {
-  const cf = activeCodiceFiscale(root);
+  const cf = activeCodiceFiscale(root, null);
   if (cf) {
     const base = accountDataDir(root, cf);
     return {
@@ -96,6 +108,33 @@ function stateFilePaths(root) {
   };
 }
 
+/**
+ * Migrazione automatica dei file di stato legacy (data/*.json personali) nella
+ * cartella per-account dell'utente attivo. Idempotente: non sovrascrive file
+ * già esistenti nell'account dir. Da chiamare all'avvio di autoplay.
+ */
+function migrateLegacyState(root, log) {
+  const cf = activeCodiceFiscale(root, log || console);
+  if (!cf) return { moved: 0, reason: 'CF non determinabile' };
+  const dest = accountDataDir(root, cf);
+  const data = path.join(root, 'data');
+  const files = ['course_state.json', 'storage_state.json', 'pending_quiz_answers.json', 'need_answer.json'];
+  let moved = 0;
+  for (const f of files) {
+    const src = path.join(data, f);
+    const dst = path.join(dest, f);
+    if (fs.existsSync(src) && !fs.existsSync(dst)) {
+      try {
+        fs.renameSync(src, dst);
+        moved++;
+      } catch (e) {
+        (log || console.warn)(`migrateLegacyState: impossibile spostare ${f}: ${e.message}`);
+      }
+    }
+  }
+  return { moved, dest };
+}
+
 module.exports = {
   readConfig,
   invalidateConfigCache,
@@ -103,5 +142,6 @@ module.exports = {
   accountsDir,
   accountDataDir,
   accountFile,
-  stateFilePaths
+  stateFilePaths,
+  migrateLegacyState
 };

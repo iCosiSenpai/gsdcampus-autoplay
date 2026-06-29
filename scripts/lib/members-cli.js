@@ -33,6 +33,7 @@ const LAST_LIST = path.join(DATA, '.members_last_list.json');
 
 const db = require(path.join(ROOT, 'src', 'lib', 'db'));
 const importCsv = require(path.join(ROOT, 'src', 'lib', 'import-csv'));
+const account = require(path.join(ROOT, 'src', 'lib', 'account'));
 
 const CF_FROM_URL_RE = /\/autologin\/([A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z])\//;
 
@@ -47,13 +48,8 @@ function readConfig() { return readJson(CONFIG, {}); }
 function writeConfig(cfg) { writeJson(CONFIG, cfg); }
 
 function activeCodiceFiscale() {
-  const cfg = readConfig();
-  if (cfg.codice_fiscale) return String(cfg.codice_fiscale).toUpperCase();
-  if (cfg.autologinUrl) {
-    const m = String(cfg.autologinUrl).match(CF_FROM_URL_RE);
-    if (m) return m[1];
-  }
-  return null;
+  // Delega al risolutore centrale per coerenza: URL vince su config.codice_fiscale.
+  return account.activeCodiceFiscale(ROOT);
 }
 
 function saveListIndex(members) {
@@ -117,7 +113,9 @@ if (cmd === 'search') {
   } else {
     const name = [m.cognome, m.nome].filter(Boolean).join(' ');
     console.log(`Membro attivo: ${name} (CF: ${m.codice_fiscale})`);
-    console.log(`  autologin: ${m.autologin_url}`);
+    // Maschera il token nell'URL per non esporre credenziali nei log.
+    const maskedUrl = String(m.autologin_url).replace(/\/([^/]+)$/, '/•••••');
+    console.log(`  autologin: ${maskedUrl}`);
   }
 
 } else if (cmd === 'set-active') {
@@ -141,8 +139,9 @@ if (cmd === 'search') {
     };
   }
   writeConfig(cfg);
+  const maskedUrl = String(m.autologin_url).replace(/\/([^/]+)$/, '/•••••');
   console.log(`Membro attivo impostato: ${cfg.memberName} (CF: ${m.codice_fiscale})`);
-  console.log(`  autologin: ${m.autologin_url}`);
+  console.log(`  autologin: ${maskedUrl}`);
 
 } else if (cmd === 'stats') {
   const total = db.countMembers(ROOT);
@@ -159,27 +158,11 @@ if (cmd === 'search') {
     console.error('Nessun membro attivo in config.json: impossibile determinare la cartella account.');
     process.exit(1);
   }
-  const dest = path.join(DATA, 'accounts', cf);
-  try { fs.mkdirSync(dest, { recursive: true }); } catch (e) { /* ok */ }
-  const legacyFiles = ['course_state.json', 'storage_state.json', 'pending_quiz_answers.json', 'need_answer.json'];
-  let moved = 0;
-  for (const f of legacyFiles) {
-    const src = path.join(DATA, f);
-    const dst = path.join(dest, f);
-    if (fs.existsSync(src) && !fs.existsSync(dst)) {
-      try {
-        fs.renameSync(src, dst);
-        console.log(`  spostato: data/${f} → data/accounts/${cf}/${f}`);
-        moved++;
-      } catch (e) {
-        console.error(`  impossibile spostare data/${f}: ${e.message}`);
-      }
-    }
-  }
-  if (moved === 0) {
+  const mig = account.migrateLegacyState(ROOT, console);
+  if (mig.moved === 0) {
     console.log(`Nessun file legacy da migrare per ${cf} (già migrato o assente).`);
   } else {
-    console.log(`Migrati ${moved} file in data/accounts/${cf}/`);
+    console.log(`Migrati ${mig.moved} file in ${mig.dest}`);
   }
 
 } else {

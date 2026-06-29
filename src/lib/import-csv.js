@@ -13,9 +13,11 @@ const fs = require('fs');
 const db = require('./db');
 
 // Regex riportata da scripts/setup.sh (validazione link autologin GSD Campus).
+const CF_RE = /^[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]$/;
+const CF_IN_URL_RE = /\/autologin\/([A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z])\//;
+
 const AUTOLOGIN_RE =
   /^https:\/\/tecsial\.gsdcampus\.it\/autologin\/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]\/[A-Za-z0-9]+$/;
-const CF_RE = /^[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]$/;
 
 const HEADERS = {
   id: ['id'],
@@ -138,6 +140,14 @@ function importCsv(root, csvPath, log) {
     }
     if (!validateAutologinUrl(url)) {
       result.errors.push(`Riga ${i + 1}: link di accesso non valido per CF ${cf}`);
+      result.skipped++;
+      continue;
+    }
+
+    // Cross-validazione: il CF nel path dell'URL deve coincidere con la colonna CF.
+    const urlCf = (url.match(CF_IN_URL_RE) || [])[1];
+    if (urlCf !== cf) {
+      result.errors.push(`Riga ${i + 1}: CF nella colonna (${cf}) non coincide con quello nell'URL (${urlCf || '?'})`);
       result.skipped++;
       continue;
     }

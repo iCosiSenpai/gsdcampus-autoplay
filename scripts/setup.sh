@@ -224,12 +224,9 @@ is_config_valid() {
   if [[ ! "$url" =~ ^https://tecsial\.gsdcampus\.it/autologin/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/[A-Za-z0-9]+$ ]]; then
     return 1
   fi
-  # 3b. Se è presente codice_fiscale, verifica che il membro sia nel database.
-  local cf
-  cf=$(node -e "const c=require('$CONFIG_FILE'); console.log(c.codice_fiscale||'');" 2>/dev/null)
-  if [ -n "$cf" ] && [ -f "$DIR/data/members.db" ]; then
-    node -e "const {getMember}=require('./src/lib/db'); if(!getMember('.','$cf')) process.exit(1);" 2>/dev/null || return 1
-  fi
+  # 3b. (non più attivo) Il campo codice_fiscale non deve bloccare la validità se
+  # il database membri è vuoto/assente: in modalità manuale l'utente potrebbe non
+  # aver importato il CSV. Il CF viene sempre derivato/verificato a runtime.
   # 4. Orario presente e con almeno un turno valido?
   node -e "
     const c = require('$CONFIG_FILE');
@@ -725,7 +722,25 @@ while true; do
     fi
 
     if [[ "$REPLY" =~ ^[Yy]$ ]]; then
-      cat > "$CONFIG_FILE" <<EOF
+      # Scrive config.json via JSON.stringify per evitare problemi di escaping
+      # con nomi contenenti virgolette o backslash.
+      ACTIVE_CF="$ACTIVE_CF" MEMBER_NAME="$MEMBER_NAME" AUTOLOGIN="$AUTOLOGIN" DAYS_JSON="$DAYS_JSON" SHIFTS_JSON="$SHIFTS_JSON" node -e "
+        const fs = require('fs');
+        const cfg = {
+          codice_fiscale: process.env.ACTIVE_CF,
+          memberName: process.env.MEMBER_NAME,
+          autologinUrl: process.env.AUTOLOGIN,
+          baseUrl: 'https://tecsial.gsdcampus.it/',
+          courseUrls: [],
+          workSchedule: {
+            days: process.env.DAYS_JSON.split(',').map(Number).filter(Boolean),
+            shifts: JSON.parse('[' + process.env.SHIFTS_JSON + ']')
+          }
+        };
+        fs.writeFileSync('$CONFIG_FILE', JSON.stringify(cfg, null, 2));
+      " 2>/dev/null || {
+        err "Impossibile salvare config.json con JSON.stringify, uso fallback heredoc."
+        cat > "$CONFIG_FILE" <<EOF
 {
   "codice_fiscale": "$ACTIVE_CF",
   "memberName": "$MEMBER_NAME",
@@ -738,6 +753,7 @@ while true; do
   }
 }
 EOF
+      }
       ok "Configurazione salvata in config.json"
       # Migra i file di stato legacy (data/*.json personali) nella cartella
       # per-account data/accounts/<CF>/. Idempotente.
@@ -775,9 +791,9 @@ else
   ok "Homebrew già installato: $(brew --version | head -1). Salto."
 fi
 
-# 2. Node.js (richiesto >= 18)
+# 2. Node.js (richiesto >= 22 per node:sqlite built-in)
 step "2/7 - Node.js"
-NODE_MIN_MAJOR=18
+NODE_MIN_MAJOR=22
 if command -v node &>/dev/null; then
   NODE_MAJOR=$(node -v | sed 's/^v\([0-9]*\).*/\1/')
   if [ "$NODE_MAJOR" -ge "$NODE_MIN_MAJOR" ] 2>/dev/null; then
