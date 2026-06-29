@@ -54,6 +54,13 @@ step() {
   echo -e "${BOLD}▶ $1${NC}"
 }
 
+# Legge il modello Ollama da config.json (campo `ollamaModel`).
+# Fallback a ${OLLAMA_MODEL} per retrocompatibilità.
+get_ollama_model() {
+  node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${OLLAMA_MODEL}'); } catch(e){ console.log('${OLLAMA_MODEL}'); }" 2>/dev/null || echo '${OLLAMA_MODEL}'
+}
+OLLAMA_MODEL=$(get_ollama_model)
+
 # Claude Code CLI installa in ~/.local/bin. Negli shell non interattivi .zshrc
 # non viene letto, quindi assicuriamo il PATH sia attivo qui e persistito nei
 # principali file di configurazione dello shell (zsh e bash).
@@ -147,7 +154,7 @@ print_header() {
   echo "  • Dipendenze npm (Playwright)"
   echo "  • Browser per Playwright / Google Chrome"
   echo "  • Ollama"
-  echo "  • Modello Ollama gemma4:31b-cloud"
+  echo "  • Modello Ollama ${OLLAMA_MODEL}"
   echo "  • Claude Code CLI"
   echo ""
   warn "Se il Terminale chiede di installare/aggiornare qualcosa (anche 'y/n'), conferma SEMPRE."
@@ -734,24 +741,24 @@ fi
 # Prima di interrogare i modelli, assicurati che il server Ollama sia attivo.
 ensure_ollama_server
 
-# 6. Modello gemma4:31b-cloud (cloud, richiede login Ollama)
-step "6/7 - Modello Ollama gemma4:31b-cloud"
-if ! ollama list 2>/dev/null | grep -q "gemma4:31b-cloud"; then
-  warn "Il modello gemma4:31b-cloud è un modello CLOUD e richiede il login Ollama."
+# 6. Modello ${OLLAMA_MODEL} (cloud, richiede login Ollama)
+step "6/7 - Modello Ollama ${OLLAMA_MODEL}"
+if ! ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
+  warn "Il modello ${OLLAMA_MODEL} è un modello CLOUD e richiede il login Ollama."
   warn "Verrà aperto il login interattivo. Inserisci le tue credenziali."
   echo ""
   # Esegue ollama login in modo interattivo, collegando stdin/stderr correttamente
   ollama login
 
-  info "Download modello gemma4:31b-cloud in corso..."
-  ollama pull gemma4:31b-cloud
+  info "Download modello ${OLLAMA_MODEL} in corso..."
+  ollama pull ${OLLAMA_MODEL}
 
-  if ! ollama list 2>/dev/null | grep -q "gemma4:31b-cloud"; then
+  if ! ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
     err "Download fallito. Se il login non è andato a buon fine, riesegui ./launch-ai-supervisor.sh."
     exit 1
   fi
 else
-  ok "Modello gemma4:31b-cloud già presente. Salto."
+  ok "Modello ${OLLAMA_MODEL} già presente. Salto."
 fi
 
 # 7. Claude Code CLI

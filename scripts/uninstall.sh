@@ -4,6 +4,12 @@ set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
+# Legge il modello Ollama da config.json (campo `ollamaModel`).
+get_ollama_model() {
+  node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${OLLAMA_MODEL}'); } catch(e){ console.log('${OLLAMA_MODEL}'); }" 2>/dev/null || echo '${OLLAMA_MODEL}'
+}
+OLLAMA_MODEL=$(get_ollama_model)
+
 echo "============================================"
 echo " Disinstallazione gsdcampus-autoplay"
 echo "============================================"
@@ -47,7 +53,7 @@ fi
 # 4. Rimuovi Ollama (modelli inclusi)
 if command -v ollama &>/dev/null; then
   echo "-> Rimozione modelli Ollama..."
-  ollama rm gemma4:31b-cloud 2>/dev/null || true
+  ollama rm ${OLLAMA_MODEL} 2>/dev/null || true
 
   echo "-> Rimozione Ollama..."
   if [ -f /usr/local/bin/ollama ]; then
