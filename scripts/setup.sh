@@ -253,7 +253,7 @@ read_config_schedule_desc() {
   node "$SCHEDULE_CLI" describe 2>/dev/null || echo "Orario non configurato"
 }
 
-# Se config esiste ed è valido, mostra riepilogo e chiede se modificarlo
+# Se config esiste ed è valido, mostra riepilogo e chiede se modificare orari
 if is_config_valid; then
   CURRENT_URL=$(read_config_url)
   CURRENT_SCHEDULE=$(read_config_schedule_desc)
@@ -267,7 +267,7 @@ if is_config_valid; then
   if [ "$AUTO_YES" = true ]; then
     MODIFY=false
   else
-    read -q "REPLY?Vuoi modificarla? [y/N] "
+    read -q "REPLY?Vuoi modificare anche orari/altre impostazioni? [y/N] "
     echo ""
     if [[ "$REPLY" =~ ^[Yy]$ ]]; then
       MODIFY=true
@@ -294,6 +294,14 @@ else
     echo ""
   fi
 fi
+
+# Schermata iniziale "Chi sei?" — prima di ogni altra scelta del setup.
+# L'utente seleziona l'account dal database membri o incolla l'autologin.
+if ! who_are_you; then
+  err "Account non configurato. Impossibile proseguire in modalità automatica."
+  exit 1
+fi
+apply_selected_account
 
 # Helper di validazione giorni
 valid_days() {
@@ -388,6 +396,237 @@ select_member_from_db() {
     fi
     warn "Link del membro non valido. Riprova."
   done
+}
+
+# Schermata iniziale "Chi sei?" — mostrata all'avvio del setup, prima di ogni
+# altra scelta. Permette di selezionare l'account dal database membri per CF o
+# nome/cognome, oppure di incollare manualmente l'autologin.
+who_are_you() {
+  # Legge account attuale da config.json (se esiste e valido)
+  local current_name current_cf current_url
+  current_name=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.memberName||'');}catch(e){console.log('')}" 2>/dev/null)
+  current_cf=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.codice_fiscale||'');}catch(e){console.log('')}" 2>/dev/null)
+  current_url=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.autologinUrl||'');}catch(e){console.log('')}" 2>/dev/null)
+
+  echo ""
+  echo "============================================"
+  echo -e "${BOLD}CHI SEI?${NC}"
+  echo "============================================"
+
+  if [ -n "$current_name" ] && [ -n "$current_cf" ]; then
+    echo "Account attuale: $current_name (CF: $current_cf)"
+  elif [ -n "$current_url" ]; then
+    echo "Account attuale: $(mask_url "$current_url")"
+  fi
+
+  # Se --yes è attivo, mantieni l'account attuale se presente
+  if [ "$AUTO_YES" = true ]; then
+    if [ -n "$current_url" ] && valid_autologin "$current_url"; then
+      AUTOLOGIN="$current_url"
+      ACTIVE_CF="$current_cf"
+      if [ -z "$ACTIVE_CF" ]; then
+        ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
+      fi
+      MEMBER_NAME="$current_name"
+      return 0
+    fi
+    # Se non c'è un account valido in --yes, lascia che il chiamante fallisca
+    return 1
+  fi
+
+  # Costruisce le opzioni in base a disponibilità database
+  local db_available=false
+  if ensure_members_db 2>/dev/null; then
+    db_available=true
+  fi
+
+  echo ""
+  echo "Scegli come identificarti:"
+  if [ "$db_available" = true ]; then
+    echo "  [1] Cerca per codice fiscale"
+    echo "  [2] Cerca per nome e cognome"
+    echo "  [3] Mostra lista completa dei membri"
+  fi
+  echo "  [m] Inserisci autologin manualmente"
+  if [ -n "$current_url" ] && valid_autologin "$current_url"; then
+    echo "  [k] Mantieni account attuale"
+  fi
+  echo ""
+
+  while true; do
+    read "CHOICE?Scelta: "
+    case "$CHOICE" in
+      1)
+        if [ "$db_available" != true ]; then
+          warn "Database membri non disponibile."
+          continue
+        fi
+        echo ""
+        read "Q?Codice fiscale: "
+        if [ -z "$Q" ]; then
+          warn "Inserisci un codice fiscale."
+          continue
+        fi
+        local list
+        list=$(node "$MEMBERS_CLI" search "$Q" 2>/dev/null)
+        if [ -z "$list" ] || echo "$list" | grep -qi 'Nessun membro'; then
+          warn "Nessun membro trovato per \"$Q\"."
+          continue
+        fi
+        echo "$list"
+        echo ""
+        read "NUM?Numero del membro (0 per rifare): "
+        if [ "$NUM" = "0" ] || [ -z "$NUM" ]; then continue; fi
+        local json
+        json=$(node "$MEMBERS_CLI" select "$NUM" 2>/dev/null)
+        if [ -z "$json" ]; then
+          warn "Selezione non valida."
+          continue
+        fi
+        AUTOLOGIN=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).autologin_url))")
+        ACTIVE_CF=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).codice_fiscale))")
+        MEMBER_NAME=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log([m.nome,m.cognome].filter(Boolean).join(' '))})")
+        if valid_autologin "$AUTOLOGIN" && [ -n "$ACTIVE_CF" ]; then
+          return 0
+        fi
+        warn "Link del membro non valido."
+        ;;
+      2)
+        if [ "$db_available" != true ]; then
+          warn "Database membri non disponibile."
+          continue
+        fi
+        echo ""
+        read "Q?Nome e cognome: "
+        if [ -z "$Q" ]; then
+          warn "Inserisci un nome o cognome."
+          continue
+        fi
+        local list
+        list=$(node "$MEMBERS_CLI" search "$Q" 2>/dev/null)
+        if [ -z "$list" ] || echo "$list" | grep -qi 'Nessun membro'; then
+          warn "Nessun membro trovato per \"$Q\"."
+          continue
+        fi
+        echo "$list"
+        echo ""
+        read "NUM?Numero del membro (0 per rifare): "
+        if [ "$NUM" = "0" ] || [ -z "$NUM" ]; then continue; fi
+        local json
+        json=$(node "$MEMBERS_CLI" select "$NUM" 2>/dev/null)
+        if [ -z "$json" ]; then
+          warn "Selezione non valida."
+          continue
+        fi
+        AUTOLOGIN=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).autologin_url))")
+        ACTIVE_CF=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).codice_fiscale))")
+        MEMBER_NAME=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log([m.nome,m.cognome].filter(Boolean).join(' '))})")
+        if valid_autologin "$AUTOLOGIN" && [ -n "$ACTIVE_CF" ]; then
+          return 0
+        fi
+        warn "Link del membro non valido."
+        ;;
+      3)
+        if [ "$db_available" != true ]; then
+          warn "Database membri non disponibile."
+          continue
+        fi
+        local list
+        list=$(node "$MEMBERS_CLI" list 2>/dev/null)
+        if [ -z "$list" ] || echo "$list" | grep -qi 'Nessun membro'; then
+          warn "Nessun membro nel database."
+          continue
+        fi
+        echo "$list"
+        echo ""
+        read "NUM?Numero del membro (0 per annullare): "
+        if [ "$NUM" = "0" ] || [ -z "$NUM" ]; then continue; fi
+        local json
+        json=$(node "$MEMBERS_CLI" select "$NUM" 2>/dev/null)
+        if [ -z "$json" ]; then
+          warn "Selezione non valida."
+          continue
+        fi
+        AUTOLOGIN=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).autologin_url))")
+        ACTIVE_CF=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>console.log(JSON.parse(d).codice_fiscale))")
+        MEMBER_NAME=$(echo "$json" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const m=JSON.parse(d);console.log([m.nome,m.cognome].filter(Boolean).join(' '))})")
+        if valid_autologin "$AUTOLOGIN" && [ -n "$ACTIVE_CF" ]; then
+          return 0
+        fi
+        warn "Link del membro non valido."
+        ;;
+      m|M)
+        echo ""
+        warn "Incolla il TUO link di autologin personale GSD Campus."
+        warn "Lo trovi nell'email di invito al corso o nella piattaforma."
+        echo ""
+        while true; do
+          read "AUTOLOGIN?Link autologin: "
+          echo ""
+          if [ -z "$AUTOLOGIN" ]; then
+            warn "Il link autologin è obbligatorio."
+          elif ! valid_autologin "$AUTOLOGIN"; then
+            warn "Link non valido."
+            echo "Formato atteso: https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN"
+            echo "Esempio:        https://tecsial.gsdcampus.it/autologin/CSOLSS95L23D862R/EbeavV6UwGUVXyVdsPqmTHWd1bWrGddQ"
+            echo "Riprova."
+          else
+            ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
+            MEMBER_NAME="(configurazione manuale)"
+            return 0
+          fi
+        done
+        ;;
+      k|K)
+        if [ -n "$current_url" ] && valid_autologin "$current_url"; then
+          AUTOLOGIN="$current_url"
+          ACTIVE_CF="$current_cf"
+          if [ -z "$ACTIVE_CF" ]; then
+            ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
+          fi
+          MEMBER_NAME="$current_name"
+          return 0
+        fi
+        warn "Nessun account attuale valido da mantenere."
+        ;;
+      *)
+        warn "Scelta non valida."
+        ;;
+    esac
+  done
+}
+
+# Aggiorna config.json con l'account selezionato preservando orari e altre
+# impostazioni esistenti.
+apply_selected_account() {
+  local current_cf
+  current_cf=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.codice_fiscale||'');}catch(e){console.log('')}" 2>/dev/null)
+
+  # Se è lo stesso account già in config, non serve riscrivere nulla
+  if [ -n "$ACTIVE_CF" ] && [ "$ACTIVE_CF" = "$current_cf" ]; then
+    return 0
+  fi
+
+  # Se il membro è nel database, usa set-active per mantenere baseUrl/courseUrls/workSchedule
+  if node "$MEMBERS_CLI" set-active "$ACTIVE_CF" 2>/dev/null; then
+    ok "Account aggiornato: $MEMBER_NAME (CF: $ACTIVE_CF)"
+    return 0
+  fi
+
+  # Altrimenti aggiorna solo autologinUrl/codice_fiscale/memberName via node
+  node -e "
+    const fs = require('fs');
+    const p = '$CONFIG_FILE';
+    let cfg = {};
+    try { cfg = JSON.parse(fs.readFileSync(p, 'utf8')); } catch(e) {}
+    cfg.autologinUrl = '$AUTOLOGIN';
+    cfg.codice_fiscale = '$ACTIVE_CF';
+    cfg.memberName = '$MEMBER_NAME';
+    if (!cfg.baseUrl) cfg.baseUrl = 'https://tecsial.gsdcampus.it/';
+    if (!Array.isArray(cfg.courseUrls)) cfg.courseUrls = [];
+    fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+  " 2>/dev/null || true
+  ok "Account aggiornato: $MEMBER_NAME (CF: $ACTIVE_CF)"
 }
 
 parse_input_time() {
@@ -647,43 +886,11 @@ configure_shifts() {
 while true; do
   if [ "$MODIFY" = true ]; then
     echo ""
-    echo -e "${BOLD}Selezione account membri${NC}"
-    echo "Invece di incollare il link, seleziona il tuo account dall'elenco membri."
-    echo ""
-
-    AUTOLOGIN=""
-    ACTIVE_CF=""
-    MEMBER_NAME=""
-
-    # Prova a usare il database membri; se non disponibile o l'utente sceglie
-    # 'manual', ricade sul copia-incolla classico del link.
-    if ensure_members_db && select_member_from_db; then
-      ok "Membro selezionato: $MEMBER_NAME (CF: $ACTIVE_CF)"
-    else
-      echo ""
-      warn "Incolla il TUO link di autologin personale GSD Campus."
-      warn "Lo trovi nell'email di invito al corso o nella piattaforma."
-      echo ""
-      while true; do
-        read "AUTOLOGIN?Link autologin: "
-        echo ""
-        if [ -z "$AUTOLOGIN" ]; then
-          warn "Il link autologin è obbligatorio."
-        elif ! valid_autologin "$AUTOLOGIN"; then
-          warn "Link non valido."
-          echo "Formato atteso: https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN"
-          echo "Esempio:        https://tecsial.gsdcampus.it/autologin/CSOLSS95L23D862R/EbeavV6UwGUVXyVdsPqmTHWd1bWrGddQ"
-          echo "Riprova."
-        else
-          ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
-          MEMBER_NAME="(configurazione manuale)"
-          break
-        fi
-      done
-    fi
-
-    echo ""
     echo -e "${BOLD}Configurazione orari di lavoro${NC}"
+    echo ""
+    echo "Account selezionato: $MEMBER_NAME (CF: $ACTIVE_CF)"
+    echo "Autologin: $(mask_url "$AUTOLOGIN")"
+    echo ""
 
     configure_days
     configure_shifts
