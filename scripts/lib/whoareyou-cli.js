@@ -71,6 +71,13 @@ function importMembersCsv() {
   return new Promise((resolve) => {
     readLine(`Percorso del CSV [${defCsv}]: `).then((answer) => {
       const csvPath = answer.trim() || defCsv;
+      if (!fs.existsSync(csvPath)) {
+        console.error(`File non trovato: ${csvPath}`);
+        console.error('Metti il CSV dell\'elenco utenti (es. in ~/Downloads) e riprova,');
+        console.error('oppure scegli "Inserisci autologin manualmente" per incollare il tuo link.');
+        resolve(false);
+        return;
+      }
       try {
         execFileSync(process.execPath, [IMPORT_MEMBERS, csvPath], { cwd: ROOT, stdio: 'inherit' });
         const n = countMembers();
@@ -479,24 +486,45 @@ async function main() {
   while (true) {
     const dbCount = countMembers();
 
-    const items = [
-      { label: 'Cerca per codice fiscale', value: 'cf' },
-      { label: 'Cerca per nome e cognome', value: 'name' },
-      { label: 'Mostra lista completa membri', value: 'list' }
-    ];
+    let items;
+    let menuSubtitle = subtitle;
 
     if (dbCount === 0) {
-      items.push({ label: 'Importa elenco membri (CSV)', value: 'import' });
+      // Database membri assente (es. installazione fresca via git clone: members.db
+      // è gitignored perché contiene i token di autologin). Le ricerche per
+      // nome/CF/lista NON possono funzionare senza DB, quindi NON le offriamo:
+      // mostriamo solo le azioni utili e una spiegazione chiara, così il collega
+      // non resta in loop "nessun membro trovato / riprova".
+      const defCsv = path.join(process.env.HOME || '/tmp', 'Downloads', 'elenco utenti FNC.csv');
+      let importLabel = 'Importa elenco membri (CSV)';
+      if (fs.existsSync(defCsv)) {
+        importLabel = 'Importa elenco membri (CSV trovato in ~/Downloads)';
+      }
+      menuSubtitle = 'Nessun elenco membri presente su questo Mac.\n' +
+        'Per scegliere il tuo account: importa il CSV dell\'elenco (se lo hai), ' +
+        'oppure incolla il tuo link di autologin personale.';
+      items = [
+        { label: importLabel, value: 'import' },
+        { label: 'Inserisci autologin manualmente (incolla il tuo link)', value: 'manual' }
+      ];
+      if (currentUrl && validAutologin(currentUrl)) {
+        items.push({ label: 'Mantieni account attuale', value: 'keep' });
+      }
+      items.push({ label: 'Annulla', value: 'cancel' });
+    } else {
+      items = [
+        { label: 'Cerca per codice fiscale', value: 'cf' },
+        { label: 'Cerca per nome e cognome', value: 'name' },
+        { label: 'Mostra lista completa membri', value: 'list' },
+        { label: 'Inserisci autologin manualmente', value: 'manual' }
+      ];
+      if (currentUrl && validAutologin(currentUrl)) {
+        items.push({ label: 'Mantieni account attuale', value: 'keep' });
+      }
+      items.push({ label: 'Annulla', value: 'cancel' });
     }
 
-    items.push({ label: 'Inserisci autologin manualmente', value: 'manual' });
-
-    if (currentUrl && validAutologin(currentUrl)) {
-      items.push({ label: 'Mantieni account attuale', value: 'keep' });
-    }
-    items.push({ label: 'Annulla', value: 'cancel' });
-
-    const choice = await menu(items, 'CHI SEI?', subtitle);
+    const choice = await menu(items, 'CHI SEI?', menuSubtitle);
     if (!choice || choice.value === 'cancel') return { action: 'cancel' };
 
     if (choice.value === 'keep') {
