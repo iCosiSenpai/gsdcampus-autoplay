@@ -633,6 +633,14 @@ async function runAutoplay() {
   let browser;
   let outerRetries = 0;
   const MAX_OUTER_RETRIES = 5;
+  // True se in QUALCHE outer retry di questo run abbiamo raggiunto la dashboard con
+  // una sessione autenticata (loggedIn=true, visto >=1 link corso). Se poi i
+  // tentativi successivi falliscono, NON è il link autologin a essere scaduto: è
+  // la piattaforma che rate-limita i re-login dopo la nostra raffica di tentativi
+  // (nei log si vede il token "esaurirsi" sotto la raffica e riprendere decine di
+  // minuti dopo). Va distinto dal caso "link davvero morto" (mai visto un corso)
+  // per non dire al collega "aggiorna il link" quando il link funziona.
+  let tokenProvenValid = false;
 
   log('========================================');
   log('Avvio GSD Campus autoplay');
@@ -747,6 +755,7 @@ async function runAutoplay() {
             continue;
           }
           loggedIn = true;
+          tokenProvenValid = true; // il link autologin FUNZIONA in questo run
           log(`URL finale dopo login: ${page.url()}`);
         } catch (e) {
           log(`Errore durante l'autologin (tentativo ${la}): ${e.message}`);
@@ -921,6 +930,23 @@ async function runAutoplay() {
         process.exit(0);
       }
       if (e instanceof AutologinError || e.code === 'AUTOLOGIN_INVALID') {
+        if (tokenProvenValid) {
+          // Il link FUNZIONA: in questo run abbiamo già raggiunto la dashboard con
+          // una sessione valida. I tentativi falliti adesso sono rate-limiting della
+          // piattaforma causato dalla nostra raffica di re-login, NON un link
+          // scaduto. Non diciamo "aggiorna il link" (sarebbe falso e porterebbe il
+          // collega a riconfigurare un account che funziona): usciamo con fase
+          // recoverable session_unstable, così il supervisore sa che basta riprovare.
+          log('SESSIONE INSTABILE (token valido, rate-limit dei re-login):', e.message);
+          monitor.update({
+            running: false,
+            phase: 'session_unstable',
+            lastError: 'Token autologin valido ma la piattaforma limita i re-login. Riprova tra qualche minuto.'
+          });
+          if (browser) { try { await browser.close(); } catch (_) {} }
+          try { writeDashboard(ROOT); } catch (_) {}
+          process.exit(3);
+        }
         log('AUTOLOGIN NON VALIDO:', e.message);
         monitor.update({ running: false, phase: 'autologin_invalid', lastError: e.message });
         if (browser) { try { await browser.close(); } catch (_) {} }
@@ -947,8 +973,15 @@ async function runAutoplay() {
         browser = null;
       }
       if (outerRetries < MAX_OUTER_RETRIES) {
-        log(`Riavvio browser tra 30 secondi (tentativo ${outerRetries}/${MAX_OUTER_RETRIES})...`);
-        await new Promise(r => setTimeout(r, 30000));
+        // Backoff crescente: 30s, 60s, 120s, 240s. La piattaforma GSD Campus
+        // rate-limita l'autologin se colpito troppe volte in poco tempo (il token
+        // si "esaurisce" sotto la raffica di re-login e riprende decine di minuti
+        // dopo). Spaziare i tentativi riduce il rate-limiting e dà alla sessione
+        // il tempo di stabilizzarsi, invece di martellare a 30s fissi.
+        const backoffMs = 30000 * Math.pow(2, outerRetries - 1); // 30, 60, 120, 240...
+        const backoffSec = Math.round(backoffMs / 1000);
+        log(`Riavvio browser tra ${backoffSec} secondi (tentativo ${outerRetries}/${MAX_OUTER_RETRIES})...`);
+        await new Promise(r => setTimeout(r, backoffMs));
       }
     }
   }
