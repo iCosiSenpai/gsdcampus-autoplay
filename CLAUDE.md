@@ -47,9 +47,14 @@ L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso 
 - **Nota importante:** `./launch-ai-supervisor.sh` ferma automaticamente eventuali istanze precedenti di autoplay/scheduler all'avvio, quindi non è necessario eseguire `./stop.sh` prima. Se un collega ha ancora un processo vecchio in esecuzione, il supervisore lo pulisce da solo.
 - `./scripts/ollama-daemon.sh start` — avvia Ollama in modalità headless (se serve al supervisore stesso).
 - `./scripts/ollama-daemon.sh stop` — ferma Ollama.
+- `./status.sh --check` — come `status.sh` ma esegue anche la **verifica LIVE** del link autologin (apre un browser headless, ~30s) e ti dice se il link funziona davvero ADESSO. La verifica live parte da sola anche senza `--check` quando lo stato salvato segnala `autologin_invalid`/`session_lost`.
+- `node scripts/lib/healthcheck-cli.js` — sonda LIVE dell'autologin (umana). `--json` per output JSON. Exit 0 = link valido, 1 = non valido. **È la fonte di verità su "il link funziona?"**, da preferire SEMPRE a `logs/status.json` (che può essere vecchio).
+- `./scripts/monitor-course.sh [secondi]` — monitor live del corso che si aggiorna da solo (default 30s); `--once` per una sola stampa.
 - `tail -f logs/autoplay.log` — segui log in tempo reale.
 - `tail -n 30 logs/autoplay.log` — ultimi log.
 - `cat logs/status.json` — stato live.
+
+> **IMPORTANTE — `logs/status.json` può essere VECCHIO.** Descrive l'ultimo run di autoplay, che potrebbe essere terminato giorni fa. Controlla sempre il campo `lastUpdate`: se è più vecchio di qualche minuto e nessun processo è attivo, NON riportarlo come stato attuale. In particolare **non dire mai all'utente che l'autologin è scaduto basandoti solo su uno `status.json` con `phase: autologin_invalid`**: prima esegui la verifica live (`node scripts/lib/healthcheck-cli.js` o `./status.sh --check`). Il link è quasi sempre ancora valido — un singolo calo di sessione transitorio durante la scoperta corsi può aver scritto quella fase.
 - `node scripts/lib/schedule-cli.js describe` — descrizione leggibile degli orari configurati.
 - `node scripts/lib/schedule-cli.js is-work-time` — controlla se adesso è orario lavorativo.
 - `node scripts/lib/schedule-cli.js next-start` — prossimo inizio turno (ISO).
@@ -85,7 +90,9 @@ Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
      - "avvia subito" → esegui `./start.sh --ignore-hours`.
      - "non fare nulla" → non avviare nulla.
 4. Se il processo è attivo ma l'ultimo log/heartbeat è vecchio (più di 2 minuti) o c'è un errore, esegui `./stop.sh` poi `./start.sh` (o `--ignore-hours` se fuori orario e l'utente vuole forzare).
-5. **Autologin non valido/scaduto**: se `logs/status.json` ha `phase: "autologin_invalid"` (o vedi nel log "AUTOLOGIN NON VALIDO"), il link non autentica più. NON riavviare in loop. Procedi in questo ordine:
+5. **Autologin non valido/scaduto**: se `logs/status.json` ha `phase: "autologin_invalid"` (o vedi nel log "AUTOLOGIN NON VALIDO"), **NON dare per scontato che il link sia morto**. Quella fase può essere stata scritta da un calo di sessione transitorio o appartenere a un run vecchio. **Verifica SEMPRE prima con la sonda live**: `node scripts/lib/healthcheck-cli.js` (o `./status.sh --check`).
+   - Se la sonda dice **VALIDO**: era un falso allarme / stato vecchio. Non chiedere nuovi link: basta riavviare con `./start.sh` (o `--ignore-hours`).
+   - Se la sonda dice **NON valido**: allora il link autentica davvero più. NON riavviare in loop; procedi in questo ordine:
    1. Se `data/members.db` esiste, è probabile che contenga un token aggiornato: offri all'utente di **re-selezionare il membro** dal database (`node scripts/lib/members-cli.js search <query>` per trovarlo, poi `node scripts/lib/members-cli.js set-active <CF>`).
    2. Se il token nel database è anch'esso scaduto, l'utente deve fornire un nuovo elenco CSV: esegui `node scripts/import-members.js "<percorso csv>"` (esporta da Numbers: File ▸ Esporta ▸ CSV) e poi re-seleziona il membro.
    3. Fallback manuale: chiedi all'utente il link aggiornato, aggiorna `config.json` con il tool Edit (mantenendo `codice_fiscale` coerente) e riavvia con `./start.sh`.
@@ -134,10 +141,10 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 ## Quiz e domande sconosciute
 
 - `src/lib/quiz.js` risolve i quiz usando prima `data/known_answers.json` (matching per similarità, soglia 0.75). Questa banca è **condivisa** tra tutti i membri.
-- Se una domanda non è presente in `known_answers.json`, lo script chiede a Ollama la risposta in base alla conoscenza generale del modello. Il modello è configurabile in `config.json` (`ollamaModel`, default `gemma4:31b-cloud`); per il monitor/autoplay consigliato il modello cloud più economico e sufficiente per quiz in italiano è `gemma4:cloud`. Il parsing della risposta è multi-strategia (prefisso "Risposta: X", frase, lettera isolata, markdown, match testo) e, se la confidenza è bassa, viene fatto **un tentativo di conferma** con un prompt che forza una singola lettera.
+- Se una domanda non è presente in `known_answers.json`, lo script chiede a Ollama la risposta in base alla conoscenza generale del modello. **Il modello è quello in `config.json` (`ollamaModel`) — unica fonte di verità, usata da launcher, setup e autoplay.** Il parsing della risposta è multi-strategia (prefisso "Risposta: X", frase, lettera isolata, markdown, match testo) e, se la confidenza è bassa, viene fatto **un tentativo di conferma** con un prompt che forza una singola lettera.
 - Le risposte date da Ollama vengono salvate in `data/accounts/<CF>/pending_quiz_answers.json` (per-account). **Solo se il quiz viene superato**, quelle risposte vengono promosse automaticamente nella banca condivisa `data/known_answers.json` (la banca cresce solo con risposte verificate dall'esito).
 - Se Ollama non riesce a rispondere, lo script si ferma e salva la domanda in `data/accounts/<CF>/need_answer.json`: in quel caso puoi cercare la risposta online, aggiornare `known_answers.json` e riavviare.
-- Quando un quiz finale risulta non superato, lo script salva **tutte** le domande del quiz in `data/need_answer.json` e segnala il corso come `need_help` in `data/course_state.json`, in attesa di intervento AI/utente.
+- Quando un quiz finale risulta non superato, lo script salva **tutte** le domande del quiz in `data/accounts/<CF>/need_answer.json` e segnala il corso come `need_help` in `data/accounts/<CF>/course_state.json`, in attesa di intervento AI/utente.
 - Strumenti manutenzione banca risposte: `node scripts/lib/answers-cli.js stats|list|merge` e `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
 
 ## Domande che l'utente può fare
@@ -169,7 +176,7 @@ Sii conciso. Riporta:
 
 ## Requisito login Ollama
 
-Il modello configurato in `config.json` (`ollamaModel`, default `gemma4:31b-cloud`) è un modello **cloud Ollama** e richiede l'autenticazione. Per il monitor/autoplay il modello cloud più economico e sufficiente per quiz in italiano è `qwen3.5:4b`. `./launch-ai-supervisor.sh` e `./scripts/setup.sh` gestiscono automaticamente il login: aprono `ollama login` in modo interattivo, aspettano che l'utente inserisca le credenziali, poi procedono con il download del modello e l'avvio di Claude. Non devi fare altro.
+Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)** — `launch-ai-supervisor.sh`, `setup.sh` e `check-requirements.sh` lo leggono tutti da lì, così non c'è rischio di scaricare/cercare modelli diversi tra loro. Se è un modello **cloud Ollama**, richiede l'autenticazione: `./launch-ai-supervisor.sh` e `./scripts/setup.sh` gestiscono automaticamente il login (aprono `ollama login` in modo interattivo, aspettano le credenziali, poi scaricano il modello e avviano Claude). Per cambiare modello basta modificare `ollamaModel` in `config.json`. Non devi fare altro.
 
 ## Configurazione iniziale
 
