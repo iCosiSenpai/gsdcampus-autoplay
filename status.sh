@@ -39,9 +39,11 @@ PID_FILE=".autoplay_pid"
 
 # ── Stato scheduler ──
 info "Processo scheduler"
+SCHED_ACTIVE=false
 if [ -f "$PID_FILE" ]; then
   PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
   if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+    SCHED_ACTIVE=true
     # Calcola durata attività dal tempo trascorso (etime), più robusto di lstart
     local etime
     etime=$(ps -o etime= -p "$PID" 2>/dev/null | tr -d ' ' || echo "")
@@ -166,8 +168,21 @@ if [ "$RUN_LIVE" = true ] && [ -f "$HEALTHCHECK_CLI" ]; then
   info "Verifica LIVE del link autologin (apro un browser headless, ~30s)..."
   if HC_OUT=$(node "$HEALTHCHECK_CLI" 2>&1); then
     ok "Link autologin VALIDO. $HC_OUT"
-    if [ "$STATUS_PHASE" = "autologin_invalid" ]; then
-      warn "Nota: lo stato salvato diceva 'autologin_invalid', ma la verifica live dice che il link FUNZIONA. Era un falso allarme/stato vecchio: basta riavviare con ./start.sh."
+    if [ "$STATUS_PHASE" = "autologin_invalid" ] || [ "$STATUS_PHASE" = "session_lost" ]; then
+      warn "Nota: lo stato salvato diceva '$STATUS_PHASE', ma la verifica live dice che il link FUNZIONA. Era un falso allarme/stato vecchio: basta riavviare con ./start.sh."
+      # Auto-correzione: se nessuno scheduler è attivo, ripuliamo il segnale ormai
+      # falso da status.json, così chi lo legge (anche l'AI) non viene più ingannato.
+      if [ "$SCHED_ACTIVE" = false ]; then
+        node -e "
+          const fs=require('fs');const p='logs/status.json';
+          let s={};try{s=JSON.parse(fs.readFileSync(p,'utf8'))}catch(e){}
+          s.phase='idle';s.running=false;s.lastError=null;
+          s.lastUpdate=new Date().toISOString();
+          s.note='Autologin verificato VALIDO con healthcheck (stato precedente obsoleto).';
+          s.autologinHealth={ok:true,checkedAt:s.lastUpdate};
+          fs.writeFileSync(p,JSON.stringify(s,null,2));
+        " 2>/dev/null && info "Stato salvato corretto (autologin risulta valido)."
+      fi
     fi
   else
     err "Link autologin NON valido. $HC_OUT"
