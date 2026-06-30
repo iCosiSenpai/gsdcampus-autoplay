@@ -32,7 +32,15 @@ if [ -f "$HOME/.zshrc" ]; then
   source "$HOME/.zshrc" >/dev/null 2>&1 || true
 fi
 
-MODEL="gemma4:31b-cloud"
+# Modello Ollama: UNICA fonte di verità è config.json (campo ollamaModel), così
+# launcher, setup.sh e check-requirements.sh usano sempre lo STESSO modello. Il
+# valore viene riletto dopo lo step di configurazione (config.json potrebbe non
+# esistere ancora al primo avvio). Fallback coerente con config.json.example.
+MODEL_FALLBACK="gemma4:cloud"
+read_ollama_model() {
+  node -e "try{const c=require('$DIR/config.json');process.stdout.write(c.ollamaModel||'$MODEL_FALLBACK')}catch(e){process.stdout.write('$MODEL_FALLBACK')}" 2>/dev/null || printf '%s' "$MODEL_FALLBACK"
+}
+MODEL="$MODEL_FALLBACK"
 
 # Controlla se tutti i requisiti sono già soddisfatti (senza output)
 requirements_satisfied() {
@@ -90,6 +98,11 @@ if [ "$CONFIG_OK" = false ]; then
     exit 1
   fi
 fi
+
+# Ora che config.json esiste di sicuro, leggi il modello da lì (fonte di verità).
+MODEL="$(read_ollama_model)"
+[ -z "$MODEL" ] && MODEL="$MODEL_FALLBACK"
+info "Modello Ollama (da config.json): $MODEL"
 
 # 2. Manutenzione pre-avvio (rotazione log, pulizia vecchi dump)
 step "2/5" "Manutenzione pre-avvio"

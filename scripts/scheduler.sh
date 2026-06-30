@@ -93,7 +93,10 @@ while true; do
   if [[ "$IGNORE_HOURS" = true ]]; then
     log "Avvio autoplay (modalità ignore-hours)..."
     node "$DIR/src/autoplay.js" --ignore-hours 2>&1 | tee -a "$LOG_FILE"
-    EXIT_CODE=${PIPESTATUS[0]}
+    # zsh: l'exit code dei comandi in pipe è in $pipestatus (1-indexed), NON in
+    # $PIPESTATUS (bash-ism, qui sarebbe vuoto → il ramo "successo" scatterebbe
+    # sempre, anche dopo un crash). Va letto SUBITO dopo la pipe.
+    EXIT_CODE=${pipestatus[1]}
     if [[ "$EXIT_CODE" -eq 0 ]]; then
       # Uscita pulita: fine turno oppure tutti i corsi completati/in attesa di aiuto (need_help).
       # Non riavviare subito a vuoto; attendi 10 minuti così l'AI/utente può intervenire.
