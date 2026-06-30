@@ -316,8 +316,8 @@ async function runCourse(page, courseUrl, sessionState, state) {
         throw new SessionError('Sessione instabile: l\'accesso cade ripetutamente dopo il login (token autologin probabilmente scaduto/consumato).');
       }
       try {
-        await page.goto(config.autologinUrl, { waitUntil: 'networkidle', timeout: 60000 });
-        await page.waitForTimeout(4000);
+        await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
+        await page.waitForTimeout(5000);
       } catch (e) {
         log(`Errore re-login: ${e.message}`);
       }
@@ -334,7 +334,7 @@ async function runCourse(page, courseUrl, sessionState, state) {
         return;
       }
       try {
-        await page.goto(config.autologinUrl, { waitUntil: 'networkidle' });
+        await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
         await page.waitForTimeout(5000);
       } catch (e) {
         log(`Errore durante il re-login: ${e.message}`);
@@ -428,7 +428,7 @@ async function runCourse(page, courseUrl, sessionState, state) {
       if (!currentUrl.includes('/corso/show/')) {
         log(`Spostamento inatteso: ${currentUrl}. Ritorno al login...`);
         try {
-          await page.goto(config.autologinUrl, { waitUntil: 'networkidle' });
+          await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
           await page.waitForTimeout(5000);
         } catch (e) {
           log(`Errore re-login: ${e.message}`);
@@ -528,7 +528,7 @@ async function runCourse(page, courseUrl, sessionState, state) {
         throw new SessionError('Troppi login drop durante apertura lezione.');
       }
       try {
-        await page.goto(config.autologinUrl, { waitUntil: 'networkidle' });
+        await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
         await page.waitForTimeout(5000);
       } catch (e) {
         log(`Errore re-login: ${e.message}`);
@@ -550,7 +550,7 @@ async function runCourse(page, courseUrl, sessionState, state) {
       }).catch(() => null);
       if (startUrl) {
         emptyUrls.clear();
-        await page.goto(startUrl, { waitUntil: 'networkidle' });
+        await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await solveQuizWrapper(page, courseUrl);
       } else {
         emptyUrls.add(nextHref);
@@ -618,28 +618,9 @@ async function runAutoplay() {
     monitor.update({ phase: 'starting', running: true, lastError: null });
     try {
       log('Avvio browser in modalità headless...');
-      browser = await chromium.launch({
-        channel: 'chrome',
-        headless: true,
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage'
-        ]
-      });
-
-      const ctxOptions = {
-        viewport: { width: 1440, height: 900 },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
-      };
-      if (fs.existsSync(STATE_FILE)) {
-        ctxOptions.storageState = STATE_FILE;
-      }
       // Pulizia preventiva: lo storage state locale può contenere cookie/sessioni
-      // vecchie che interferiscono con il nuovo autologin. Rimuoviamolo all'inizio
-      // di ogni run in modo che il browser parta pulito. Se il login ha successo,
-      // verrà riscritto con la nuova sessione valida.
+      // vecchie che interferiscono con il nuovo autologin. Rimuoviamolo PRIMA di
+      // creare il contesto browser, così il browser parte sempre pulito.
       try {
         if (fs.existsSync(STATE_FILE)) {
           fs.unlinkSync(STATE_FILE);
@@ -651,6 +632,24 @@ async function runAutoplay() {
       } catch (e) {
         log('Impossibile rimuovere storage/session state precedente:', e.message);
       }
+
+      browser = await chromium.launch({
+        channel: 'chrome',
+        headless: true,
+        args: [
+          '--disable-blink-features=AutomationControlled',
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage'
+        ]
+      });
+
+      // Contesto pulito: NON carichiamo mai vecchi storageState. Il login
+      // via autologin URL imposterà i cookie corretti da zero.
+      const ctxOptions = {
+        viewport: { width: 1440, height: 900 },
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+      };
 
       const ctx = await browser.newContext(ctxOptions);
 
@@ -665,31 +664,41 @@ async function runAutoplay() {
       for (let la = 1; la <= MAX_LOGIN_ATTEMPTS && !loggedIn; la++) {
         try {
           log(`Navigazione verso autologin (tentativo ${la}/${MAX_LOGIN_ATTEMPTS})`);
-          // Pulisci eventuali cookie precedenti del dominio per evitare conflitti con
-          // sessioni vecchie salvate nello storage state.
-          await ctx.clearCookies({ domain: 'tecsial.gsdcampus.it' }).catch(() => {});
-          await page.goto(config.autologinUrl, { waitUntil: 'networkidle', timeout: 60000 });
+          // Al primo tentativo puliamo i cookie per partire da zero. Ai tentativi
+          // successivi NON li puliamo: il re-goto all'autologin potrebbe aver
+          // impostato cookie che il server riconosce al prossimo redirect.
+          if (la === 1) {
+            await ctx.clearCookies({ domain: 'tecsial.gsdcampus.it' }).catch(() => {});
+          }
+          // Usiamo 'load' invece di 'networkidle': la piattaforma GSD Campus ha
+          // script persistenti (analytics, polling) che impediscono a networkidle
+          // di risolvere, causando timeout che fanno scadere la sessione server-side.
+          await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
+          // Attendi il redirect dall'autologin (normalmente immediato)
           let attempts = 0;
-          while (page.url().includes('autologin') && attempts < 30) {
-            await page.waitForTimeout(2000);
+          while (page.url().includes('autologin') && attempts < 20) {
+            await page.waitForTimeout(1000);
             attempts++;
           }
+          // Pausa per stabilizzare la sessione dopo l'autologin
+          await page.waitForTimeout(3000);
           // Gestisci pagine intermedie post-autologin (termini, scelta ruolo, ecc.)
           await handlePostLoginInterstitial(page, log);
 
-          await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'networkidle', timeout: 60000 });
+          // Naviga alla dashboard con 'domcontentloaded' (veloce e affidabile)
+          await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
           await handlePostLoginInterstitial(page, log);
 
           // Attendiamo che il DOM sia stabilizzato e la dashboard sia effettivamente caricata.
-          for (let w = 0; w < 30; w++) {
+          // Usiamo un timeout lungo perché il rendering dei corsi è asincrono.
+          for (let w = 0; w < 40; w++) {
             if (await isDashboardLoaded(page)) break;
             if (await isLoginPage(page)) break;
             await page.waitForTimeout(500);
           }
-          await page.waitForTimeout(1000);
+          await page.waitForTimeout(2000);
 
-          // Test di salute: verifica che la dashboard contenga corsi. Se è vuota ma non è
-          // login, potrebbe esserci un problema di sessione; ritentiamo.
+          // Test di salute: verifica che la dashboard contenga corsi.
           const dashboardLinks = await page.evaluate(() =>
             [...document.querySelectorAll('a[href*="/corso/show/"]')].map(a => a.href)
           ).catch(() => []);
@@ -739,13 +748,17 @@ async function runAutoplay() {
           // iniziale e la scoperta corsi (non significa che il link sia scaduto).
           const DC_MAX = 3;
           for (let dcAttempt = 1; dcAttempt <= DC_MAX; dcAttempt++) {
-            await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'networkidle', timeout: 60000 });
-            for (let w = 0; w < 15; w++) {
+            // Usiamo 'domcontentloaded' per evitare che networkidle resti appeso
+            // sugli script persistenti della piattaforma causando timeout e
+            // conseguente scadenza della sessione server-side.
+            await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
+            // Attesa esplicita per il rendering dei corsi (più affidabile di networkidle)
+            for (let w = 0; w < 30; w++) {
               if (await isDashboardLoaded(page)) break;
               if (await isLoginPage(page)) break;
               await page.waitForTimeout(500);
             }
-            await page.waitForTimeout(1000);
+            await page.waitForTimeout(2000);
             const links = await page.evaluate(() => {
               const seen = new Set();
               return [...document.querySelectorAll('a[href*="/corso/show/"]')]
@@ -763,6 +776,8 @@ async function runAutoplay() {
             }
             if (fresh.length > 0) {
               log(`Trovati ${fresh.length} corsi attivi su ${links.length} totali.`);
+              // Salva lo storage state ora che la sessione funziona
+              try { await ctx.storageState({ path: STATE_FILE }); } catch (_) {}
               return fresh;
             }
             if (links.length > 0) {
@@ -773,21 +788,22 @@ async function runAutoplay() {
             if (await isLoginPage(page)) {
               if (dcAttempt < DC_MAX) {
                 log(`Dashboard mostra login durante la scoperta (tentativo ${dcAttempt}/${DC_MAX}). Ritento autologin...`);
-                await ctx.clearCookies({ domain: 'tecsial.gsdcampus.it' }).catch(() => {});
-                await page.goto(config.autologinUrl, { waitUntil: 'networkidle', timeout: 60000 });
+                // NON puliamo i cookie qui: il clearCookies distrugge la sessione
+                // che l'autologin aveva appena impostato. La piattaforma GSD Campus
+                // usa un redirect che imposta i cookie di sessione: cancellarli e
+                // rifare il goto produce un loop infinito di sessioni morte.
+                await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
                 let attempts = 0;
-                while (page.url().includes('autologin') && attempts < 30) {
-                  await page.waitForTimeout(2000);
+                while (page.url().includes('autologin') && attempts < 20) {
+                  await page.waitForTimeout(1000);
                   attempts++;
                 }
                 // Diamo tempo alla sessione di stabilizzarsi prima del prossimo giro.
-                await page.waitForTimeout(4000);
+                await page.waitForTimeout(5000);
                 continue;
               }
               // Esauriti i tentativi: trattiamo come SESSIONE PERSA (recuperabile),
-              // non come autologin scaduto. La diagnosi di token davvero invalido
-              // avviene già nel loop di login principale (loggedIn mai true). Così
-              // un calo transitorio non blocca tutto in 'autologin_invalid'.
+              // non come autologin scaduto.
               throw new SessionError('La sessione cade durante la scoperta corsi dopo più tentativi di re-login. Riprovo (se persiste, il link autologin potrebbe essere scaduto).');
             }
             // Nessun link e nessun login: pagina vuota/errore. Riprova.

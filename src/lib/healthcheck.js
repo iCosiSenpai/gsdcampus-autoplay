@@ -77,20 +77,21 @@ async function checkAutologin(root, opts = {}) {
         // Sessione pulita a ogni tentativo, come fa autoplay.
         await ctx.clearCookies({ domain: 'tecsial.gsdcampus.it' }).catch(() => {});
 
-        await page.goto(config.autologinUrl, { waitUntil: 'networkidle', timeout: timeoutMs });
+        await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: timeoutMs });
         let guard = 0;
-        while (page.url().includes('autologin') && guard < 30) {
+        while (page.url().includes('autologin') && guard < 20) {
           await page.waitForTimeout(1000);
           guard++;
         }
+        await page.waitForTimeout(3000);
 
-        await page.goto(DASHBOARD_URL, { waitUntil: 'networkidle', timeout: timeoutMs });
-        for (let w = 0; w < 20; w++) {
+        await page.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+        for (let w = 0; w < 30; w++) {
           if (await isDashboardLoaded(page)) break;
           if (await isLoginPage(page)) break;
           await page.waitForTimeout(500);
         }
-        await page.waitForTimeout(1000);
+        await page.waitForTimeout(2000);
 
         result.finalUrl = page.url();
 
