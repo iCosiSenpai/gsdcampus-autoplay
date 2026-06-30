@@ -4,6 +4,17 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
+HEALTHCHECK_CLI="$DIR/scripts/lib/healthcheck-cli.js"
+
+# --check / --live: esegue anche la sonda LIVE dell'autologin (apre un browser
+# headless, ~30s). Senza il flag, la sonda parte da sola solo quando lo stato
+# salvato segnala problemi di autologin (per smentire/confermare un falso allarme).
+LIVE_CHECK=false
+for arg in "$@"; do
+  case "$arg" in
+    --check|--live) LIVE_CHECK=true ;;
+  esac
+done
 
 # Colori
 BOLD='\033[1m'
@@ -85,10 +96,35 @@ fi
 # ── Stato runtime ──
 echo ""
 info "Stato runtime"
+
+# Fase salvata e freschezza dello status.json: se il file è vecchio (nessun
+# aggiornamento da minuti) significa che descrive un run ORMAI TERMINATO, non lo
+# stato attuale. Senza questa distinzione si rischia di riportare all'utente un
+# "autologin scaduto" di giorni fa come se fosse adesso.
+STATUS_PHASE=""
+STATUS_STALE=false
+STATUS_AGE_MIN=""
+if [ -f logs/status.json ] && node -e "JSON.parse(require('fs').readFileSync('logs/status.json','utf8'))" 2>/dev/null; then
+  STATUS_PHASE=$(node -e "try{console.log(require('./logs/status.json').phase||'')}catch(e){}" 2>/dev/null)
+  STATUS_AGE_MIN=$(node -e "
+    try {
+      const s = require('./logs/status.json');
+      if (!s.lastUpdate) { console.log(''); process.exit(0); }
+      console.log(Math.floor((Date.now() - new Date(s.lastUpdate).getTime()) / 60000));
+    } catch(e) { console.log(''); }
+  " 2>/dev/null)
+  if [ -n "$STATUS_AGE_MIN" ] && [ "$STATUS_AGE_MIN" -gt 3 ] 2>/dev/null; then
+    STATUS_STALE=true
+  fi
+fi
+
 if [ -f logs/status.json ]; then
   if ! node -e "JSON.parse(require('fs').readFileSync('logs/status.json','utf8'))" 2>/dev/null; then
     warn "status.json presente ma non valido."
   else
+    if [ "$STATUS_STALE" = true ]; then
+      warn "Lo stato qui sotto è VECCHIO (ultimo aggiornamento ${STATUS_AGE_MIN} min fa): descrive un run terminato, non la situazione attuale. NON dedurne lo stato corrente — usa la verifica live più sotto."
+    fi
     node -e "
       const s = require('./logs/status.json');
       const lines = [];
@@ -98,7 +134,7 @@ if [ -f logs/status.json ]; then
       if (s.lessonTitle) lines.push(['Titolo', s.lessonTitle]);
       if (s.videoProgress) lines.push(['Video', s.videoProgress]);
       if (s.lastQuizResult) lines.push(['Esito quiz', s.lastQuizResult]);
-      if (s.courseStateSummary) lines.push(['Corsi', `done: ${s.courseStateSummary.done || 0}, need_help: ${s.courseStateSummary.needHelp || 0}, in_progress: ${s.courseStateSummary.inProgress || 0}`]);
+      if (s.courseStateSummary) lines.push(['Corsi', `done: \${s.courseStateSummary.done || 0}, need_help: \${s.courseStateSummary.needHelp || 0}, in_progress: \${s.courseStateSummary.inProgress || 0}`]);
       if (s.phase === 'autologin_invalid') lines.push(['ATTENZIONE', 'Autologin non valido/scaduto: aggiorna il link in config.json']);
       if (s.phase === 'need_help') lines.push(['ATTENZIONE', 'Un o più corsi richiedono intervento: leggi data/need_answer.json, aggiungi risposte a data/known_answers.json, poi riavvia.']);
       if (s.phase === 'session_lost') lines.push(['ATTENZIONE', 'Sessione instabile: l\'accesso cade dopo il login (riavvio in corso; se persiste, link scaduto)']);
@@ -112,6 +148,31 @@ if [ -f logs/status.json ]; then
   fi
 else
   warn "Nessun status.json trovato."
+fi
+
+# ── Verifica LIVE autologin ──
+# Si attiva con --check, oppure automaticamente quando lo stato salvato segnala
+# un problema di autologin/sessione: in quel caso vale la pena verificare DAVVERO
+# se il link funziona, invece di fidarsi di uno status.json che può essere vecchio.
+RUN_LIVE=false
+if [ "$LIVE_CHECK" = true ]; then
+  RUN_LIVE=true
+elif [ "$STATUS_PHASE" = "autologin_invalid" ] || [ "$STATUS_PHASE" = "session_lost" ]; then
+  RUN_LIVE=true
+fi
+
+if [ "$RUN_LIVE" = true ] && [ -f "$HEALTHCHECK_CLI" ]; then
+  echo ""
+  info "Verifica LIVE del link autologin (apro un browser headless, ~30s)..."
+  if HC_OUT=$(node "$HEALTHCHECK_CLI" 2>&1); then
+    ok "Link autologin VALIDO. $HC_OUT"
+    if [ "$STATUS_PHASE" = "autologin_invalid" ]; then
+      warn "Nota: lo stato salvato diceva 'autologin_invalid', ma la verifica live dice che il link FUNZIONA. Era un falso allarme/stato vecchio: basta riavviare con ./start.sh."
+    fi
+  else
+    err "Link autologin NON valido. $HC_OUT"
+    info "Aggiorna l'account: node scripts/lib/members-cli.js set-active <CF>  (oppure reimporta il CSV)."
+  fi
 fi
 
 # ── Heartbeat ──

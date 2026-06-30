@@ -78,22 +78,9 @@ class AllCoursesNeedHelpExit extends Error {
   }
 }
 
-async function isLoginPage(page) {
-  if (/\/login(\?|$|\/)/.test(page.url())) return true;
-  return await page.evaluate(() => {
-    return !!document.querySelector('input[type="password"]') ||
-      /inserisci le tue credenziali/i.test(document.body ? document.body.innerText : '');
-  }).catch(() => false);
-}
-
-async function isDashboardLoaded(page) {
-  return await page.evaluate(() => {
-    const bodyText = document.body ? document.body.innerText : '';
-    const hasCourseLinks = document.querySelectorAll('a[href*="/corso/show/"]').length > 0;
-    const hasDashboardMarkers = /i miei corsi|formazione|benvenut|dashboard|corsi disponibili|i miei piani formativi/i.test(bodyText);
-    return hasCourseLinks || hasDashboardMarkers;
-  }).catch(() => false);
-}
+// Predicati di riconoscimento pagina (login vs dashboard) centralizzati in
+// src/lib/page-detect.js, condivisi con l'health-check per evitare derive.
+const { isLoginPage, isDashboardLoaded } = require('./lib/page-detect');
 
 // Gestisce eventuali pagine intermedie post-autologin, come:
 // - scelta utente/ruolo;
@@ -747,10 +734,11 @@ async function runAutoplay() {
         }
         log('Scoperta automatica corsi dalla dashboard...');
         try {
-          // Se la dashboard finisce sulla pagina di login, ritenta una volta
-          // l'autologin: può capitare che la sessione cada tra il login iniziale
-          // e la scoperta corsi.
-          for (let dcAttempt = 1; dcAttempt <= 2; dcAttempt++) {
+          // Se la dashboard finisce sulla pagina di login, ritenta l'autologin:
+          // può capitare che la sessione cada transitoriamente tra il login
+          // iniziale e la scoperta corsi (non significa che il link sia scaduto).
+          const DC_MAX = 3;
+          for (let dcAttempt = 1; dcAttempt <= DC_MAX; dcAttempt++) {
             await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'networkidle', timeout: 60000 });
             for (let w = 0; w < 15; w++) {
               if (await isDashboardLoaded(page)) break;
@@ -783,8 +771,8 @@ async function runAutoplay() {
               return [];
             }
             if (await isLoginPage(page)) {
-              if (dcAttempt === 1) {
-                log('Dashboard mostra login durante la scoperta. Ritento autologin...');
+              if (dcAttempt < DC_MAX) {
+                log(`Dashboard mostra login durante la scoperta (tentativo ${dcAttempt}/${DC_MAX}). Ritento autologin...`);
                 await ctx.clearCookies({ domain: 'tecsial.gsdcampus.it' }).catch(() => {});
                 await page.goto(config.autologinUrl, { waitUntil: 'networkidle', timeout: 60000 });
                 let attempts = 0;
@@ -792,13 +780,19 @@ async function runAutoplay() {
                   await page.waitForTimeout(2000);
                   attempts++;
                 }
+                // Diamo tempo alla sessione di stabilizzarsi prima del prossimo giro.
+                await page.waitForTimeout(4000);
                 continue;
               }
-              throw new AutologinError('La dashboard mostra la pagina di login: autologin non valido o scaduto. Aggiorna il link in config.json.');
+              // Esauriti i tentativi: trattiamo come SESSIONE PERSA (recuperabile),
+              // non come autologin scaduto. La diagnosi di token davvero invalido
+              // avviene già nel loop di login principale (loggedIn mai true). Così
+              // un calo transitorio non blocca tutto in 'autologin_invalid'.
+              throw new SessionError('La sessione cade durante la scoperta corsi dopo più tentativi di re-login. Riprovo (se persiste, il link autologin potrebbe essere scaduto).');
             }
-            // Nessun link e nessun login: pagina vuota/errore. Riprova una volta.
-            if (dcAttempt === 1) {
-              log('Dashboard vuota durante la scoperta, riprovo...');
+            // Nessun link e nessun login: pagina vuota/errore. Riprova.
+            if (dcAttempt < DC_MAX) {
+              log(`Dashboard vuota durante la scoperta (tentativo ${dcAttempt}/${DC_MAX}), riprovo...`);
               await page.waitForTimeout(3000);
               continue;
             }
@@ -807,7 +801,7 @@ async function runAutoplay() {
           }
           return [];
         } catch (e) {
-          if (e instanceof AutologinError) throw e;
+          if (e instanceof AutologinError || e instanceof SessionError) throw e;
           log(`Errore scoperta corsi: ${e.message}`);
           return [];
         }
