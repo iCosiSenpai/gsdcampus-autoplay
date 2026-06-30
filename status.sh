@@ -127,26 +127,7 @@ if [ -f logs/status.json ]; then
     if [ "$STATUS_STALE" = true ]; then
       warn "Lo stato qui sotto è VECCHIO (ultimo aggiornamento ${STATUS_AGE_MIN} min fa): descrive un run terminato, non la situazione attuale. NON dedurne lo stato corrente — usa la verifica live più sotto."
     fi
-    node -e "
-      const s = require('./logs/status.json');
-      const lines = [];
-      if (s.phase) lines.push(['Fase', s.phase]);
-      if (s.courseUrl) lines.push(['Corso', s.courseUrl]);
-      if (s.lessonUrl) lines.push(['Lezione', s.lessonUrl]);
-      if (s.lessonTitle) lines.push(['Titolo', s.lessonTitle]);
-      if (s.videoProgress) lines.push(['Video', s.videoProgress]);
-      if (s.lastQuizResult) lines.push(['Esito quiz', s.lastQuizResult]);
-      if (s.courseStateSummary) lines.push(['Corsi', `done: \${s.courseStateSummary.done || 0}, need_help: \${s.courseStateSummary.needHelp || 0}, in_progress: \${s.courseStateSummary.inProgress || 0}`]);
-      if (s.phase === 'autologin_invalid') lines.push(['ATTENZIONE', 'Autologin non valido/scaduto: aggiorna il link in config.json']);
-      if (s.phase === 'need_help') lines.push(['ATTENZIONE', 'Un o più corsi richiedono intervento: leggi data/need_answer.json, aggiungi risposte a data/known_answers.json, poi riavvia.']);
-      if (s.phase === 'session_lost') lines.push(['ATTENZIONE', 'Sessione instabile: l\'accesso cade dopo il login (riavvio in corso; se persiste, link scaduto)']);
-      if (s.lastError) lines.push(['Ultimo errore', s.lastError]);
-      if (s.running !== undefined) lines.push(['Running', s.running ? 'sì' : 'no']);
-      if (s.startedAt) lines.push(['Avviato alle', s.startedAt]);
-      if (s.lastUpdate) lines.push(['Ultimo aggiornamento', s.lastUpdate]);
-      const width = lines.reduce((m, [k]) => Math.max(m, k.length), 0);
-      lines.forEach(([k, v]) => console.log('  ' + k.padEnd(width + 2) + v));
-    " 2>/dev/null || warn "Impossibile leggere status.json."
+    node "$DIR/scripts/lib/status-print.js" 2>/dev/null || warn "Impossibile leggere status.json."
   fi
 else
   warn "Nessun status.json trovato."

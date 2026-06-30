@@ -61,33 +61,64 @@ async function checkAutologin(root, opts = {}) {
     });
     const page = await ctx.newPage();
 
-    await page.goto(config.autologinUrl, { waitUntil: 'networkidle', timeout: timeoutMs });
-    let attempts = 0;
-    while (page.url().includes('autologin') && attempts < 30) {
-      await page.waitForTimeout(1000);
-      attempts++;
+    // La piattaforma fallisce spesso l'autologin al PRIMO tentativo e va a buon
+    // fine al secondo (visibile nei log: "tentativo 1" → login, "tentativo 2" →
+    // dashboard). Una sonda a tentativo singolo darebbe quindi falsi "scaduto".
+    // Ritentiamo come fa autoplay, e dichiariamo KO solo se TUTTI i tentativi
+    // finiscono sulla pagina di login.
+    const MAX_ATTEMPTS = opts.attempts || 3;
+    result.attempts = 0;
+    let reachedDashboard = false;
+    let everLogin = false;
+
+    for (let a = 1; a <= MAX_ATTEMPTS && !reachedDashboard; a++) {
+      result.attempts = a;
+      try {
+        // Sessione pulita a ogni tentativo, come fa autoplay.
+        await ctx.clearCookies({ domain: 'tecsial.gsdcampus.it' }).catch(() => {});
+
+        await page.goto(config.autologinUrl, { waitUntil: 'networkidle', timeout: timeoutMs });
+        let guard = 0;
+        while (page.url().includes('autologin') && guard < 30) {
+          await page.waitForTimeout(1000);
+          guard++;
+        }
+
+        await page.goto(DASHBOARD_URL, { waitUntil: 'networkidle', timeout: timeoutMs });
+        for (let w = 0; w < 20; w++) {
+          if (await isDashboardLoaded(page)) break;
+          if (await isLoginPage(page)) break;
+          await page.waitForTimeout(500);
+        }
+        await page.waitForTimeout(1000);
+
+        result.finalUrl = page.url();
+
+        if (await isDashboardLoaded(page) && !(await isLoginPage(page))) {
+          reachedDashboard = true;
+          result.courseLinks = await countCourseLinks(page);
+          break;
+        }
+        if (await isLoginPage(page)) {
+          everLogin = true;
+          // Pausa breve prima del prossimo tentativo (la sessione si stabilizza).
+          if (a < MAX_ATTEMPTS) await page.waitForTimeout(3000);
+        }
+      } catch (e) {
+        result.lastAttemptError = e.message;
+        if (a < MAX_ATTEMPTS) await page.waitForTimeout(2000);
+      }
     }
 
-    await page.goto(DASHBOARD_URL, { waitUntil: 'networkidle', timeout: timeoutMs });
-    for (let w = 0; w < 20; w++) {
-      if (await isDashboardLoaded(page)) break;
-      if (await isLoginPage(page)) break;
-      await page.waitForTimeout(500);
-    }
-    await page.waitForTimeout(1000);
-
-    result.finalUrl = page.url();
-    result.courseLinks = await countCourseLinks(page);
-
-    if (await isLoginPage(page)) {
-      result.ok = false;
-      result.reason = 'La piattaforma mostra la pagina di login: autologin scaduto o non valido.';
-    } else if (await isDashboardLoaded(page)) {
+    if (reachedDashboard) {
       result.ok = true;
-      result.reason = `Autologin valido: dashboard raggiunta (${result.courseLinks} corsi visibili).`;
+      result.reason = `Autologin valido: dashboard raggiunta (${result.courseLinks} corsi visibili) al tentativo ${result.attempts}.`;
+    } else if (everLogin) {
+      result.ok = false;
+      result.reason = `La piattaforma mostra la pagina di login dopo ${result.attempts} tentativi: autologin scaduto o non valido.`;
     } else {
       result.ok = false;
-      result.reason = 'Pagina inattesa dopo autologin (né dashboard né login). Riprova.';
+      result.reason = `Impossibile raggiungere la dashboard dopo ${result.attempts} tentativi (problema di rete o pagina inattesa). Riprova.`;
     }
   } catch (e) {
     result.ok = false;
