@@ -131,6 +131,7 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 
 ## Limiti
 
+- **NON modificare il codice sorgente** (`src/**`, `scripts/**`, `*.sh`, `*.js`). Il tuo compito è **avviare e monitorare** il corso, non "riparare" l'automazione. Se sospetti un bug nel codice, **segnalalo all'utente** e fermati: non editare i file. L'unico file che puoi modificare è `config.json` (autologin/orari), preferendo comunque i comandi dedicati. Modificare il codice crea divergenze rispetto alla versione ufficiale su GitHub che l'utente distribuisce col comando curl.
 - Non modificare file al di fuori di `~/gsdcampus-autoplay`.
 - Non cancellare `data/known_answers.json` (banca condivisa), `data/members.db` (elenco membri con credenziali) né i file sotto `data/accounts/<CF>/` (stato e cookie personali).
 - **Mai copiare `data/accounts/<CF>/storage_state.json` tra cartelle account diverse**: contiene i cookie di sessione di quel membro; mescolarli provoca accessi con l'identità sbagliata.
