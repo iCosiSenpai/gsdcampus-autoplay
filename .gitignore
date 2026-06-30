@@ -18,8 +18,9 @@ data/extracted_full.json
 data/summary_dump.json
 data/quiz-domande.txt
 # NOTA: known_answers_public.json è intenzionalmente tracciato da git come banca condivisa
-# database membri (contiene token di autologin → credenziali)
-data/members.db
+# database membri: tracciato da git (con esplicito consenso del titolare) così i colleghi
+# che fanno git clone hanno subito l'elenco membri e la sezione "Chi sei?" funziona senza
+# dover importare il CSV. I file -journal/-wal/-shm sono runtime e restano ignorati.
 data/members.db-journal
 data/members.db-wal
 data/members.db-shm
