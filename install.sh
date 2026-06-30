@@ -207,6 +207,16 @@ echo ""
 if [ -n "$TTY_REDIR" ]; then
   exec ./launch-ai-supervisor.sh <&1 2>&1
 else
-  warn "Nessun terminale interattivo rilevato: non posso aprire l'AI automaticamente."
-  info "Apri il Terminale ed esegui:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
+  warn "Nessun terminale interattivo rilevato in questo contesto."
+  info "Apro automaticamente una nuova finestra del Terminale con l'AI..."
+  # osascript apre una finestra di Terminal.app che lancia il supervisore in un pty
+  # pulito: il collega non deve lanciare comandi a mano. Se Terminal.app non è
+  # disponibile (es. usa iTerm2 senza permessi di automazione), restiamo sul messaggio.
+  if osascript -e "tell application \"Terminal\" to do script \"cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh\"" >/dev/null 2>&1; then
+    ok "Finestra del Terminale aperta. Continua lì: l'AI si avvierà da sola."
+    exit 0
+  else
+    warn "Impossibile aprire automaticamente una finestra del Terminale."
+    info "Apri il Terminale ed esegui:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
+  fi
 fi

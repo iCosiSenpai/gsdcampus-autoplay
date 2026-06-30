@@ -156,15 +156,34 @@ fi
 if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
   echo ""
   warn "Il modello $MODEL è un modello CLOUD e richiede il login Ollama."
-  warn "Apro il login interattivo. Inserisci le tue credenziali..."
   echo ""
-  ollama login
+  echo -e "${BOLD}Tra pochi secondi si aprirà una finestra del browser per il login su ollama.com.${NC}"
+  echo -e "${BOLD}Se il browser NON si apre da solo, copia nel browser l'URL che compare qui sotto${NC}"
+  echo -e "${BOLD}(la riga con https://ollama.com/...).${NC}"
   echo ""
-  info "Download modello $MODEL..."
-  ollama pull "$MODEL"
 
+  # login + pull in una funzione: sotto `set -e` usiamo `|| return 1` per non abortire,
+  # così possiamo fare un secondo tentativo se il popup del browser non si è aperto.
+  ollama_login_and_pull() {
+    ollama login || true
+    info "Download modello $MODEL (la prima volta può richiedere qualche minuto)..."
+    ollama pull "$MODEL" || return 1
+    return 0
+  }
+
+  ollama_login_and_pull || true
   if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
-    warn "Download fallito. Riesegui ./launch-ai-supervisor.sh dopo aver verificato il login."
+    echo ""
+    warn "Non riuscito al primo tentativo (a volte il browser non si apre subito). Riprovo una volta..."
+    echo -e "${BOLD}Se il browser non si apre, copia a mano l'URL (https://ollama.com/...) nel browser.${NC}"
+    echo ""
+    ollama_login_and_pull || true
+  fi
+  if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
+    echo ""
+    err "Modello $MODEL non disponibile."
+    warn "Verifica di aver completato il login su ollama.com nel browser e di avere connessione,"
+    warn "poi rilancia con:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
     exit 1
   fi
 fi
@@ -183,6 +202,10 @@ echo "  • 'avvia il corso'"
 echo "  • 'ferma tutto'"
 echo ""
 
-# Avvia Claude con skip permessi e modello Ollama
+# Avvia Claude con skip permessi e modello Ollama.
+# Passiamo un prompt di apertura: Claude saluta da solo, legge config.json e mostra
+# account + orari, e dice al collega quali frasi può scrivere in chat. Così niente
+# schermata vuota e niente comandi da lanciare a mano: il collega sceglie solo una frase.
 info "Avvio Claude Code con modello $MODEL..."
-ollama launch claude --model "$MODEL" -- --dangerously-skip-permissions
+INITIAL_PROMPT="Sei il supervisore dell'automazione gsdcampus-autoplay (cartella di lavoro ~/gsdcampus-autoplay). Saluta brevemente l'utente in italiano. Poi usa i tool a tua disposizione (leggi config.json) per mostrare: il membro attivo (nome) e i giorni/turni lavorativi configurati. Infine digli che in chat può scrivere una di queste frasi: 'avvia il corso', 'controlla il corso', 'come sta andando?' oppure 'ferma tutto'. Non avviare né fermare nulla finché l'utente non lo chiede esplicitamente."
+ollama launch claude --model "$MODEL" -- --dangerously-skip-permissions "$INITIAL_PROMPT"

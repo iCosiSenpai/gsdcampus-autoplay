@@ -144,6 +144,37 @@ package_hash_changed() {
   [ "$current" != "$saved" ]
 }
 
+# Versioni minime consigliate delle dipendenze esterne. Se un collega ha già una
+# versione >= di questa, lo script NON reinstalla e NON si blocca: va avanti.
+# Se la versione è più vecchia, tenta un aggiornamento NON bloccante (se fallisce,
+# prosegue con la versione presente piuttosto che abortire). Così chi ha già
+# Ollama o Claude installati non viene fermato.
+MIN_OLLAMA="0.3.0"   # serve `ollama launch` + modelli cloud
+MIN_CLAUDE="1.0.0"   # Claude Code CLI moderno
+
+# Confronto versione: restituisce 0 se $1 >= $2 (componenti numeriche separate da punto).
+version_ge() {
+  local a="$1" b="$2"
+  local -a A B
+  IFS='.' read -A A <<< "$a"
+  IFS='.' read -A B <<< "$b"
+  local n=${#A} m=${#B} i mx
+  mx=$(( n > m ? n : m ))
+  for ((i=1; i<=mx; i++)); do
+    local ai=${A[i]:-0} bi=${B[i]:-0}
+    ai=${ai//[^0-9]/}; bi=${bi//[^0-9]/}
+    ai=${ai:-0}; bi=${bi:-0}
+    (( ai > bi )) && return 0
+    (( ai < bi )) && return 1
+  done
+  return 0
+}
+
+# Estrae la prima versione numerica x.y.z dallo stdout/stderr che le viene passato.
+extract_version() {
+  grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+}
+
 # Verifica LIVE che il link autologin scelto funzioni davvero: apre un browser
 # headless e raggiunge la dashboard. Dà all'utente la conferma immediata che è
 # tutto a posto (o lo avvisa subito se il link va aggiornato), invece di scoprirlo
@@ -887,7 +918,19 @@ elif [ "$FORCE_UPDATE" = true ]; then
   curl -fsSL https://ollama.com/install.sh | sh
   ok "Ollama aggiornato."
 else
-  ok "Ollama già installato: $(ollama --version | head -1). Salto."
+  OLLAMA_VER=$(ollama --version 2>/dev/null | extract_version)
+  if [ -z "$OLLAMA_VER" ]; then
+    ok "Ollama già installato: $(ollama --version 2>/dev/null | head -1). Salto."
+  elif version_ge "$OLLAMA_VER" "$MIN_OLLAMA"; then
+    ok "Ollama già installato (v$OLLAMA_VER ≥ min $MIN_OLLAMA). Salto."
+  else
+    warn "Ollama presente ma versione vecchia (v$OLLAMA_VER < $MIN_OLLAMA). Provo ad aggiornare..."
+    if curl -fsSL https://ollama.com/install.sh | sh; then
+      ok "Ollama aggiornato: $(ollama --version 2>/dev/null | head -1)."
+    else
+      warn "Aggiornamento Ollama non riuscito: continuo con la versione presente (v$OLLAMA_VER)."
+    fi
+  fi
 fi
 
 # Prima di interrogare i modelli, assicurati che il server Ollama sia attivo.
@@ -897,16 +940,32 @@ ensure_ollama_server
 step "6/7 - Modello Ollama ${OLLAMA_MODEL}"
 if ! ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
   warn "Il modello ${OLLAMA_MODEL} è un modello CLOUD e richiede il login Ollama."
-  warn "Verrà aperto il login interattivo. Inserisci le tue credenziali."
   echo ""
-  # Esegue ollama login in modo interattivo, collegando stdin/stderr correttamente
-  ollama login
+  echo -e "${BOLD}Tra pochi secondi si aprirà una finestra del browser per il login su ollama.com.${NC}"
+  echo -e "${BOLD}Se il browser NON si apre da solo, copia nel browser l'URL che compare qui sotto${NC}"
+  echo -e "${BOLD}(la riga con https://ollama.com/...).${NC}"
+  echo ""
 
-  info "Download modello ${OLLAMA_MODEL} in corso..."
-  ollama pull ${OLLAMA_MODEL}
-
+  # login + pull in una funzione: sotto `set -e` usiamo `|| return 1` per non abortire,
+  # così possiamo fare un secondo tentativo se il popup del browser non si è aperto.
+  ollama_login_and_pull() {
+    ollama login || true
+    info "Download modello ${OLLAMA_MODEL} in corso (la prima volta può richiedere qualche minuto)..."
+    ollama pull "${OLLAMA_MODEL}" || return 1
+    return 0
+  }
+  ollama_login_and_pull || true
   if ! ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
-    err "Download fallito. Se il login non è andato a buon fine, riesegui ./launch-ai-supervisor.sh."
+    echo ""
+    warn "Non riuscito al primo tentativo (a volte il browser non si apre subito). Riprovo una volta..."
+    echo -e "${BOLD}Se il browser non si apre, copia a mano l'URL (https://ollama.com/...) nel browser.${NC}"
+    echo ""
+    ollama_login_and_pull || true
+  fi
+  if ! ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
+    err "Download del modello ${OLLAMA_MODEL} non riuscito."
+    warn "Verifica di aver completato il login su ollama.com nel browser e di avere connessione,"
+    warn "poi rilancia con:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
     exit 1
   fi
 else
@@ -920,6 +979,21 @@ if ! command -v claude &>/dev/null; then
   info "Claude Code CLI non trovato. Installazione in corso..."
   curl -fsSL https://claude.ai/install.sh | bash
   ensure_local_bin_in_path
+else
+  CLAUDE_VER=$(claude --version 2>/dev/null | extract_version)
+  if [ -z "$CLAUDE_VER" ]; then
+    ok "Claude Code CLI già installato: $(claude --version 2>/dev/null | head -1). Salto."
+  elif version_ge "$CLAUDE_VER" "$MIN_CLAUDE"; then
+    ok "Claude Code CLI già installato (v$CLAUDE_VER ≥ min $MIN_CLAUDE). Salto."
+  else
+    warn "Claude presente ma versione vecchia (v$CLAUDE_VER < $MIN_CLAUDE). Provo ad aggiornare..."
+    if curl -fsSL https://claude.ai/install.sh | bash; then
+      ensure_local_bin_in_path
+      ok "Claude aggiornato: $(claude --version 2>/dev/null | head -1)."
+    else
+      warn "Aggiornamento Claude non riuscito: continuo con la versione presente (v$CLAUDE_VER)."
+    fi
+  fi
 fi
 
 if command -v claude &>/dev/null; then
