@@ -20,11 +20,13 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
+DIM='\033[2m'
 NC='\033[0m' # No Color
 
 AUTO_YES=false
 FORCE_UPDATE=false
 UNINSTALL=false
+CONFIG_CHANGED=false   # true se l'utente ha appena (ri)configurato account/orari
 
 # === Gestione argomenti (ordine libero) ===
 for arg in "$@"; do
@@ -142,26 +144,48 @@ package_hash_changed() {
   [ "$current" != "$saved" ]
 }
 
+# Verifica LIVE che il link autologin scelto funzioni davvero: apre un browser
+# headless e raggiunge la dashboard. Dà all'utente la conferma immediata che è
+# tutto a posto (o lo avvisa subito se il link va aggiornato), invece di scoprirlo
+# solo più tardi. Non blocca il setup: in caso di problemi il supervisore AI può
+# comunque intervenire dopo.
+HEALTHCHECK_CLI="$DIR/scripts/lib/healthcheck-cli.js"
+verify_autologin_live() {
+  [ -f "$HEALTHCHECK_CLI" ] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  step "Verifica accesso al corso"
+  info "Provo ad accedere al corso con il link configurato (apro un browser, ~30s)..."
+  local out
+  if out=$(node "$HEALTHCHECK_CLI" 2>&1); then
+    echo ""
+    ok "Accesso al corso RIUSCITO. $out"
+    ok "Il tuo link funziona: il supervisore potrà seguire il corso senza problemi."
+  else
+    echo ""
+    warn "Non sono riuscito ad accedere al corso con questo link."
+    warn "Dettaglio: $out"
+    warn "Il link autologin potrebbe essere scaduto. Quando avvii il supervisore AI,"
+    warn "chiedigli di aggiornare l'account (re-selezione dal database o nuovo CSV)."
+  fi
+}
+
 print_header() {
   echo ""
   echo "============================================"
-  echo -e "${BOLD}  Setup gsdcampus-autoplay${NC}"
+  echo -e "${BOLD}  Benvenuto nel setup di GSD Campus Autopilot${NC}"
   echo "============================================"
   echo ""
-  echo "Questo script aggiorna/verifica i requisiti."
-  echo "Se sono già installati e aggiornati, li salta."
+  echo "Ti guido in pochi passi a configurare l'automazione del corso."
+  echo "Ti chiederò solo 2 cose semplici:"
+  echo -e "  ${BOLD}1)${NC} Chi sei  — scegli il tuo nominativo (o incolla il link di accesso)"
+  echo -e "  ${BOLD}2)${NC} Quando lavorare — giorni e orari in cui il corso deve andare avanti"
   echo ""
-  echo "Verifica:"
-  echo "  • Homebrew e formule installate"
-  echo "  • Node.js e npm"
-  echo "  • Dipendenze npm (Playwright)"
-  echo "  • Browser per Playwright / Google Chrome"
-  echo "  • Ollama"
-  echo "  • Modello Ollama ${OLLAMA_MODEL}"
-  echo "  • Claude Code CLI"
+  echo "Al resto (programmi necessari, browser, modello AI) penso io in automatico:"
+  echo -e "  ${DIM}Homebrew · Node.js · Playwright · Chrome · Ollama (${OLLAMA_MODEL}) · Claude Code${NC}"
+  echo "Quello che è già installato e aggiornato viene saltato."
   echo ""
-  warn "Se il Terminale chiede di installare/aggiornare qualcosa (anche 'y/n'), conferma SEMPRE."
-  warn "Non avere paura: serve tutto per automatizzare il corso."
+  warn "Se il Terminale chiede di installare/aggiornare qualcosa (anche 'y/n'), rispondi SEMPRE sì."
+  warn "Tranquillo: serve tutto per far funzionare il corso, e non tocca i tuoi dati personali."
   echo ""
 }
 
@@ -171,8 +195,13 @@ print_footer() {
   ok "Setup completato con successo."
   echo "============================================"
   echo ""
-  info "Puoi ora avviare l'AI supervisore con:"
-  echo "  cd $DIR && ./launch-ai-supervisor.sh"
+  info "Da ora ti basta SEMPRE questo comando (installa, aggiorna e avvia):"
+  echo -e "  ${BOLD}curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash${NC}"
+  echo ""
+  info "Strumenti utili (opzionali):"
+  echo "  • ./status.sh            — stato attuale e log"
+  echo "  • ./status.sh --check     — stato + verifica LIVE che il link funzioni"
+  echo "  • ./scripts/monitor-course.sh  — monitor live del corso (si aggiorna da solo)"
   echo ""
 }
 
@@ -212,6 +241,86 @@ mask_url() {
 }
 
 # Rileva se config.json è ancora un placeholder / non valido.
+
+valid_autologin() {
+  local url="$1"
+  if [[ ! "$url" =~ ^https://tecsial\.gsdcampus\.it/autologin/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/[A-Za-z0-9]+$ ]]; then
+    return 1
+  fi
+  return 0
+}
+cf_from_url() {
+  local url="$1"
+  [[ "$url" =~ autologin/([A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z])/ ]]
+  echo "${match[1]:-${match[1]}}"
+}
+who_are_you() {
+  local result_file="$DIR/.whoareyou_result.json"
+  rm -f "$result_file"
+
+  if ! AUTO_YES="$AUTO_YES" node "$WHOAREYOU_CLI" "$result_file"; then
+    return 1
+  fi
+
+  # Se il risultato non c'è (es. keep in --yes senza file), leggi da config.json
+  if [ ! -f "$result_file" ]; then
+    AUTOLOGIN=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.autologinUrl||'');}catch(e){console.log('')}" 2>/dev/null)
+    ACTIVE_CF=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.codice_fiscale||'');}catch(e){console.log('')}" 2>/dev/null)
+    MEMBER_NAME=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.memberName||'');}catch(e){console.log('')}" 2>/dev/null)
+    if [ -z "$ACTIVE_CF" ] && [ -n "$AUTOLOGIN" ]; then
+      ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
+    fi
+    return 0
+  fi
+
+  # Legge i dati dal JSON prodotto da whoareyou-cli.js
+  local action
+  action=$(node -e "
+    const fs=require('fs');
+    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
+    console.log(r.action||'');
+  " 2>/dev/null)
+
+  if [ "$action" = "cancel" ]; then
+    rm -f "$result_file"
+    return 1
+  fi
+
+  AUTOLOGIN=$(node -e "
+    const fs=require('fs');
+    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
+    console.log(r.autologinUrl||'');
+  " 2>/dev/null)
+  ACTIVE_CF=$(node -e "
+    const fs=require('fs');
+    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
+    console.log(r.codice_fiscale||'');
+  " 2>/dev/null)
+  MEMBER_NAME=$(node -e "
+    const fs=require('fs');
+    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
+    console.log(r.memberName||'');
+  " 2>/dev/null)
+
+  rm -f "$result_file"
+
+  if [ "$action" != "keep" ] && [ -z "$AUTOLOGIN" ] && [ -z "$ACTIVE_CF" ]; then
+    warn "whoareyou-cli non ha restituito un account valido."
+    return 1
+  fi
+
+  return 0
+}
+apply_selected_account() {
+  if [ -n "$MEMBER_NAME" ] && [ -n "$ACTIVE_CF" ] && [ "$MEMBER_NAME" != "(configurazione manuale)" ]; then
+    ok "Account selezionato: $MEMBER_NAME (CF: $ACTIVE_CF)"
+  elif [ -n "$ACTIVE_CF" ] && [ -n "$AUTOLOGIN" ]; then
+    ok "Account configurato: CF $ACTIVE_CF — $(mask_url "$AUTOLOGIN")"
+  elif [ -n "$AUTOLOGIN" ]; then
+    ok "Account configurato: $(mask_url "$AUTOLOGIN")"
+  fi
+}
+
 is_config_valid() {
   [ -f "$CONFIG_FILE" ] || return 1
   # 1. JSON valido?
@@ -299,9 +408,20 @@ fi
 # Schermata iniziale "Chi sei?" — prima di ogni altra scelta del setup.
 # L'utente seleziona l'account dal database membri o incolla l'autologin.
 if ! who_are_you; then
-  err "Account non configurato. Impossibile proseguire in modalità automatica."
+  # Se la riconfigurazione è stata annullata ma esiste un backup (creato da
+  # install.sh in modalità "Cambia account/orari"), ripristiniamo la config
+  # precedente invece di lasciare l'utente senza account.
+  if [ -f "$DIR/config.json.bak" ] && [ ! -f "$CONFIG_FILE" ]; then
+    mv "$DIR/config.json.bak" "$CONFIG_FILE"
+    warn "Riconfigurazione annullata: ho ripristinato la configurazione precedente."
+    ok "Account e orari ripristinati. Puoi rilanciare il comando curl quando vuoi cambiarli."
+    exit 0
+  fi
+  err "Account non configurato. Impossibile proseguire."
   exit 1
 fi
+# Riconfigurazione completata con successo: il backup non serve più.
+rm -f "$DIR/config.json.bak" 2>/dev/null || true
 apply_selected_account
 
 # Helper di validazione giorni
@@ -316,94 +436,16 @@ format_days() {
   echo "$1" | tr ',' '\n' | grep -E '^[0-6]$' | sort -u | tr '\n' ',' | sed 's/,$//'
 }
 
-valid_autologin() {
-  local url="$1"
-  if [[ ! "$url" =~ ^https://tecsial\.gsdcampus\.it/autologin/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/[A-Za-z0-9]+$ ]]; then
-    return 1
-  fi
-  return 0
-}
 
 # Estrae il codice fiscale da un URL autologin valido.
-cf_from_url() {
-  local url="$1"
-  [[ "$url" =~ autologin/([A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z])/ ]]
-  echo "${match[1]:-${match[1]}}"
-}
 
 # Schermata interattiva "CHI SEI?" — mostrata all'avvio del setup, prima di ogni
 # altra scelta. Usa scripts/lib/whoareyou-cli.js che offre:
 #   • su TTY: menu navigabile con frecce ↑/↓ e Invio, come una app nel terminale
 #   • su non-TTY: menu numerico classico (per pipe/redirezioni)
-who_are_you() {
-  local result_file="$DIR/.whoareyou_result.json"
-  rm -f "$result_file"
-
-  if ! AUTO_YES="$AUTO_YES" node "$WHOAREYOU_CLI" "$result_file"; then
-    return 1
-  fi
-
-  # Se il risultato non c'è (es. keep in --yes senza file), leggi da config.json
-  if [ ! -f "$result_file" ]; then
-    AUTOLOGIN=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.autologinUrl||'');}catch(e){console.log('')}" 2>/dev/null)
-    ACTIVE_CF=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.codice_fiscale||'');}catch(e){console.log('')}" 2>/dev/null)
-    MEMBER_NAME=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.memberName||'');}catch(e){console.log('')}" 2>/dev/null)
-    if [ -z "$ACTIVE_CF" ] && [ -n "$AUTOLOGIN" ]; then
-      ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
-    fi
-    return 0
-  fi
-
-  # Legge i dati dal JSON prodotto da whoareyou-cli.js
-  local action
-  action=$(node -e "
-    const fs=require('fs');
-    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
-    console.log(r.action||'');
-  " 2>/dev/null)
-
-  if [ "$action" = "cancel" ]; then
-    rm -f "$result_file"
-    return 1
-  fi
-
-  AUTOLOGIN=$(node -e "
-    const fs=require('fs');
-    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
-    console.log(r.autologinUrl||'');
-  " 2>/dev/null)
-  ACTIVE_CF=$(node -e "
-    const fs=require('fs');
-    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
-    console.log(r.codice_fiscale||'');
-  " 2>/dev/null)
-  MEMBER_NAME=$(node -e "
-    const fs=require('fs');
-    const r=JSON.parse(fs.readFileSync('$result_file','utf8'));
-    console.log(r.memberName||'');
-  " 2>/dev/null)
-
-  rm -f "$result_file"
-
-  if [ "$action" != "keep" ] && [ -z "$AUTOLOGIN" ] && [ -z "$ACTIVE_CF" ]; then
-    warn "whoareyou-cli non ha restituito un account valido."
-    return 1
-  fi
-
-  return 0
-}
 
 # Logga l'account attivo/aggiornato. Il file config.json viene già scritto
 # direttamente da whoareyou-cli.js per le azioni select/manual.
-apply_selected_account() {
-  if [ -n "$MEMBER_NAME" ] && [ -n "$ACTIVE_CF" ] && [ "$MEMBER_NAME" != "(configurazione manuale)" ]; then
-    ok "Account selezionato: $MEMBER_NAME (CF: $ACTIVE_CF)"
-  elif [ -n "$ACTIVE_CF" ] && [ -n "$AUTOLOGIN" ]; then
-    ok "Account configurato: CF $ACTIVE_CF — $(mask_url "$AUTOLOGIN")"
-  elif [ -n "$AUTOLOGIN" ]; then
-    ok "Account configurato: $(mask_url "$AUTOLOGIN")"
-  fi
-}
 
 parse_input_time() {
   local t="$1"
@@ -748,6 +790,7 @@ while true; do
 EOF
       }
       ok "Configurazione salvata in config.json"
+      CONFIG_CHANGED=true
       # Migra i file di stato legacy (data/*.json personali) nella cartella
       # per-account data/accounts/<CF>/. Idempotente.
       if [ -n "$ACTIVE_CF" ]; then
@@ -884,6 +927,13 @@ if command -v claude &>/dev/null; then
 else
   err "Claude Code CLI non trovato neanche dopo l'installazione. Prova a chiudere e riaprire il Terminale, poi riesegui ./launch-ai-supervisor.sh."
   exit 1
+fi
+
+# Verifica LIVE dell'accesso solo quando l'utente ha appena (ri)configurato un
+# account: è il momento in cui la conferma "il link funziona" è più utile. Nel
+# path di solo aggiornamento (--yes, config già valida) non rallentiamo con i ~30s.
+if [ "$CONFIG_CHANGED" = true ]; then
+  verify_autologin_live
 fi
 
 print_footer

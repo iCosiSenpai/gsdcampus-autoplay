@@ -31,6 +31,7 @@ data/accounts/
 data/.members_last_list.json
 # dati personali
 config.json
+config.json.bak
 PROMPT-per-altra-AI.md
 .autoplay_pid
 .ollama_pid

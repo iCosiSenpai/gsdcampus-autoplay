@@ -14,15 +14,18 @@ echo "============================================"
 echo " Disinstallazione gsdcampus-autoplay"
 echo "============================================"
 echo ""
-echo "Questo script rimuove:"
-echo "  - dipendenze npm"
-echo "  - browser Playwright installati"
-echo "  - Ollama (inclusi modelli)"
+echo "Questo script RIMUOVE:"
+echo "  - dipendenze npm (node_modules)"
+echo "  - browser di Playwright + relativa cache (~500 MB)"
+echo "  - Ollama: app/binario, modelli scaricati e ~/.ollama (anche diversi GB)"
 echo "  - Claude Code CLI"
-echo "  - log, dump, screenshot e backup"
-echo "  - la cartella del progetto (opzionale)"
+echo "  - la riga PATH aggiunta da setup.sh ai file dello shell"
+echo "  - log, dump, screenshot, backup e file temporanei (.pid, ...)"
+echo "  - la cartella del progetto (a parte, con conferma)"
 echo ""
-echo "NOTA: non rimuove Homebrew nè Node.js, per non compromettere altri software."
+echo "NON rimuove (per non rompere altri software del Mac):"
+echo "  - Homebrew e Node.js"
+echo "  - Google Chrome (è il tuo browser, non lo tocchiamo)"
 echo ""
 
 read -q "REPLY?Procedere con la disinstallazione? [y/N] "
@@ -38,16 +41,25 @@ echo "-> Arresto processi attivi..."
 "$DIR/stop.sh" 2>/dev/null || true
 "$DIR/scripts/ollama-daemon.sh" stop 2>/dev/null || true
 
-# 2. Rimuovi dipendenze npm
+# 2. Rimuovi i browser di Playwright — PRIMA di cancellare node_modules, altrimenti
+#    `npx playwright` non troverebbe più il pacchetto e dovrebbe riscaricarlo (o
+#    fallire in silenzio), lasciando sul disco la cache dei browser (~500+ MB).
+echo "-> Rimozione browser Playwright..."
+if [ -d "$DIR/node_modules/playwright" ] || [ -d "$DIR/node_modules/playwright-core" ]; then
+  (cd "$DIR" && npx --no-install playwright uninstall --all 2>/dev/null) || true
+fi
+# Fallback esplicito: rimuovi comunque la cache dei browser di Playwright, che è
+# il grosso dello spazio occupato. `playwright uninstall` da solo a volte non la
+# svuota del tutto, e questo copre anche il caso in cui il comando sopra fallisca.
+if [ -d "$HOME/Library/Caches/ms-playwright" ]; then
+  echo "   Pulizia cache browser (~$(du -sh "$HOME/Library/Caches/ms-playwright" 2>/dev/null | cut -f1))..."
+  rm -rf "$HOME/Library/Caches/ms-playwright"
+fi
+
+# 3. Rimuovi dipendenze npm
 if [ -d "$DIR/node_modules" ]; then
   echo "-> Rimozione dipendenze npm..."
   rm -rf "$DIR/node_modules"
-fi
-
-# 3. Rimuovi browser Playwright
-if command -v npx &>/dev/null; then
-  echo "-> Rimozione browser Playwright..."
-  npx playwright uninstall --all 2>/dev/null || true
 fi
 
 # 4. Rimuovi Ollama (modelli inclusi)
@@ -56,12 +68,20 @@ if command -v ollama &>/dev/null; then
   ollama rm ${OLLAMA_MODEL} 2>/dev/null || true
 
   echo "-> Rimozione Ollama..."
+  # Se installato via Homebrew, disinstallalo da lì (altrimenti resterebbe).
+  if command -v brew &>/dev/null && brew list ollama &>/dev/null; then
+    brew uninstall ollama 2>/dev/null || true
+  fi
   if [ -f /usr/local/bin/ollama ]; then
     sudo rm -f /usr/local/bin/ollama 2>/dev/null || true
+  fi
+  if [ -f /opt/homebrew/bin/ollama ]; then
+    rm -f /opt/homebrew/bin/ollama 2>/dev/null || true
   fi
   if [ -d /Applications/Ollama.app ]; then
     sudo rm -rf /Applications/Ollama.app 2>/dev/null || true
   fi
+  # Modelli scaricati + config (~/.ollama può pesare diversi GB).
   rm -rf "$HOME/.ollama" 2>/dev/null || true
 fi
 

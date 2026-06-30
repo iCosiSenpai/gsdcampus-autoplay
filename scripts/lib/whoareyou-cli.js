@@ -126,9 +126,12 @@ function printBox(title, lines) {
 // ────────────────────────────────────────────────────────────────
 // Menu interattivo TTY (frecce + invio)
 // ────────────────────────────────────────────────────────────────
+// Menu a frecce basato SOLO su keypress in raw mode (niente readline.Interface:
+// avere insieme un'interfaccia readline e i keypress sullo stesso stdin faceva
+// "consumare" l'Invio di selezione al prompt di testo successivo, che riceveva
+// una riga vuota — di qui il bug "non mi fa scrivere il nome").
 function ttyMenu(items, title, subtitle) {
   return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     let selected = 0;
 
     function draw() {
@@ -147,11 +150,11 @@ function ttyMenu(items, title, subtitle) {
 
     readline.emitKeypressEvents(process.stdin);
     if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
 
     function cleanup() {
-      process.stdin.removeAllListeners('keypress');
+      process.stdin.removeListener('keypress', onKeypress);
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
-      rl.close();
     }
 
     function onKeypress(str, key) {
@@ -161,13 +164,13 @@ function ttyMenu(items, title, subtitle) {
         resolve(null);
         return;
       }
-      if (key.name === 'up' && selected > 0) {
-        selected--;
+      if (key.name === 'up') {
+        selected = (selected - 1 + items.length) % items.length;
         draw();
-      } else if (key.name === 'down' && selected < items.length - 1) {
-        selected++;
+      } else if (key.name === 'down') {
+        selected = (selected + 1) % items.length;
         draw();
-      } else if (key.name === 'return') {
+      } else if (key.name === 'return' || key.name === 'enter') {
         cleanup();
         resolve(items[selected]);
       }
@@ -175,6 +178,56 @@ function ttyMenu(items, title, subtitle) {
 
     process.stdin.on('keypress', onKeypress);
     draw();
+  });
+}
+
+// Lettura di una riga su TTY basata su keypress (stessa "modalità" del menu, così
+// non c'è conflitto di consumer su stdin). Gestisce echo, backspace, Ctrl-C e
+// ignora un eventuale Invio "residuo" che arriva subito dopo la selezione del menu.
+function readLineTTY(question) {
+  return new Promise((resolve) => {
+    process.stdout.write(question);
+    let buf = '';
+    const startedAt = Date.now();
+    readline.emitKeypressEvents(process.stdin);
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
+
+    function done(val) {
+      process.stdin.removeListener('keypress', onKey);
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+      process.stdout.write('\n');
+      resolve(val);
+    }
+
+    function onKey(str, key) {
+      if (!key) return;
+      if (key.ctrl && key.name === 'c') {
+        process.stdout.write('\n');
+        process.exit(1);
+      }
+      if (key.name === 'return' || key.name === 'enter') {
+        // Scarta un Invio vuoto immediato (< 120ms): è quasi certamente quello
+        // con cui l'utente ha appena confermato la voce di menu, non una riga vuota.
+        if (buf.length === 0 && Date.now() - startedAt < 120) return;
+        done(buf.trim());
+        return;
+      }
+      if (key.name === 'backspace') {
+        if (buf.length > 0) {
+          buf = buf.slice(0, -1);
+          process.stdout.write('\b \b');
+        }
+        return;
+      }
+      // Carattere stampabile (ignora tasti di controllo come frecce, tab, ecc.)
+      if (str && !key.ctrl && !key.meta && str.length === 1 && str >= ' ') {
+        buf += str;
+        process.stdout.write(str);
+      }
+    }
+
+    process.stdin.on('keypress', onKey);
   });
 }
 
@@ -219,14 +272,14 @@ function initLineReader() {
 }
 
 async function readLine(question) {
-  initLineReader();
-  if (!process.stdin.isTTY) {
-    process.stdout.write(question);
-  } else {
-    // Su TTY lasciamo che readline gestisca il cursore, se serve
-    // (qui usato solo da numericMenu/promptText in fallback)
-    process.stdout.write(question);
+  // Su TTY usiamo il lettore basato su keypress (coerente con il menu a frecce);
+  // su input reindirizzato (pipe) usiamo il lettore a buffer di righe, che gestisce
+  // correttamente più righe arrivate in un unico chunk.
+  if (process.stdin.isTTY) {
+    return readLineTTY(question);
   }
+  initLineReader();
+  process.stdout.write(question);
   if (lineQueue.length > 0) {
     return Promise.resolve(lineQueue.shift());
   }
@@ -420,57 +473,64 @@ async function main() {
     return { action: 'cancel', reason: 'AUTO_YES senza account valido' };
   }
 
-  const dbCount = countMembers();
+  // Loop del menu principale: se l'utente esce da un sotto-flusso (ricerca vuota,
+  // "torna indietro", selezione annullata) si torna QUI invece di chiudere il setup.
+  // Solo "Annulla"/q chiudono davvero.
+  while (true) {
+    const dbCount = countMembers();
 
-  const items = [
-    { label: 'Cerca per codice fiscale', value: 'cf' },
-    { label: 'Cerca per nome e cognome', value: 'name' },
-    { label: 'Mostra lista completa membri', value: 'list' }
-  ];
+    const items = [
+      { label: 'Cerca per codice fiscale', value: 'cf' },
+      { label: 'Cerca per nome e cognome', value: 'name' },
+      { label: 'Mostra lista completa membri', value: 'list' }
+    ];
 
-  if (dbCount === 0) {
-    items.push({ label: 'Importa elenco membri (CSV)', value: 'import' });
-  }
-
-  items.push(
-    { label: 'Inserisci autologin manualmente', value: 'manual' }
-  );
-
-  if (currentUrl && validAutologin(currentUrl)) {
-    items.push({ label: 'Mantieni account attuale', value: 'keep' });
-  }
-  items.push({ label: 'Annulla', value: 'cancel' });
-
-  const choice = await menu(items, 'CHI SEI?', subtitle);
-  if (!choice) return { action: 'cancel' };
-
-  if (choice.value === 'import') {
-    const ok = await importMembersCsv();
-    if (!ok) return { action: 'cancel', reason: 'Import CSV fallito' };
-    // Dopo import, riavvia il menu principale
-    return main();
-  }
-
-  let result;
-  switch (choice.value) {
-    case 'cf': result = await searchAndSelectMember('cf'); break;
-    case 'name': result = await searchAndSelectMember('name'); break;
-    case 'list': result = await listAndSelectMember(); break;
-    case 'manual': result = await manualAutologin(); break;
-    case 'keep': result = { action: 'keep' }; break;
-    default: result = { action: 'cancel' };
-  }
-
-  if (result && (result.action === 'select' || result.action === 'manual')) {
-    if (!updateConfigForAccount(result)) {
-      return { action: 'cancel', reason: 'Impossibile salvare config.json' };
+    if (dbCount === 0) {
+      items.push({ label: 'Importa elenco membri (CSV)', value: 'import' });
     }
-    console.error(`Account selezionato: ${result.memberName} (CF: ${result.codice_fiscale})`);
-  } else if (result && result.action === 'keep') {
-    console.error('Account attuale confermato.');
-  }
 
-  return result;
+    items.push({ label: 'Inserisci autologin manualmente', value: 'manual' });
+
+    if (currentUrl && validAutologin(currentUrl)) {
+      items.push({ label: 'Mantieni account attuale', value: 'keep' });
+    }
+    items.push({ label: 'Annulla', value: 'cancel' });
+
+    const choice = await menu(items, 'CHI SEI?', subtitle);
+    if (!choice || choice.value === 'cancel') return { action: 'cancel' };
+
+    if (choice.value === 'keep') {
+      console.error('Account attuale confermato.');
+      return { action: 'keep' };
+    }
+
+    if (choice.value === 'import') {
+      const ok = await importMembersCsv();
+      if (!ok) console.error('Import non riuscito. Torno al menu principale.');
+      continue; // ridisegna il menu (dbCount aggiornato dopo l'import)
+    }
+
+    let result = null;
+    switch (choice.value) {
+      case 'cf': result = await searchAndSelectMember('cf'); break;
+      case 'name': result = await searchAndSelectMember('name'); break;
+      case 'list': result = await listAndSelectMember(); break;
+      case 'manual': result = await manualAutologin(); break;
+    }
+
+    if (!result) {
+      // L'utente è uscito dal sotto-flusso senza scegliere: torna al menu.
+      continue;
+    }
+
+    if (result.action === 'select' || result.action === 'manual') {
+      if (!updateConfigForAccount(result)) {
+        return { action: 'cancel', reason: 'Impossibile salvare config.json' };
+      }
+      console.error(`Account selezionato: ${result.memberName} (CF: ${result.codice_fiscale})`);
+    }
+    return result;
+  }
 }
 
 main()

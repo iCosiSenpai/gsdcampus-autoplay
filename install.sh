@@ -79,6 +79,11 @@ if [ -d "$TARGET/.git" ]; then
   if [ -n "$TTY_REDIR" ]; then
     echo ""
     info "Trovata un'installazione esistente in $TARGET."
+    # Mostra l'account/orari attualmente configurati, così sai su cosa stai operando.
+    if command -v node >/dev/null 2>&1 && [ -f "$TARGET/config.json" ]; then
+      ACCT_DESC=$(node -e "try{const c=require('$TARGET/config.json');const s=c.workSchedule&&c.workSchedule.days?(c.workSchedule.days.length+' giorni'):'orari default';process.stdout.write((c.memberName||c.codice_fiscale||'account sconosciuto')+'  ·  '+s)}catch(e){process.stdout.write('')}" 2>/dev/null)
+      [ -n "$ACCT_DESC" ] && info "Account attuale: $ACCT_DESC"
+    fi
     echo ""
     printf "${BOLD}Perché stai rilanciando l'installer?${NC}\n"
     echo "  1) Aggiorna e avvia          — scarica fix e risposte quiz aggiornate, poi apre l'AI (consigliato)"
@@ -147,6 +152,13 @@ case "$MODE" in
   reconfig)
     update_repo
     warn "Riconfigurazione: ti verrà richiesto di selezionare l'account dall'elenco membri e di configurare gli orari."
+    # NON cancelliamo subito la config: la mettiamo da parte come backup, così se
+    # la riconfigurazione viene annullata setup.sh può ripristinarla (niente perdita
+    # di account/orari, come capitato annullando a metà).
+    if [ -f config.json ]; then
+      cp config.json config.json.bak
+      ok "Configurazione attuale salvata in config.json.bak (ripristinata se annulli)."
+    fi
     rm -f config.json
     ;;
   clean)
