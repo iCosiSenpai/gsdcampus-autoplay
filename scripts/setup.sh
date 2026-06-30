@@ -405,6 +405,40 @@ else
   fi
 fi
 
+# 1. Homebrew
+step "1/7 - Homebrew"
+if ! command -v brew &>/dev/null; then
+  info "Homebrew non trovato. Installazione in corso..."
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
+  ok "Homebrew installato."
+elif [ "$FORCE_UPDATE" = true ]; then
+  info "Aggiornamento Homebrew (richiesto --force-update)..."
+  brew update
+  brew upgrade
+  ok "Homebrew aggiornato."
+else
+  ok "Homebrew già installato: $(brew --version | head -1). Salto."
+fi
+
+# 2. Node.js (richiesto >= 22 per node:sqlite built-in)
+step "2/7 - Node.js"
+NODE_MIN_MAJOR=22
+if command -v node &>/dev/null; then
+  NODE_MAJOR=$(node -v | sed 's/^v\([0-9]*\).*/\1/')
+  if [ "$NODE_MAJOR" -ge "$NODE_MIN_MAJOR" ] 2>/dev/null; then
+    ok "Node.js già installato: $(node -v). Salto."
+  else
+    info "Node.js trovato ma versione $NODE_MAJOR < $NODE_MIN_MAJOR. Aggiornamento in corso..."
+    brew install node 2>/dev/null || true
+    ok "Node.js pronto: $(node -v)"
+  fi
+else
+  info "Node.js non trovato. Installazione in corso..."
+  brew install node 2>/dev/null || true
+  ok "Node.js pronto: $(node -v)"
+fi
+
 # Schermata iniziale "Chi sei?" — prima di ogni altra scelta del setup.
 # L'utente seleziona l'account dal database membri o incolla l'autologin.
 if ! who_are_you; then
@@ -810,40 +844,6 @@ EOF
     break
   fi
 done
-
-# 1. Homebrew
-step "1/7 - Homebrew"
-if ! command -v brew &>/dev/null; then
-  info "Homebrew non trovato. Installazione in corso..."
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)"
-  ok "Homebrew installato."
-elif [ "$FORCE_UPDATE" = true ]; then
-  info "Aggiornamento Homebrew (richiesto --force-update)..."
-  brew update
-  brew upgrade
-  ok "Homebrew aggiornato."
-else
-  ok "Homebrew già installato: $(brew --version | head -1). Salto."
-fi
-
-# 2. Node.js (richiesto >= 22 per node:sqlite built-in)
-step "2/7 - Node.js"
-NODE_MIN_MAJOR=22
-if command -v node &>/dev/null; then
-  NODE_MAJOR=$(node -v | sed 's/^v\([0-9]*\).*/\1/')
-  if [ "$NODE_MAJOR" -ge "$NODE_MIN_MAJOR" ] 2>/dev/null; then
-    ok "Node.js già installato: $(node -v). Salto."
-  else
-    info "Node.js trovato ma versione $NODE_MAJOR < $NODE_MIN_MAJOR. Aggiornamento in corso..."
-    brew install node 2>/dev/null || true
-    ok "Node.js pronto: $(node -v)"
-  fi
-else
-  info "Node.js non trovato. Installazione in corso..."
-  brew install node 2>/dev/null || true
-  ok "Node.js pronto: $(node -v)"
-fi
 
 # 3. npm dependencies — solo se package.json/package-lock.json sono cambiati,
 # node_modules manca, oppure --force-update
