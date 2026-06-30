@@ -232,8 +232,15 @@ async function acceptUsageDeclaration(page, log) {
     for (const cb of checkboxes) {
       await cb.check().catch(() => {});
     }
-    await btn.click().catch(e => log(`Errore click 'Confermo e proseguo': ${e.message}`));
+    await btn.click({ force: true }).catch(e => log(`Errore click 'Confermo e proseguo': ${e.message}`));
     await page.waitForTimeout(4000);
+    
+    // Fallback: se il modal SweetAlert rimane aperto e blocca i click futuri, rimuovilo dal DOM.
+    await page.evaluate(() => {
+      const swal = document.querySelector('.swal2-container');
+      if (swal) swal.remove();
+    }).catch(() => {});
+
     log(`Dopo dichiarazione: URL = ${page.url()}`);
     return true;
   } catch (e) {
@@ -282,7 +289,12 @@ async function runCourse(page, courseUrl, sessionState, state) {
     try {
       log('Ritorno dashboard per accesso al corso...');
       await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.waitForTimeout(3000);
+      for (let w = 0; w < 30; w++) {
+        if (await isDashboardLoaded(page)) break;
+        if (await isLoginPage(page)) break;
+        await page.waitForTimeout(500);
+      }
+      await page.waitForTimeout(2000);
 
       const targetId = courseUrl.split('/show/')[1];
       log(`Searching for course ID ${targetId} in dashboard...`);
@@ -317,6 +329,11 @@ async function runCourse(page, courseUrl, sessionState, state) {
       }
       try {
         await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
+        let attempts = 0;
+        while (page.url().includes('autologin') && attempts < 20) {
+          await page.waitForTimeout(1000);
+          attempts++;
+        }
         await page.waitForTimeout(5000);
       } catch (e) {
         log(`Errore re-login: ${e.message}`);
@@ -335,6 +352,11 @@ async function runCourse(page, courseUrl, sessionState, state) {
       }
       try {
         await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
+        let attempts = 0;
+        while (page.url().includes('autologin') && attempts < 20) {
+          await page.waitForTimeout(1000);
+          attempts++;
+        }
         await page.waitForTimeout(5000);
       } catch (e) {
         log(`Errore durante il re-login: ${e.message}`);
@@ -429,6 +451,11 @@ async function runCourse(page, courseUrl, sessionState, state) {
         log(`Spostamento inatteso: ${currentUrl}. Ritorno al login...`);
         try {
           await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
+          let attempts = 0;
+          while (page.url().includes('autologin') && attempts < 20) {
+            await page.waitForTimeout(1000);
+            attempts++;
+          }
           await page.waitForTimeout(5000);
         } catch (e) {
           log(`Errore re-login: ${e.message}`);
@@ -529,6 +556,11 @@ async function runCourse(page, courseUrl, sessionState, state) {
       }
       try {
         await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
+        let attempts = 0;
+        while (page.url().includes('autologin') && attempts < 20) {
+          await page.waitForTimeout(1000);
+          attempts++;
+        }
         await page.waitForTimeout(5000);
       } catch (e) {
         log(`Errore re-login: ${e.message}`);
