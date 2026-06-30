@@ -322,23 +322,13 @@ async function runCourse(page, courseUrl, sessionState, state) {
     }
 
     if (await isLoginPage(page)) {
-      sessionState.loginDrops++;
-      log(`Sessione persa (pagina di login). Drop ${sessionState.loginDrops}/${MAX_LOGIN_DROPS}. Ritento autologin...`);
-      if (sessionState.loginDrops >= MAX_LOGIN_DROPS) {
-        throw new SessionError('Sessione instabile: l\'accesso cade ripetutamente dopo il login (token autologin probabilmente scaduto/consumato).');
-      }
-      try {
-        await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
-        let attempts = 0;
-        while (page.url().includes('autologin') && attempts < 20) {
-          await page.waitForTimeout(1000);
-          attempts++;
-        }
-        await page.waitForTimeout(5000);
-      } catch (e) {
-        log(`Errore re-login: ${e.message}`);
-      }
-      continue;
+      // Sessione caduta. NON re-hitiamo l'autologin: ogni hit consuma/degrada il
+      // token, e la raffica di re-login è proprio la causa dell'instabilità che
+      // stiamo curando (la piattaforma rate-limita l'autologin usato troppe volte
+      // nello stesso giorno). Usciamo subito con SessionError: il catch esterno,
+      // visto che il token era già valido, emette session_unstable (exit 4) e lo
+      // scheduler fa cooldown, così il token recupera e il prossimo run è stabile.
+      throw new SessionError('Sessione caduta durante l\'accesso al corso (pagina di login). Token probabilmente degradato dal sovrauso: esco senza re-login per non consumarlo ulteriormente.');
     }
 
     if (page.url().includes('error?code=missing_permission')) {
@@ -549,23 +539,10 @@ async function runCourse(page, courseUrl, sessionState, state) {
     }
 
     if (await isLoginPage(page)) {
-      log('Sessione persa durante apertura lezione. Ritento autologin...');
-      sessionState.loginDrops = (sessionState.loginDrops || 0) + 1;
-      if (sessionState.loginDrops >= MAX_LOGIN_DROPS) {
-        throw new SessionError('Troppi login drop durante apertura lezione.');
-      }
-      try {
-        await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
-        let attempts = 0;
-        while (page.url().includes('autologin') && attempts < 20) {
-          await page.waitForTimeout(1000);
-          attempts++;
-        }
-        await page.waitForTimeout(5000);
-      } catch (e) {
-        log(`Errore re-login: ${e.message}`);
-      }
-      continue;
+      // Stesso principio del drop in dashboard: niente re-login autologin (consuma
+      // il token e causa il rate-limit che stiamo curando). Esco subito con
+      // SessionError -> session_unstable (exit 4) + cooldown dello scheduler.
+      throw new SessionError('Sessione caduta durante l\'apertura della lezione (pagina di login). Esco senza re-login per non degradare il token.');
     }
 
     const isQuizDashboard = await page.evaluate(() => {
@@ -827,25 +804,10 @@ async function runAutoplay() {
               return [];
             }
             if (await isLoginPage(page)) {
-              if (dcAttempt < DC_MAX) {
-                log(`Dashboard mostra login durante la scoperta (tentativo ${dcAttempt}/${DC_MAX}). Ritento autologin...`);
-                // NON puliamo i cookie qui: il clearCookies distrugge la sessione
-                // che l'autologin aveva appena impostato. La piattaforma GSD Campus
-                // usa un redirect che imposta i cookie di sessione: cancellarli e
-                // rifare il goto produce un loop infinito di sessioni morte.
-                await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
-                let attempts = 0;
-                while (page.url().includes('autologin') && attempts < 20) {
-                  await page.waitForTimeout(1000);
-                  attempts++;
-                }
-                // Diamo tempo alla sessione di stabilizzarsi prima del prossimo giro.
-                await page.waitForTimeout(5000);
-                continue;
-              }
-              // Esauriti i tentativi: trattiamo come SESSIONE PERSA (recuperabile),
-              // non come autologin scaduto.
-              throw new SessionError('La sessione cade durante la scoperta corsi dopo più tentativi di re-login. Riprovo (se persiste, il link autologin potrebbe essere scaduto).');
+              // Sessione caduta subito dopo il login. NON re-hitiamo l'autologin
+              // (consuma il token e causa il rate-limit che stiamo curando): esco
+              // subito con SessionError -> session_unstable (exit 4) + cooldown.
+              throw new SessionError('La sessione cade subito dopo il login durante la scoperta corsi. Token probabilmente degradato dal sovrauso: esco senza re-login.');
             }
             // Nessun link e nessun login: pagina vuota/errore. Riprova.
             if (dcAttempt < DC_MAX) {
@@ -945,7 +907,7 @@ async function runAutoplay() {
           });
           if (browser) { try { await browser.close(); } catch (_) {} }
           try { writeDashboard(ROOT); } catch (_) {}
-          process.exit(3);
+          process.exit(4); // exit 4 = session_unstable: lo scheduler fa cooldown lungo
         }
         log('AUTOLOGIN NON VALIDO:', e.message);
         monitor.update({ running: false, phase: 'autologin_invalid', lastError: e.message });
@@ -962,6 +924,19 @@ async function runAutoplay() {
       if (e instanceof SessionError || e.code === 'SESSION_LOST') {
         log('SESSIONE PERSA:', e.message);
         try { if (fs.existsSync(STATE_FILE)) fs.unlinkSync(STATE_FILE); } catch (_) {}
+        if (tokenProvenValid) {
+          // Token già dimostrato valido in questo run (login riuscito) ma la
+          // sessione è caduta. Re-hitare l'autologin consumerebbe un altro hit del
+          // token, degradandolo e causando proprio l'instabilità che stiamo curando.
+          // Usciamo subito con session_unstable (exit 4): lo scheduler fa cooldown
+          // lungo (es. 30 min) così il token recupera e il prossimo run ha sessione
+          // stabile. Niente outer-retry, niente raffica.
+          log('Token valido ma sessione instabile: esco senza re-login per non consumare il token.');
+          monitor.update({ running: false, phase: 'session_unstable', lastError: 'Sessione instabile con token valido. Attendo il cooldown dello scheduler prima di riprovare.' });
+          if (browser) { try { await browser.close(); } catch (_) {} }
+          try { writeDashboard(ROOT); } catch (_) {}
+          process.exit(4);
+        }
         monitor.update({ phase: 'session_lost', lastError: e.message });
       } else {
         log('ERRORE CRITICO:', e);

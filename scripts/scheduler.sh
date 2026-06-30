@@ -102,6 +102,14 @@ while true; do
       # Non riavviare subito a vuoto; attendi 10 minuti così l'AI/utente può intervenire.
       log "Autoplay terminato con codice 0. Riavvio tra 10 minuti (evito loop a vuoto, need_help o fine turno)..."
       wait_ms 600000
+    elif [[ "$EXIT_CODE" -eq 4 ]]; then
+      # session_unstable: il token autologin è valido (abbiamo raggiunto la dashboard)
+      # ma la sessione è instabile — tipicamente il token è degradato dal sovrauso
+      # (troppi hit nello stesso giorno). Re-hitare subito l'autologin peggiorerebbe
+      # il degrado (raffica -> rate-limit della piattaforma). Lasciamo un cooldown
+      # lungo così il token recupera e il prossimo run ha una sessione stabile.
+      log "Autoplay terminato con codice 4 (session_unstable): token valido ma sessione instabile. Cooldown 30 minuti per far recuperare il token..."
+      wait_ms 1800000
     else
       log "Autoplay terminato con codice $EXIT_CODE. Riavvio tra 60 secondi..."
       sleep 60
