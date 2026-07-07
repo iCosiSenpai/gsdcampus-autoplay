@@ -135,6 +135,47 @@ ensure_ollama_server() {
   ok "Server Ollama attivo."
 }
 
+# Assicura che il CLI `ollama` sia raggiungibile nel PATH dopo l'installazione.
+# L'installer ufficiale crea il symlink /usr/local/bin/ollama, ma il path del CLI
+# dentro il bundle varia tra versioni (a volte Contents/Resources/ollama, a volte
+# non presente) e la shell corrente potrebbe non avere /usr/local/bin nel PATH.
+# Qui: se `ollama` non è in PATH, cerco il CLI nel bundle, creo/aggiorno il symlink
+# in /usr/local/bin e aggiungo /usr/local/bin al PATH. Ritorna 0 se alla fine
+# `command -v ollama` ha successo.
+ensure_ollama_cli() {
+  if command -v ollama &>/dev/null; then
+    return 0
+  fi
+
+  # Symlink già creato dall'installer ma /usr/local/bin non in PATH: aggiungilo.
+  if [ -x "/usr/local/bin/ollama" ]; then
+    export PATH="/usr/local/bin:$PATH"
+    command -v ollama &>/dev/null && return 0
+  fi
+
+  # Fallback: individua il CLI dentro il bundle dell'app (path variabile).
+  local cli=""
+  for cand in \
+    "/Applications/Ollama.app/Contents/Resources/ollama" \
+    "/Applications/Ollama.app/Contents/MacOS/ollama"; do
+    if [ -x "$cand" ]; then
+      cli="$cand"
+      break
+    fi
+  done
+
+  if [ -n "$cli" ]; then
+    info "CLI ollama non in PATH: creo/aggiorno il symlink /usr/local/bin/ollama..."
+    if ! ln -sf "$cli" "/usr/local/bin/ollama" 2>/dev/null; then
+      sudo -v 2>/dev/null
+      sudo ln -sf "$cli" "/usr/local/bin/ollama"
+    fi
+    export PATH="/usr/local/bin:$PATH"
+  fi
+
+  command -v ollama &>/dev/null
+}
+
 # True se package.json/package-lock.json sono cambiati rispetto all'ultimo hash salvato.
 package_hash_changed() {
   [ ! -f "$DIR/.package_hash" ] && return 0
@@ -238,13 +279,15 @@ print_footer() {
 
 print_header
 
-# Richiedi sudo all'inizio e avvia un keepalive in background
-info "Richiesta privilegi sudo all'inizio per tutta la sessione..."
+# Richiedi sudo UNA volta, in foreground, PRIMA dei prompt interattivi.
+# Niente keepalive in background: un `sudo -v` lanciato in background legge la
+# password da /dev/tty e, quando il timestamp scade durante il menu "Chi sei?"
+# (raw-mode, eco in user-space) o i `read` degli orari, ruba i tasti digitati
+# dall'utente — caratteri non visibili + "Sorry, try again. Password:". Il sudo
+# lo rinfreschiamo in foreground al passo 5 (Ollama), dopo i prompt interattivi.
+info "Richiesta privilegi sudo (una volta, prima del setup)..."
 sudo -v
-(while true; do sudo -v 2>/dev/null; sleep 60; done) &
-SUDO_KEEPALIVE_PID=$!
-trap 'kill $SUDO_KEEPALIVE_PID 2>/dev/null || true' EXIT INT TERM
-ok "Privilegi sudo acquisiti e mantenuti attivi."
+ok "Privilegi sudo acquisiti."
 
 if [ "$AUTO_YES" = false ]; then
   read -q "REPLY?Procedere? [y/N] "
@@ -909,13 +952,36 @@ fi
 
 # 5. Ollama
 step "5/7 - Ollama"
+install_ollama_official() {
+  # Rinfresco sudo in foreground: l'installer crea symlink in /usr/local/bin che
+  # può richiedere sudo. Avviene dopo i prompt interattivi, quindi nessun TUI attivo:
+  # un eventuale prompt password è sicuro (l'utente sta guardando i log di install).
+  sudo -v
+  # OLLAMA_NO_START=1 fa saltare all'installer ufficiale il `open -a Ollama` finale,
+  # che fallisce ("Unable to find application named 'Ollama'") perché LaunchServices
+  # non ha ancora registrato l'app appena spostata in /Applications. Con set -eu
+  # nell'installer, quel fallimento abortirebbe tutto il setup. Il server lo avviamo
+  # noi headless (ollama-daemon.sh). L'installer esce 0 pulito.
+  if ! curl -fsSL https://ollama.com/install.sh | OLLAMA_NO_START=1 sh; then
+    warn "Installer Ollama ha segnalato un errore (es. avvio GUI non riuscito). Verifico comunque il CLI..."
+  fi
+  # Best-effort: se non riesco a mettere ollama in PATH, non abortire qui;
+  # ci pensa il controllo successivo (CLI o app binary mancanti) con un messaggio utile.
+  ensure_ollama_cli || true
+}
+
 if ! command -v ollama &>/dev/null; then
   info "Ollama non trovato. Installazione in corso..."
-  curl -fsSL https://ollama.com/install.sh | sh
+  install_ollama_official
+  if ! command -v ollama &>/dev/null && [ ! -x "/Applications/Ollama.app/Contents/MacOS/Ollama" ]; then
+    err "Installazione Ollama non riuscita (CLI non disponibile)."
+    info "Prova a eseguire manualmente: curl -fsSL https://ollama.com/install.sh | sh"
+    exit 1
+  fi
   ok "Ollama installato."
 elif [ "$FORCE_UPDATE" = true ]; then
   info "Reinstallazione/aggiornamento Ollama (richiesto --force-update)..."
-  curl -fsSL https://ollama.com/install.sh | sh
+  install_ollama_official
   ok "Ollama aggiornato."
 else
   OLLAMA_VER=$(ollama --version 2>/dev/null | extract_version)
@@ -925,7 +991,8 @@ else
     ok "Ollama già installato (v$OLLAMA_VER ≥ min $MIN_OLLAMA). Salto."
   else
     warn "Ollama presente ma versione vecchia (v$OLLAMA_VER < $MIN_OLLAMA). Provo ad aggiornare..."
-    if curl -fsSL https://ollama.com/install.sh | sh; then
+    install_ollama_official
+    if command -v ollama &>/dev/null; then
       ok "Ollama aggiornato: $(ollama --version 2>/dev/null | head -1)."
     else
       warn "Aggiornamento Ollama non riuscito: continuo con la versione presente (v$OLLAMA_VER)."

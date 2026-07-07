@@ -174,7 +174,7 @@ Sii conciso. Riporta:
 
 ## Permessi di Claude Code
 
-`./launch-ai-supervisor.sh` avvia Claude con `--dangerously-skip-permissions`. All'inizio lo script chiede la password di sudo una solta volta (`sudo -v`) e la mantiene valida per tutta la sessione tramite un keepalive in background. Durante il setup l'utente deve solo confermare eventuali richieste di installazione/aggiornamento da Homebrew/npm (sempre `y`). I permessi di Claude Code non richiedono conferme ripetute.
+`./launch-ai-supervisor.sh` avvia Claude con `--dangerously-skip-permissions`. Lo script chiede la password di sudo una sola volta (`sudo -v`) in foreground, **prima** dei prompt interattivi, e la rinfresca in foreground al passo Ollama. **Non usa un keepalive in background**: un `sudo -v` in background legge la password da `/dev/tty` e ruba i tasti al menu "Chi sei?" (caratteri non visibili + "Sorry, try again. Password:"). Durante il setup l'utente deve solo confermare eventuali richieste di installazione/aggiornamento da Homebrew/npm (sempre `y`). I permessi di Claude Code non richiedono conferme ripetute.
 
 ## Requisito login Ollama
 
