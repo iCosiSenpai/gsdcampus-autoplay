@@ -19,6 +19,10 @@ Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `con
 
 **Nota su replicabilità su altri Mac**: gli ID dei corsi (`/corso/show/XXXX`) sono **personali** e variano da utente a utente. Per questo lo script `src/autoplay.js` scopre automaticamente i corsi dalla dashboard `https://tecsial.gsdcampus.it/corso/listAllByUser` dopo il login. `config.json` non deve più contenere `courseUrls` (o può contenerlo vuoto `[]`). L'URL di autologin è l'unico dato personale necessario.
 
+**Giro di scoperta prima di cominciare**: ad **ogni run**, prima di processare qualsiasi corso, `autoplay.js` fa un passaggio di scoperta (`discoverCourses`) che legge dalla dashboard l'elenco fresco dei corsi dell'utente e li filtra per stato (salta `done`/`need_help`). Lo script **non persiste né "impara" gli ID dei corsi**: la scoperta è sempre da zero, perché gli ID sono personali e possono cambiare. Non inserire mai ID corso hardcoded nello script o in `config.json`.
+
+**AI sempre attiva insieme allo script**: l'autoplay gira **sempre insieme a Claude + Ollama** (v. `launch-ai-supervisor.sh`), quindi c'è sempre un'AI co-attiva che può intervenire su `need_help`/`ignoto`, arricchire `known_answers.json`, gestire domande sconosciute e diagnosi. I dump diagnostici (`debug/quiz/`, `dumpQuizDiagnostics` in `src/lib/quiz.js`) servono proprio a dare all'AI qualcosa da leggere quando l'esito non è chiaro: l'autopilot non fallisce mai in silenzio, lascia artefatti per l'AI.
+
 ---
 
 ## Flusso utente principale

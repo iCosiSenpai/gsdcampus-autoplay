@@ -80,9 +80,26 @@ function mergeIntoKnown(root, newAnswers, log) {
 
 function extractScore(text) {
   const t = (text || '').toLowerCase();
+  // 1) Priorità: frazione vicino alle parole chiave "punteggio" o "voto [finale]".
+  // Evita di catturare numeri casuali del menù/indice (es. "4.3 38-39" nel sillabo).
+  const ctx = t.match(/(?:punteggio|voto(?:\s+finale)?)\s*:?\s*(\d{1,3})\s*\/\s*(\d{1,3})/);
+  if (ctx) {
+    const got = parseInt(ctx[1], 10);
+    const total = parseInt(ctx[2], 10);
+    return { text: `${got}/${total}`, pct: total ? (got / total) * 100 : 0, type: 'frac', got, total };
+  }
+  // 2) Forma italiana "X su Y" (es. "24 su 30").
+  const su = t.match(/(\d{1,3})\s+su\s+(\d{1,3})/);
+  if (su) {
+    const got = parseInt(su[1], 10);
+    const total = parseInt(su[2], 10);
+    return { text: `${got}/${total}`, pct: total ? (got / total) * 100 : 0, type: 'frac', got, total };
+  }
+  // 3) Percentuale esplicita.
   const pct = t.match(/(\d{1,3}([.,]\d+)?)\s*%/);
-  const frac = t.match(/(\d+)\s*\/\s*(\d+)/);
   if (pct) return { text: `${pct[1]}%`, pct: parseFloat(pct[1].replace(',', '.')), type: 'pct' };
+  // 4) Fallback: prima frazione generica "X/Y".
+  const frac = t.match(/(\d+)\s*\/\s*(\d+)/);
   if (frac) {
     const got = parseInt(frac[1], 10);
     const total = parseInt(frac[2], 10);
@@ -99,10 +116,13 @@ function scoreLooksPassing(score) {
 
 function detectOutcomeFromText(text) {
   const low = (text || '').toLowerCase();
-  const failedText = low.includes('non superato') || low.includes('non idoneo');
+  // Pattern esito: copriamo le formulazioni reali della piattaforma GSD Campus
+  // ("Questionario superato!", "Complimenti, hai superato...", "non superato",
+  // "insufficiente", "da ripetere"...).
+  const failedText = /non\s+superato|non\s+idoneo|non\s+hai\s+superato|insufficiente|da\s+ripetere|da\s+rifare/.test(low);
   const score = extractScore(text);
-  // Se il testo dice superato/idoneo ed esplicitamente NON dice "non", è superato.
-  const passedText = !failedText && (low.includes('superato') || low.includes('idoneo'));
+  // Se il testo dice superato/idoneo/complimenti ed esplicitamente NON dice "non", è superato.
+  const passedText = !failedText && /superato|idoneo|complimenti|hai\s+superato/.test(low);
   // Fallback sul punteggio: >= 80% conta come superato anche in assenza di testo chiaro.
   const passed = passedText || scoreLooksPassing(score);
   return { passed, failed: failedText, score };
@@ -116,7 +136,8 @@ async function extractQuestionsFromPage(page) {
       const seenQuestions = new Set();
       // Le opzioni sono in card .opzione-risposta; risaliamo al container comune
       // e prendiamo il primo heading come testo della domanda.
-      const optionCards = document.querySelectorAll('.opzione-risposta');
+      // Fallback selettori: la piattaforma può usare classi leggermente diverse.
+      const optionCards = document.querySelectorAll('.opzione-risposta, .opzione, [class*="opzione-risposta"], .risposta, [class*="risposta"]');
       optionCards.forEach(card => {
         const container = card.closest('form, .card, fieldset, .question-block, [class*="question"]') || card.parentElement;
         if (!container) return;
@@ -179,6 +200,34 @@ function saveNeedAnswer(root, questions, reason) {
     fs.mkdirSync(path.dirname(needPath), { recursive: true });
     fs.writeFileSync(needPath, JSON.stringify({ reason, questions, savedAt: new Date().toISOString() }, null, 2));
   } catch (e) { /* ignora */ }
+}
+
+// Salva HTML + screenshot + bodyText della pagina del quiz in debug/quiz/.
+// A prova di bomba: qualsiasi esito non chiaro o cattura fallita lascia artefatti
+// per diagnosi, così l'autopilot non fallisce MAI in silenzio. Non lancia mai.
+async function dumpQuizDiagnostics(page, root, label, bodyText) {
+  try {
+    const dir = path.join(root, 'debug', 'quiz');
+    fs.mkdirSync(dir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const base = path.join(dir, `${ts}_${label}`);
+    let html = '';
+    try { html = await page.content(); } catch (e) { /* pagina chiusa? */ }
+    try { fs.writeFileSync(base + '.html', html || ''); } catch (e) { /* ignora */ }
+    try { await page.screenshot({ path: base + '.png', fullPage: true }); } catch (e) { /* ignora */ }
+    try {
+      const meta = {
+        label,
+        ts: new Date().toISOString(),
+        url: (page.url && page.url()) ? page.url() : '',
+        bodyText: bodyText || null,
+      };
+      fs.writeFileSync(base + '.json', JSON.stringify(meta, null, 2));
+    } catch (e) { /* ignora */ }
+    return base;
+  } catch (e) {
+    return null;
+  }
 }
 
 // Cerca un bottone per riprovare / avviare il quiz.
@@ -338,7 +387,7 @@ async function solveQuiz(page, root, log, monitor) {
   const outcomeCheck = await page.evaluate(() => {
     const bodyText = document.body ? document.body.innerText : '';
     return {
-      bodyText: bodyText.slice(0, 3000),
+      bodyText: bodyText.slice(0, 12000),
       hasActiveQuestion: !!document.querySelector('form h4'),
       hasQuizButton: !!document.querySelector('a.btn-primary, button.btn-primary')
     };
@@ -381,12 +430,15 @@ async function solveQuiz(page, root, log, monitor) {
         // Prova a tornare al link del questionario e catturare da lì.
         const quizUrl = page.url();
         if (quizUrl.includes('/questionario/')) {
-          await page.goto(quizUrl, { waitUntil: 'networkidle' });
+          await page.goto(quizUrl, { waitUntil: 'networkidle' }).catch(() => {});
           await page.waitForTimeout(3000);
           captured = await extractQuestionsFromPage(page);
         }
       }
       saveNeedAnswer(root, captured, `quiz non superato (${resultText}), nessuna possibilità di riprova`);
+      if (captured.length === 0) {
+        await dumpQuizDiagnostics(page, root, 'failed_noretry_nocapture', outcomeCheck.bodyText);
+      }
       return {
         outcome: 'need_help',
         passed: false,
@@ -408,13 +460,23 @@ async function solveQuiz(page, root, log, monitor) {
   }
 
   // 3) Risolvi le domande attive.
-  const solveResult = await solveActiveQuestions(page, root, log, monitor);
+  // A prova di bomba: un'eccezione imprevista (pagina chiusa, nav fallita) non deve
+  // mai crashare l'autoplay. Lascio un dump diagnostico e dichiaro esito ignoto.
+  let solveResult;
+  try {
+    solveResult = await solveActiveQuestions(page, root, log, monitor);
+  } catch (e) {
+    log(`Errore imprevisto durante la risoluzione delle domande: ${e.message}. Salvo dump diagnostico.`);
+    await dumpQuizDiagnostics(page, root, 'exception_solve', null);
+    monitor?.update({ lastQuizResult: 'ignoto (eccezione)' });
+    return { outcome: 'unknown', passed: false, score: null, resultText: 'ignoto (eccezione)', reason: e.message };
+  }
 
   // 4) Dopo aver risposto, verifica l'esito finale.
   await page.waitForTimeout(3000);
   const finalOutcome = await page.evaluate(() => {
     const text = document.body ? document.body.innerText : '';
-    return { bodyText: text.slice(0, 3000) };
+    return { bodyText: text.slice(0, 12000) };
   }).catch(() => ({ bodyText: '' }));
 
   const final = detectOutcomeFromText(finalOutcome.bodyText);
@@ -449,12 +511,15 @@ async function solveQuiz(page, root, log, monitor) {
       // al questionario e catturare da lì.
       const quizUrl = page.url();
       if (quizUrl.includes('/questionario/')) {
-        await page.goto(quizUrl, { waitUntil: 'networkidle' });
+        await page.goto(quizUrl, { waitUntil: 'networkidle' }).catch(() => {});
         await page.waitForTimeout(3000);
         captured = await extractQuestionsFromPage(page);
       }
     }
     saveNeedAnswer(root, captured, `quiz non superato (${resultText})`);
+    if (captured.length === 0) {
+      await dumpQuizDiagnostics(page, root, 'failed_nocapture', finalOutcome.bodyText);
+    }
     return { outcome: 'need_help', passed: false, score: finalScoreText, resultText, reason: 'quiz non superato' };
   }
 
@@ -463,8 +528,12 @@ async function solveQuiz(page, root, log, monitor) {
   const captured = await extractQuestionsFromPage(page);
   if (captured.length > 0) {
     saveNeedAnswer(root, captured, 'esito quiz non chiaro');
+  } else {
+    // Nessun esito chiaro E nessuna domanda catturata: lascio artefatti per diagnosi
+    // (a prova di bomba: mai un fallimento silenzioso senza poter capire perché).
+    await dumpQuizDiagnostics(page, root, 'ignoto_nocapture', finalOutcome.bodyText);
   }
   return { outcome: 'unknown', passed: false, score: null, resultText: 'ignoto' };
 }
 
-module.exports = { solveQuiz, extractScore, detectOutcomeFromText, extractQuestionsFromPage, saveNeedAnswer };
+module.exports = { solveQuiz, extractScore, detectOutcomeFromText, extractQuestionsFromPage, saveNeedAnswer, dumpQuizDiagnostics };
