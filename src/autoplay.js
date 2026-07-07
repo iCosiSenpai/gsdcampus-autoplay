@@ -287,8 +287,13 @@ async function runCourse(page, courseUrl, sessionState, state) {
     monitor.update({ phase: 'checking', courseUrl });
 
     try {
-      log('Ritorno dashboard per accesso al corso...');
-      await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
+      // Se siamo già sulla dashboard (es. subito dopo discoverCourses), NON
+      // ricaricarla: ogni goto in più stressa la sessione quando è fragile e
+      // la piattaforma può rimbalzarci su /login. Ricarichiamo solo se serve.
+      if (!page.url().includes('/corso/listAllByUser')) {
+        log('Ritorno dashboard per accesso al corso...');
+        await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
+      }
       for (let w = 0; w < 30; w++) {
         if (await isDashboardLoaded(page)) break;
         if (await isLoginPage(page)) break;
@@ -299,15 +304,36 @@ async function runCourse(page, courseUrl, sessionState, state) {
       const targetId = courseUrl.split('/show/')[1];
       log(`Searching for course ID ${targetId} in dashboard...`);
 
-      const courseLink = page.locator(`a[href*="/corso/show/${targetId}"]`).first();
-      if (await courseLink.isVisible().catch(() => false)) {
+      // Cliccare il link "Apri" del corso nella dashboard è il percorso "naturale"
+      // che la piattaforma riconosce: preserva la sessione molto meglio di una
+      // goto diretta a /corso/show/X (che su sessione fragile rimbalza su /login).
+      // Aspettiamo che il link sia nel DOM (la dashboard può renderizzare le card
+      // in lazy) e preferiamo sempre il click alla goto diretta.
+      const linkSel = `a[href*="/corso/show/${targetId}"]`;
+      let courseLink = null;
+      for (let w = 0; w < 20; w++) {
+        if (await page.locator(linkSel).count().catch(() => 0) > 0) {
+          courseLink = page.locator(linkSel).first();
+          break;
+        }
+        if (await isLoginPage(page)) break;
+        await page.waitForTimeout(500);
+      }
+
+      if (courseLink && (await courseLink.isVisible().catch(() => false))) {
         log(`Link corso trovato tramite href per ID ${targetId}. Clicco per entrare...`);
         try {
           await courseLink.click({ timeout: 10000 });
         } catch (clickErr) {
-          log(`Click corso non andato a buon fine (${clickErr.message}); provo click forzato.`);
-          await courseLink.click({ force: true, timeout: 10000 }).catch(() => {});
+          log(`Click corso non andato a buon fine (${clickErr.message}); provo click JS forzato.`);
+          await page.evaluate((sel) => { const a = document.querySelector(sel); if (a) a.click(); }, linkSel).catch(() => {});
         }
+        await page.waitForTimeout(5000);
+      } else if (courseLink) {
+        // Link presente nel DOM ma non "visibile" (card collassata/off-screen/animazione):
+        // click via JS invece di arrenderci e fare la goto diretta (che fa cadere la sessione).
+        log(`Link corso per ID ${targetId} presente ma non visibile. Click JS forzato...`);
+        await page.evaluate((sel) => { const a = document.querySelector(sel); if (a) a.click(); }, linkSel).catch(() => {});
         await page.waitForTimeout(5000);
       } else {
         log(`Link corso per ID ${targetId} NON trovato in dashboard. Provo navigazione diretta...`);
