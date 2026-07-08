@@ -795,7 +795,15 @@ async function runAutoplay() {
             // Usiamo 'domcontentloaded' per evitare che networkidle resti appeso
             // sugli script persistenti della piattaforma causando timeout e
             // conseguente scadenza della sessione server-side.
-            await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
+            // Al primo tentativo, se siamo GIÀ sulla dashboard caricata (es. subito
+            // dopo il login), NON ricaricarla: ogni goto in più stressa la sessione
+            // quando è fragile e la piattaforma può rimbalzarci su /login (era questa
+            // la causa dei "Sessione caduta subito dopo il login durante la scoperta").
+            // Ricarichiamo solo ai retry o se non siamo in dashboard.
+            const alreadyOnDash = page.url().includes('/corso/listAllByUser') && (await isDashboardLoaded(page).catch(() => false));
+            if (!(dcAttempt === 1 && alreadyOnDash)) {
+              await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
+            }
             // Attesa esplicita per il rendering dei corsi (più affidabile di networkidle)
             for (let w = 0; w < 30; w++) {
               if (await isDashboardLoaded(page)) break;
