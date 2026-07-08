@@ -10,7 +10,7 @@ const { isWorkTime, nextWorkEnd, nextWorkStart, describeSchedule, minutesUntilSh
 const courseState = require('./lib/course-state');
 const { writeDashboard } = require('./lib/dashboard');
 const { writeJsonAtomic } = require('./lib/io');
-const { OffHoursExit, AutologinError, SessionError, AllCoursesNeedHelpExit, NeedHelpExit } = require('./lib/errors');
+const { OffHoursExit, AutologinError, SessionError, AllCoursesNeedHelpExit, DashboardEmptyError, NeedHelpExit } = require('./lib/errors');
 const { dashboardUrl, userAgent } = require('./lib/platform');
 
 const ROOT = path.join(__dirname, '..');
@@ -187,6 +187,38 @@ async function handleCourseInformativa(page, log) {
     return true;
   } catch (e) {
     log(`Errore gestione informativa: ${e.message}`);
+    return false;
+  }
+}
+
+// Gestisce la pagina di accettazione informativa che appare DOPO il login
+// (URL /informativa/acceptPrivacyPolicy, e sibling come /informativa/accept* per
+// la scheda tecnica). A differenza di handleCourseInformativa (che è sulla
+// pagina /corso/informativa/ con checkbox), qui NON ci sono checkbox: basta
+// cliccare il bottone "Confermo" del form. Il form ha un hidden csrf_token, e il
+// click sul submit sottomette nativamente (POST con csrf), niente POST manuale.
+// Idempotente: torna false se non siamo sulla pagina (es. privacy già accettata
+// in un run precedente).
+async function acceptInformativa(page, log) {
+  const url = page.url();
+  if (!url.includes('/informativa/accept')) return false;
+  log(`Pagina informativa post-login rilevata (${url}). Clicco conferma...`);
+  try {
+    let btn = page.locator('form[id^="accept_"] button[type="submit"]').first();
+    if (await btn.count().catch(() => 0) === 0) {
+      // Fallback: qualsiasi submit primario nella pagina
+      btn = page.locator('button[type="submit"].btn-primary').first();
+      if (await btn.count().catch(() => 0) === 0) {
+        log('Bottone conferma informativa non trovato.');
+        return false;
+      }
+    }
+    await btn.click().catch(e => log(`Errore click conferma informativa: ${e.message}`));
+    await page.waitForTimeout(4000);
+    log(`Dopo conferma informativa: URL = ${page.url()}`);
+    return true;
+  } catch (e) {
+    log(`Errore gestione conferma informativa: ${e.message}`);
     return false;
   }
 }
@@ -745,6 +777,11 @@ async function runAutoplay() {
           }
           // Pausa per stabilizzare la sessione dopo l'autologin
           await page.waitForTimeout(3000);
+          // Gestisci la pagina di accettazione informativa (privacy/scheda tecnica)
+          // che la piattaforma mostra dopo il login. Va PRIMA di handlePostLoginInterstitial:
+          // quella matcha "privacy" nel testo ma cerca checkbox (qui non ce ne sono) e il
+          // bottone "Confermo" non matcha i suoi selettori "Conferma/Continua/Prosegui".
+          await acceptInformativa(page, log);
           // Gestisci pagine intermedie post-autologin (termini, scelta ruolo, ecc.)
           await handlePostLoginInterstitial(page, log);
 
@@ -824,6 +861,10 @@ async function runAutoplay() {
             if (!(dcAttempt === 1 && alreadyOnDash)) {
               await page.goto(dashboardUrl(config), { waitUntil: 'domcontentloaded', timeout: 60000 });
             }
+            // Belt-and-suspenders: se il goto dashboard rimbalza su un'informativa
+            // non gestita al login (es. scheda tecnica dopo la privacy), gestiscila qui.
+            // Idempotente: torna false se non sulla pagina.
+            await acceptInformativa(page, log);
             // Attesa esplicita per il rendering dei corsi (più affidabile di networkidle)
             for (let w = 0; w < 30; w++) {
               if (await isDashboardLoaded(page)) break;
@@ -888,7 +929,13 @@ async function runAutoplay() {
         if (courseState.allDoneOrNeedHelp(state, Object.keys(state))) {
           throw new AllCoursesNeedHelpExit('Tutti i corsi sono completati o bloccati. Serve intervento manuale per i corsi bloccati.');
         }
-        throw new Error('Nessun corso disponibile dopo autologin. Verificare il link autologin e i permessi account.');
+        // Dashboard vuota = quasi sicuramente una pagina di blocco (informativa)
+        // non gestita. Dump della pagina per diagnosi AI (page è in scope qui dentro
+        // il try), poi lancio DashboardEmptyError -> il catch mappa a
+        // phase 'post_login_blocked' + exit 4 (cooldown, NON crash): evita il
+        // blackout da interstitial sconosciuti.
+        await monitor.recordError(page, new Error('Dashboard vuota dopo login'), 'dashboard_empty');
+        throw new DashboardEmptyError('Dashboard vuota dopo il login: probabile pagina di blocco (informativa) non gestita. Dump salvato in debug/dumps+screenshots.');
       }
 
       const sessionState = { loginDrops: 0, maxLoginDrops: MAX_LOGIN_DROPS };
@@ -990,6 +1037,23 @@ async function runAutoplay() {
         if (browser) { try { await browser.close(); } catch (_) {} }
         try { writeDashboard(ROOT); } catch (_) {}
         process.exit(0);
+      }
+      if (e instanceof DashboardEmptyError || e.code === 'DASHBOARD_EMPTY') {
+        // Dashboard vuota dopo login: blocco da interstitial non gestito (non un
+        // crash). recordError è già stato chiamato al throw site (page in scope
+        // lì) per il dump HTML+screenshot in debug/. Qui chiudo browser+ctx e
+        // esco con exit 4: lo scheduler fa cooldown 30 min SENZA incrementare il
+        // crash counter -> niente blackout. La fase 'post_login_blocked' (vs
+        // 'session_unstable') dice all'AI che è un blocco post-login, non un
+        // token degradato. L'AI legge il dump e aggiunge l'handler per il nuovo
+        // interstitial. Il finally NON gira dopo process.exit: chiudo ctx+browser
+        // esplicitamente (come fa il ramo OffHoursExit).
+        log('DASHBOARD VUOTA / BLOCCO POST-LOGIN:', e.message);
+        monitor.update({ running: false, phase: 'post_login_blocked', lastError: e.message, courseStateSummary: courseState.summarize(state) });
+        if (ctx) { try { await ctx.close(); } catch (_) {} ctx = null; }
+        if (browser) { try { await browser.close(); } catch (_) {} browser = null; }
+        try { writeDashboard(ROOT); } catch (_) {}
+        process.exit(4);
       }
       if (e instanceof SessionError || e.code === 'SESSION_LOST') {
         log('SESSIONE PERSA:', e.message);
