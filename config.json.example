@@ -3,6 +3,8 @@
   "baseUrl": "https://tecsial.gsdcampus.it/",
   "ollamaModel": "gemma4:cloud",
   "courseUrls": [],
+  "reportIssues": false,
+  "issueReporterToken": "",
   "workSchedule": {
     "days": [1, 2, 3, 4, 5, 6],
     "shifts": [

@@ -254,7 +254,7 @@ print_header() {
   echo -e "  ${BOLD}2)${NC} Quando lavorare — giorni e orari in cui il corso deve andare avanti"
   echo ""
   echo "Al resto (programmi necessari, browser, modello AI) penso io in automatico:"
-  echo -e "  ${DIM}Homebrew · Node.js · Playwright · Chrome · Ollama (${OLLAMA_MODEL}) · Claude Code${NC}"
+  echo -e "  ${DIM}Homebrew · Node.js · Playwright · Chrome · Ollama (${OLLAMA_MODEL}) · Claude Code · gh${NC}"
   echo "Quello che è già installato e aggiornato viene saltato."
   echo ""
   warn "Se il Terminale chiede di installare/aggiornare qualcosa (anche 'y/n'), rispondi SEMPRE sì."
@@ -494,6 +494,21 @@ elif [ "$FORCE_UPDATE" = true ]; then
   ok "Homebrew aggiornato."
 else
   ok "Homebrew già installato: $(brew --version | head -1). Salto."
+fi
+
+# GitHub CLI (gh) — usato da scripts/lib/issue-report.js per segnalare bug al
+# maintainer via issue GitHub (opt-in). Non richiede `gh auth login`: si usa con
+# GH_TOKEN=<issueReporterToken> letto da config.json.
+if ! command -v gh &>/dev/null; then
+  info "GitHub CLI (gh) non trovato. Installazione in corso..."
+  brew install gh 2>/dev/null || true
+  if command -v gh &>/dev/null; then
+    ok "gh installato: $(gh --version | head -1)."
+  else
+    warn "gh non installato (brew install gh fallito). La segnalazione issue resterà disattivata finché non lo installi."
+  fi
+else
+  ok "gh già installato: $(gh --version | head -1). Salto."
 fi
 
 # 2. Node.js (richiesto >= 22 per node:sqlite built-in)
@@ -822,6 +837,35 @@ while true; do
     configure_days
     configure_shifts
 
+    # Segnalazione issue al maintainer (opt-in). L'AI supervisore può aprire issue
+    # sulla repo pubblica del manutentore per i bug codice/infra che non risolve in
+    # loco (invece di modificare src/scripts, cosa vietata). Serve un token
+    # "issue-reporter": fine-grained PAT GitHub con scope Issues: Read and write,
+    # limitato alla sola repo del progetto. Salvato in config.json (gitignored).
+    REPORT_ISSUES=0
+    ISSUE_TOKEN=""
+    if [ "$AUTO_YES" != true ]; then
+      echo ""
+      echo -e "${BOLD}Segnalazione automatica problemi al maintainer (issue GitHub)${NC}"
+      echo "L'AI può aprire issue sulla repo del manutentore per i bug che non risolve in loco."
+      echo "Serve un token 'issue-reporter' (fine-grained PAT GitHub, scope Issues:write, solo la repo del progetto)."
+      echo "Il token va in config.json (gitignored, mai pubblicato). Per disattivarla in seguito, edita config.json."
+      read -q "REPLY?Vuoi attivarla ora? [y/N] "
+      echo ""
+      if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+        echo "Incolla il token issue-reporter (fine-grained PAT, inizia per 'github_pat_'):"
+        read "ISSUE_TOKEN?Token: "
+        if [ -n "$ISSUE_TOKEN" ]; then
+          REPORT_ISSUES=1
+          ok "Segnalazione issue ATTIVATA (token salvato in config.json)."
+        else
+          warn "Token vuoto: segnalazione non attivata."
+        fi
+      else
+        info "Segnalazione issue non attivata ora (config esistente preservata; attivabile rilanciando il setup)."
+      fi
+    fi
+
     # Costruisci JSON shifts su una sola riga (JSON non richiede a capo; evita problemi di
     # escaping di \n in zsh, che lascerebbe backslash-n letterali rendendo il file non valido).
     SHIFTS_JSON=""
@@ -853,6 +897,11 @@ while true; do
     echo "  Autologin: $(mask_url "$AUTOLOGIN")"
     echo "  Giorni:    $(days_human "$DAYS_JSON")"
     echo "  Turni:     $shifts_summary"
+    if [ "$REPORT_ISSUES" = "1" ]; then
+      echo "  Issue:     segnalazione ATTIVATA (token in config.json)"
+    else
+      echo "  Issue:     segnalazione non attivata"
+    fi
     echo ""
 
     if [ "$AUTO_YES" = true ]; then
@@ -866,7 +915,7 @@ while true; do
       # Scrive config.json via JSON.stringify per evitare problemi di escaping
       # con nomi contenenti virgolette o backslash. Preserva campi esistenti
       # come baseUrl, courseUrls e ollamaModel.
-      ACTIVE_CF="$ACTIVE_CF" MEMBER_NAME="$MEMBER_NAME" AUTOLOGIN="$AUTOLOGIN" DAYS_JSON="$DAYS_JSON" SHIFTS_JSON="$SHIFTS_JSON" node -e "
+      ACTIVE_CF="$ACTIVE_CF" MEMBER_NAME="$MEMBER_NAME" AUTOLOGIN="$AUTOLOGIN" DAYS_JSON="$DAYS_JSON" SHIFTS_JSON="$SHIFTS_JSON" REPORT_ISSUES="$REPORT_ISSUES" ISSUE_TOKEN="$ISSUE_TOKEN" node -e "
         const fs = require('fs');
         const path = require('path');
         const cfgPath = '$CONFIG_FILE';
@@ -882,6 +931,13 @@ while true; do
           days: process.env.DAYS_JSON.split(',').map(Number).filter(Boolean),
           shifts: JSON.parse('[' + process.env.SHIFTS_JSON + ']')
         };
+        // Segnalazione issue (opt-in): scrive solo se l'utente l'ha attivata in
+        // questo setup. Se dice 'no', preserva eventuali chiavi preesistenti (non
+        // cancella un token già configurato in un run precedente).
+        if (process.env.REPORT_ISSUES === '1' && process.env.ISSUE_TOKEN) {
+          cfg.reportIssues = true;
+          cfg.issueReporterToken = String(process.env.ISSUE_TOKEN).trim();
+        }
         // Scrittura atomica (tmp+rename): se il processo viene interrotto a metà
         // (SIGTERM/SIGINT/Ctrl-C durante il setup), config.json non resta troncato.
         const tmp = cfgPath + '.tmp';
@@ -890,6 +946,11 @@ while true; do
       " 2>/dev/null || {
         err "Impossibile salvare config.json con JSON.stringify, uso fallback heredoc."
         # Fallback heredoc anch'esso atomico: scrivo su .tmp poi rinomino.
+        if [ "$REPORT_ISSUES" = "1" ] && [ -n "$ISSUE_TOKEN" ]; then
+          REPORT_FRAGMENT="\"reportIssues\": true, \"issueReporterToken\": \"$ISSUE_TOKEN\","
+        else
+          REPORT_FRAGMENT="\"reportIssues\": false, \"issueReporterToken\": \"\","
+        fi
         cat > "$CONFIG_FILE.tmp" <<EOF
 {
   "codice_fiscale": "$ACTIVE_CF",
@@ -898,6 +959,7 @@ while true; do
   "baseUrl": "https://tecsial.gsdcampus.it/",
   "ollamaModel": "${OLLAMA_MODEL}",
   "courseUrls": [],
+  $REPORT_FRAGMENT
   "workSchedule": {
     "days": [$DAYS_JSON],
     "shifts": [$SHIFTS_JSON]
