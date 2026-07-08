@@ -22,6 +22,7 @@ const CONFIG = path.join(ROOT, 'config.json');
 const DATA = path.join(ROOT, 'data');
 const MEMBERS_CLI = path.join(ROOT, 'scripts', 'lib', 'members-cli.js');
 const IMPORT_MEMBERS = path.join(ROOT, 'scripts', 'import-members.js');
+const { writeJsonAtomic } = require(path.join(__dirname, 'write-json'));
 
 const CF_FROM_URL_RE = /\/autologin\/([A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z])\//;
 
@@ -98,7 +99,9 @@ function importMembersCsv() {
 
 function writeConfig(cfg) {
   try {
-    fs.writeFileSync(CONFIG, JSON.stringify(cfg, null, 2));
+    // Scrittura atomica (tmp+rename): se il setup viene interrotto (Ctrl-C)
+    // durante la selezione del membro, config.json non resta troncato a metà.
+    writeJsonAtomic(CONFIG, cfg);
     return true;
   } catch (e) {
     console.error(`Errore scrittura config.json: ${e.message}`);

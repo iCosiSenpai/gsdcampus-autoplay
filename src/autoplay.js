@@ -9,6 +9,9 @@ const { watchVideo } = require('./lib/video');
 const { isWorkTime, nextWorkEnd, nextWorkStart, describeSchedule, minutesUntilShiftEnd } = require('./lib/schedule');
 const courseState = require('./lib/course-state');
 const { writeDashboard } = require('./lib/dashboard');
+const { writeJsonAtomic } = require('./lib/io');
+const { OffHoursExit, AutologinError, SessionError, AllCoursesNeedHelpExit, NeedHelpExit } = require('./lib/errors');
+const { dashboardUrl, userAgent } = require('./lib/platform');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'data');
@@ -46,38 +49,6 @@ const MAX_MISSING_PERMISSION = 3;
 const MAX_COURSE_ITER = 80;
 const MAX_LOGIN_DROPS = 4;
 
-class OffHoursExit extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'OffHoursExit';
-    this.code = 'OFF_HOURS';
-  }
-}
-
-class AutologinError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'AutologinError';
-    this.code = 'AUTOLOGIN_INVALID';
-  }
-}
-
-class SessionError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'SessionError';
-    this.code = 'SESSION_LOST';
-  }
-}
-
-class AllCoursesNeedHelpExit extends Error {
-  constructor(message) {
-    super(message);
-    this.name = 'AllCoursesNeedHelpExit';
-    this.code = 'ALL_NEED_HELP';
-  }
-}
-
 // Predicati di riconoscimento pagina (login vs dashboard) centralizzati in
 // src/lib/page-detect.js, condivisi con l'health-check per evitare derive.
 const { isLoginPage, isDashboardLoaded } = require('./lib/page-detect');
@@ -91,7 +62,10 @@ async function handlePostLoginInterstitial(page, log) {
     const bodyText = await page.evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
     const currentUrl = page.url();
 
-    // Pop-up o pagina con bottone "Continua", "Accedi", "Conferma", "Prosegui"
+    // Pop-up o pagina con bottone "Continua", "Accedi", "Conferma", "Prosegui".
+    // I selettori con testo esplicito hanno la priorità; il submit generico è
+    // ultimo resort e viene blindato contro submit di logout/uscita (per non
+    // cliccare il bottone sbagliato su pagine con più form).
     const proceedSelectors = [
       'button:has-text("Continua")',
       'button:has-text("Prosegui")',
@@ -104,7 +78,17 @@ async function handlePostLoginInterstitial(page, log) {
     for (const sel of proceedSelectors) {
       const btn = page.locator(sel).first();
       if (await btn.isVisible().catch(() => false)) {
-        log(`Pagina intermedia rilevata (${currentUrl}). Clicco '${sel}'...`);
+        // Blindatura del submit generico: salta bottoni che sembrano logout/uscita.
+        if (sel === 'input[type="submit"]') {
+          const val = (await btn.getAttribute('value').catch(() => '')) || '';
+          if (/esci|logout|chiudi|annulla|esc/i.test(String(val))) {
+            log(`Pagina intermedia (${currentUrl}): submit '${val}' sembra logout, lo salto.`);
+            continue;
+          }
+          log(`Pagina intermedia rilevata (${currentUrl}). Clicco submit '${val}'...`);
+        } else {
+          log(`Pagina intermedia rilevata (${currentUrl}). Clicco '${sel}'...`);
+        }
         await btn.click().catch(() => {});
         await page.waitForTimeout(3000);
         return true;
@@ -141,22 +125,16 @@ async function handlePostLoginInterstitial(page, log) {
 
 function saveSession(state) {
   try {
-    fs.writeFileSync(SESSION_FILE, JSON.stringify({ ...state, savedAt: new Date().toISOString() }, null, 2));
+    // Scrittura atomica (tmp + rename): session_state.json non deve mai restare
+    // troncato a metà (lo legge il cleanup, ma un file corrotto confondere).
+    writeJsonAtomic(SESSION_FILE, { ...state, savedAt: new Date().toISOString() });
   } catch (e) {
     log('Errore salvataggio sessione:', e.message);
   }
 }
 
-function loadSession() {
-  try {
-    const data = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-    const ageMin = (Date.now() - new Date(data.savedAt).getTime()) / 60000;
-    if (ageMin < 120) return data;
-  } catch (e) {
-    // nessuna sessione valida
-  }
-  return null;
-}
+// loadSession rimosso: era codice morto (mai chiamato). Lo stato di sessione
+// vero è in-memory; SESSION_FILE è solo un artefatto di cleanup.
 
 async function solveQuizWrapper(page, courseUrl) {
   try {
@@ -255,6 +233,13 @@ async function getLessonProgressOnCoursePage(page, courseUrl, lessonHref) {
   try {
     await page.goto(courseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(3000);
+    // Su sessione fragile il goto rimbalza su /login: NON tornare null silenzioso
+    // (sennà runCourse crede "lezione non completata" e dopo 3 tentativi marca
+    // need_help un corso legittimamente completato). Segnala il drop di sessione:
+    // runAutoplay esce con session_unstable + cooldown invece di insistere.
+    if (await isLoginPage(page)) {
+      throw new SessionError('Sessione caduta verificando il progresso della lezione (redirect a /login dopo goto corso).');
+    }
     const rows = await page.evaluate(() => {
       const all = [...document.querySelectorAll('a[href*="/lezione/show/"]')];
       return all.map(a => {
@@ -267,6 +252,7 @@ async function getLessonProgressOnCoursePage(page, courseUrl, lessonHref) {
     const found = rows.find(r => r.href === lessonHref);
     return found ? found.pct : null;
   } catch (e) {
+    if (e instanceof SessionError) throw e; // propaga il drop, non inghiottirlo
     return null;
   }
 }
@@ -292,7 +278,7 @@ async function runCourse(page, courseUrl, sessionState, state) {
       // la piattaforma può rimbalzarci su /login. Ricarichiamo solo se serve.
       if (!page.url().includes('/corso/listAllByUser')) {
         log('Ritorno dashboard per accesso al corso...');
-        await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.goto(dashboardUrl(config), { waitUntil: 'domcontentloaded', timeout: 60000 });
       }
       for (let w = 0; w < 30; w++) {
         if (await isDashboardLoaded(page)) break;
@@ -634,6 +620,7 @@ async function runCourse(page, courseUrl, sessionState, state) {
 
 async function runAutoplay() {
   let browser;
+  let ctx;
   let outerRetries = 0;
   const MAX_OUTER_RETRIES = 5;
   // True se in QUALCHE outer retry di questo run abbiamo raggiunto la dashboard con
@@ -656,8 +643,41 @@ async function runAutoplay() {
   log(`Stato corsi caricato: ${JSON.stringify(initialSummary)}`);
   monitor.update({ courseStateSummary: initialSummary });
 
+  // --- Gestione segnali / crash: chiusura sicura del browser ---
+  // Senza questi handler, uno SIGTERM (es. da ./stop.sh) o un crash uccide il
+  // processo saltando il finally -> il chromium resta orfano (leak a ogni stop).
+  let shuttingDown = false;
+  async function gracefulShutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    try { log(`Ricevuto ${signal}: chiusura sicura...`); } catch (_) {}
+    try { monitor.update({ running: false, phase: 'stopped' }); } catch (_) {}
+    if (browser) { try { await browser.close(); } catch (_) {} browser = null; }
+    if (ctx) { try { await ctx.close(); } catch (_) {} ctx = null; }
+    process.exit(0);
+  }
+  async function fatalShutdown(reason, err) {
+    try { log(`FATAL (${reason}):`, err?.message || err); } catch (_) {}
+    try { monitor.update({ running: false, phase: 'fatal', lastError: String(err?.message || err) }); } catch (_) {}
+    if (browser) { try { await browser.close(); } catch (_) {} browser = null; }
+    if (ctx) { try { await ctx.close(); } catch (_) {} ctx = null; }
+    process.exit(1);
+  }
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('uncaughtException', (err) => fatalShutdown('uncaughtException', err));
+  process.on('unhandledRejection', (err) => fatalShutdown('unhandledRejection', err));
+
   while (outerRetries < MAX_OUTER_RETRIES) {
     outerRetries++;
+    // Rileva divergenze: se config.json è stato cambiato durante il run (es.
+    // members-cli set-active da parte dell'AI/utente), il CF attivo può divergere
+    // da quello con cui abbiamo caricato lo stato. Avvisa: lo stato/cookie
+    // finirebbero nella cartella dell'account sbagliato. Richiede riavvio.
+    const _nowPaths = account.stateFilePaths(ROOT);
+    if (_nowPaths.codiceFiscale && ACTIVE_CF && _nowPaths.codiceFiscale !== ACTIVE_CF) {
+      log(`ATTENZIONE: l'account attivo in config.json (${_nowPaths.codiceFiscale}) è diverso da quello all'avvio (${ACTIVE_CF}). Stato e cookie stanno nella cartella dell'account sbagliato: riavvia (./stop.sh && ./start.sh) per usare il nuovo account.`);
+    }
     monitor.update({ phase: 'starting', running: true, lastError: null });
     try {
       log('Avvio browser in modalità headless...');
@@ -691,10 +711,10 @@ async function runAutoplay() {
       // via autologin URL imposterà i cookie corretti da zero.
       const ctxOptions = {
         viewport: { width: 1440, height: 900 },
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+        userAgent: userAgent(config)
       };
 
-      const ctx = await browser.newContext(ctxOptions);
+      ctx = await browser.newContext(ctxOptions);
 
       const page = await ctx.newPage();
       await page.addInitScript(() => {
@@ -729,7 +749,7 @@ async function runAutoplay() {
           await handlePostLoginInterstitial(page, log);
 
           // Naviga alla dashboard con 'domcontentloaded' (veloce e affidabile)
-          await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
+          await page.goto(dashboardUrl(config), { waitUntil: 'domcontentloaded', timeout: 60000 });
           await handlePostLoginInterstitial(page, log);
 
           // Attendiamo che il DOM sia stabilizzato e la dashboard sia effettivamente caricata.
@@ -802,7 +822,7 @@ async function runAutoplay() {
             // Ricarichiamo solo ai retry o se non siamo in dashboard.
             const alreadyOnDash = page.url().includes('/corso/listAllByUser') && (await isDashboardLoaded(page).catch(() => false));
             if (!(dcAttempt === 1 && alreadyOnDash)) {
-              await page.goto('https://tecsial.gsdcampus.it/corso/listAllByUser', { waitUntil: 'domcontentloaded', timeout: 60000 });
+              await page.goto(dashboardUrl(config), { waitUntil: 'domcontentloaded', timeout: 60000 });
             }
             // Attesa esplicita per il rendering dei corsi (più affidabile di networkidle)
             for (let w = 0; w < 30; w++) {
@@ -843,10 +863,13 @@ async function runAutoplay() {
               // subito con SessionError -> session_unstable (exit 4) + cooldown.
               throw new SessionError('La sessione cade subito dopo il login durante la scoperta corsi. Token probabilmente degradato dal sovrauso: esco senza re-login.');
             }
-            // Nessun link e nessun login: pagina vuota/errore. Riprova.
+            // Nessun link e nessun login: pagina vuota/errore. Riprova con
+            // backoff crescente (3s, 10s, 25s): tentativi ravvicinati a 3s fissi
+            // stressano la sessione fragile esattamente come i re-login sconsigliati.
             if (dcAttempt < DC_MAX) {
-              log(`Dashboard vuota durante la scoperta (tentativo ${dcAttempt}/${DC_MAX}), riprovo...`);
-              await page.waitForTimeout(3000);
+              const dcBackoff = [3000, 10000, 25000][Math.min(dcAttempt - 1, 2)] || 3000;
+              log(`Dashboard vuota durante la scoperta (tentativo ${dcAttempt}/${DC_MAX}), riprovo tra ${Math.round(dcBackoff / 1000)}s...`);
+              await page.waitForTimeout(dcBackoff);
               continue;
             }
             log('Nessun corso attivo trovato in dashboard.');
@@ -922,8 +945,21 @@ async function runAutoplay() {
       if (e instanceof OffHoursExit || e.code === 'OFF_HOURS') {
         log('Uscita per fine turno lavorativo.');
         monitor.update({ running: false, phase: 'off_hours' });
+        if (ctx) { try { await ctx.close(); } catch (_) {} ctx = null; }
+        if (browser) { try { await browser.close(); } catch (_) {} browser = null; }
         try { writeDashboard(ROOT); } catch (_) {}
         process.exit(0);
+      }
+      if (e instanceof NeedHelpExit) {
+        // Quiz sospeso (domanda senza risposta nota): chiude il browser e scrive
+        // phase need_help PRIMA di exit. Prima questo avveniva con process.exit(2)
+        // dentro quiz.js, che orfanava il chromium e saltava il finally.
+        log('NEED HELP:', e.message);
+        monitor.update({ running: false, phase: 'need_help', lastError: e.message, courseStateSummary: courseState.summarize(state) });
+        if (ctx) { try { await ctx.close(); } catch (_) {} ctx = null; }
+        if (browser) { try { await browser.close(); } catch (_) {} browser = null; }
+        try { writeDashboard(ROOT); } catch (_) {}
+        process.exit(2);
       }
       if (e instanceof AutologinError || e.code === 'AUTOLOGIN_INVALID') {
         if (tokenProvenValid) {
@@ -977,6 +1013,10 @@ async function runAutoplay() {
         await monitor.recordError(null, e, 'outer');
       }
     } finally {
+      if (ctx) {
+        try { await ctx.close(); } catch (e) {}
+        ctx = null;
+      }
       if (browser) {
         try { await browser.close(); } catch (e) {}
         browser = null;

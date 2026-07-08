@@ -19,6 +19,17 @@ step() { echo -e "${BOLD}[PASSO $1]${NC} $2"; }
 PID_FILE=".autoplay_pid"
 STOP_FILE=".scheduler_stop"
 
+# pid_matches <PID> <pattern>: il PID esiste E la sua command line contiene il
+# pattern. Protegge dal PID recycling: un PID recyclato a un processo non nostro
+# non verrebbe segnalato (kill -0 puro direbbe solo "esiste un processo").
+pid_matches() {
+  local p="$1"; local pat="$2"
+  [ -n "$p" ] || return 1
+  kill -0 "$p" 2>/dev/null || return 1
+  ps -o command= -p "$p" 2>/dev/null | grep -qE "$pat" || return 1
+  return 0
+}
+
 echo ""
 echo "============================================"
 echo -e "${BOLD}  Arresto GSD Campus Autoplay${NC}"
@@ -37,8 +48,12 @@ else
   if [ -z "$PID" ]; then
     warn "PID file vuoto."
     rm -f "$PID_FILE"
-  else
+  elif pid_matches "$PID" "scheduler|autoplay"; then
     ok "Trovato scheduler PID $PID."
+  else
+    warn "PID $PID nel file non corrisponde a scheduler/autoplay (probabile PID recycling). Non lo kill: pulisco il file."
+    PID=""
+    rm -f "$PID_FILE"
   fi
 fi
 
@@ -68,7 +83,10 @@ fi
 # Cleanup orfani di autoplay e scheduler
 echo ""
 step "3/3" "Pulizia eventuali processi orfani"
-ORPHANS=$(pgrep -f "node src/autoplay.js" 2>/dev/null || true)
+# Pattern path-indipendente: lo scheduler lancia `node /abs/path/src/autoplay.js`,
+# quindi "node src/autoplay.js" (sottostringa) NON matchava mai. Usiamo il nome
+# file, che matcha qualsiasi path. Esclude autoplay.log (grep su "autoplay\.js").
+ORPHANS=$(pgrep -f "autoplay\.js" 2>/dev/null || true)
 if [ -n "$ORPHANS" ]; then
   echo "$ORPHANS" | while read orphan; do
     [ "$orphan" != "$$" ] && kill -9 "$orphan" 2>/dev/null || true

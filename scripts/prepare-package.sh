@@ -53,6 +53,13 @@ if [ "$AUTO_YES" = false ]; then
 fi
 
 step "1/6" "Pulizia pacchetto precedente"
+# Sanity check anti-rm-rf-`: se OUTPUT_DIR fosse vuoto o "/", rm -rf
+# cancellerebbe la home o la radice. I valori sono hardcoded ma il guard
+# resta come rete di sicurezza contro future modifiche.
+if [ -z "$OUTPUT_DIR" ] || [ "$OUTPUT_DIR" = "/" ] || [ -z "$HOME" ] || [ ! -d "$HOME/Desktop" ]; then
+  err "OUTPUT_DIR non valido ('$OUTPUT_DIR'): mi rifiuto di eseguire rm -rf."
+  exit 1
+fi
 rm -rf "$OUTPUT_DIR"
 rm -f "$ZIP_FILE"
 ok "Pulizia completata."

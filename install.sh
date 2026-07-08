@@ -26,6 +26,29 @@ REPO_URL="https://github.com/iCosiSenpai/gsdcampus-autoplay.git"
 BRANCH="main"
 TARGET="$HOME/gsdcampus-autoplay"
 
+# Pin di versione (supply-chain): quando impostato a un tag esistente (es.
+# "v0.1.0"), la prima installazione clona ESATTAMENTE quel tag invece del main
+# mobile. Main è un branch mobile: un commit malevolo/errato pushato su main
+# verrebbe eseguito da ogni collega tramite "curl | bash". Pinning a un tag
+# immutabile blocca il codice a una versione verificata.
+# Lascia vuoto per usare main (comportamento attuale). Tag va creato con:
+#   git tag -a v0.1.0 -m "..." && git push origin v0.1.0
+PINNED_TAG=""
+
+clone_repo() {
+  # $1 = path destinazione
+  local dest="$1"
+  if [ -n "$PINNED_TAG" ]; then
+    info "Clono la versione pin-nata $PINNED_TAG (immutabile)..."
+    if git clone --branch "$PINNED_TAG" --depth 1 "$REPO_URL" "$dest" 2>/dev/null; then
+      ok "Progetto scaricato (tag $PINNED_TAG)."
+      return 0
+    fi
+    warn "Tag $PINNED_TAG non trovato (forse non ancora pubblicato). Fallback su $BRANCH."
+  fi
+  git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$dest"
+}
+
 BOLD='\033[1m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; RED='\033[0;31m'; NC='\033[0m'
 info() { printf "${BLUE}${BOLD}[INFO]${NC} %s\n" "$1"; }
 ok()   { printf "${GREEN}${BOLD}[OK]${NC} %s\n" "$1"; }
@@ -116,7 +139,7 @@ elif [ -d "$TARGET" ]; then
   MODE="launch"
 else
   info "Scarico il progetto in $TARGET..."
-  git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$TARGET"
+  clone_repo "$TARGET"
   ok "Progetto scaricato."
   MODE="install"   # prima volta: il launcher avvierà il setup interattivo (selezione account + orari)
 fi

@@ -28,8 +28,15 @@ function createLogger(root) {
     const line = `${new Date().toLocaleTimeString('it-IT')} | ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`;
     process.stdout.write(line);
     rotateIfNeeded(logFile);
-    fs.appendFileSync(logFile, line);
-    fs.writeFileSync(heartbeatFile, `Last active: ${new Date().toLocaleTimeString('it-IT')} (${new Date().toISOString()})`);
+    // Le scritture su file non devono MAI propagare eccezioni (disco pieno,
+    // permessi rotti): log() è chiamato anche fuori da try block, e un'eccezione
+    // qui diventerebbe un uncaughtException fatale senza cleanup del browser.
+    try { fs.appendFileSync(logFile, line); } catch (e) {
+      try { process.stderr.write(`[logger] append fallito: ${e.message}\n`); } catch (_) {}
+    }
+    try { fs.writeFileSync(heartbeatFile, `Last active: ${new Date().toLocaleTimeString('it-IT')} (${new Date().toISOString()})`); } catch (e) {
+      try { process.stderr.write(`[logger] heartbeat fallito: ${e.message}\n`); } catch (_) {}
+    }
   }
 
   return log;

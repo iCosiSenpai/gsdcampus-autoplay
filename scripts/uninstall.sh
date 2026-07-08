@@ -5,10 +5,12 @@ DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
 # Legge il modello Ollama da config.json (campo `ollamaModel`).
+# Fallback a costante letterale (NON a ${OLLAMA_MODEL}: circolare — vedi check-requirements.sh).
+MODEL_FALLBACK="gemma4:cloud"
 get_ollama_model() {
-  node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${OLLAMA_MODEL}'); } catch(e){ console.log('${OLLAMA_MODEL}'); }" 2>/dev/null || echo '${OLLAMA_MODEL}'
+  node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${MODEL_FALLBACK}'); } catch(e){ console.log('${MODEL_FALLBACK}'); }" 2>/dev/null || echo "${MODEL_FALLBACK}"
 }
-OLLAMA_MODEL=$(get_ollama_model)
+OLLAMA_MODEL="$(get_ollama_model)"
 
 BOLD='\033[1m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RED='\033[0;31m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}${BOLD}[OK]${NC} $1"; }

@@ -148,9 +148,42 @@ function loadScheduleConfig() {
   return { days: DEFAULT_DAYS, shifts: DEFAULT_SHIFTS };
 }
 
-const { days: WORK_DAYS, shifts: SHIFTS } = loadScheduleConfig();
+// Cache con invalidazione su mtime: legge config.json a ogni chiamata solo se
+// il file è cambiato. Permette di cambiare orari in config.json (es. via AI o
+// setup.sh) e vederli riflesso senza riavviare il processo. Prima WORK_DAYS/
+// SHIFTS erano catturati una volta sola a require(): un cambio orari nello
+// stesso processo non veniva riflesso finché non si riavviava.
+let _schedCache = null;
+let _schedMtime = 0;
+function currentSchedule() {
+  try {
+    const root = path.join(__dirname, '..', '..');
+    const cfgPath = path.join(root, 'config.json');
+    const st = fs.statSync(cfgPath);
+    if (_schedCache && st.mtimeMs === _schedMtime) return _schedCache;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    if (cfg.workSchedule && Array.isArray(cfg.workSchedule.days) && Array.isArray(cfg.workSchedule.shifts)) {
+      const shifts = normalizeShifts(cfg.workSchedule.shifts);
+      if (shifts.length > 0) {
+        _schedCache = { days: normalizeDays(cfg.workSchedule.days), shifts };
+        _schedMtime = st.mtimeMs;
+        return _schedCache;
+      }
+    }
+  } catch (e) {
+    // fallback su default
+  }
+  _schedCache = { days: DEFAULT_DAYS, shifts: DEFAULT_SHIFTS };
+  _schedMtime = 0;
+  return _schedCache;
+}
+
+// Snapshot per back-compat con chi importa WORK_DAYS/SHIFTS (nessuno oggi, ma
+// esposti). Le funzioni sotto usano currentSchedule() per riflettere i cambiamenti.
+const { days: WORK_DAYS, shifts: SHIFTS } = currentSchedule();
 
 function isWorkTime(date = new Date()) {
+  const { days: WORK_DAYS, shifts: SHIFTS } = currentSchedule();
   const day = date.getDay();
   if (!WORK_DAYS.includes(day)) return false;
 
@@ -166,6 +199,7 @@ function isWorkTime(date = new Date()) {
 }
 
 function nextWorkEnd(date = new Date()) {
+  const { days: WORK_DAYS, shifts: SHIFTS } = currentSchedule();
   let d = new Date(date);
   for (let i = 0; i < 14; i++) {
     const day = d.getDay();
@@ -187,6 +221,7 @@ function nextWorkEnd(date = new Date()) {
 }
 
 function nextWorkStart(date = new Date()) {
+  const { days: WORK_DAYS, shifts: SHIFTS } = currentSchedule();
   let d = new Date(date);
   for (let i = 0; i < 14; i++) {
     const day = d.getDay();
@@ -213,6 +248,7 @@ function nextShiftBoundary(date = new Date()) {
 
 // Ritorna i minuti mancanti alla fine del turno attuale, oppure null se non siamo in orario.
 function minutesUntilShiftEnd(date = new Date()) {
+  const { days: WORK_DAYS, shifts: SHIFTS } = currentSchedule();
   const day = date.getDay();
   if (!WORK_DAYS.includes(day)) return null;
   const total = date.getHours() * 60 + date.getMinutes();

@@ -71,9 +71,19 @@ fi
 
 echo ""
 step "3/5" "Controllo istanze attive"
+# pid_matches <PID> <pattern>: verifica che il PID esista E che la sua command
+# line contenga il pattern. Protegge dal PID recycling (un PID recyclato a un
+# processo non nostro verrebbe scambiato per un'istanza attiva).
+pid_matches() {
+  local p="$1"; local pat="$2"
+  [ -n "$p" ] || return 1
+  kill -0 "$p" 2>/dev/null || return 1
+  ps -o command= -p "$p" 2>/dev/null | grep -qE "$pat" || return 1
+  return 0
+}
 if [ -f "$PID_FILE" ]; then
   OLD_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+  if pid_matches "$OLD_PID" "scheduler|autoplay"; then
     warn "Autoplay già in esecuzione (PID $OLD_PID)."
     info "Monitor: ./status.sh"
     info "Ferma:   ./stop.sh"
@@ -83,6 +93,14 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$PID_FILE"
 else
   ok "Nessuna istanza attiva."
+fi
+# Lock atomica anti-doppio-avvio: noclobber crea il PID file solo se non esiste,
+# in modo esclusivo. Previene che due start.sh lanciati in rapida successione
+# passino entrambi il check "nessuna istanza" e avviino due scheduler concorrenti.
+if ! (set -o noclobber; : > "$PID_FILE") 2>/dev/null; then
+  err "Impossibile acquisire il lock su $PID_FILE (avvio concorrente?)."
+  info "Se sei sicuro che non ci sia un'istanza attiva: rm -f $PID_FILE e riprova."
+  exit 1
 fi
 
 echo ""
@@ -110,8 +128,8 @@ else
   fi
   nohup "$DIR/scripts/scheduler.sh" > "$OUT_FILE" 2>&1 &
 fi
-echo $! > "$PID_FILE"
-PID=$(cat "$PID_FILE")
+PID=$!
+echo "$PID" > "$PID_FILE"
 
 echo ""
 echo "────────────────────────────"

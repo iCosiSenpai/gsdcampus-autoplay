@@ -34,14 +34,19 @@ const LAST_LIST = path.join(DATA, '.members_last_list.json');
 const db = require(path.join(ROOT, 'src', 'lib', 'db'));
 const importCsv = require(path.join(ROOT, 'src', 'lib', 'import-csv'));
 const account = require(path.join(ROOT, 'src', 'lib', 'account'));
+const { writeJsonAtomic, readJsonSafe } = require(path.join(__dirname, 'write-json'));
 
 const CF_FROM_URL_RE = /\/autologin\/([A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z])\//;
 
 function readJson(p, fallback) {
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch (e) { return fallback; }
+  // readJsonSafe emette warning su file corrotto (non silenzioso) a differenza
+  // del vecchio catch vuoto.
+  return readJsonSafe(p, fallback, { warn: false });
 }
 function writeJson(p, obj) {
-  fs.writeFileSync(p, JSON.stringify(obj, null, 2));
+  // Scrittura atomica (tmp+rename): config.json e .members_last_list.json non
+  // rischiano più di restare troncati se il CLI viene interrotto a metà.
+  writeJsonAtomic(p, obj);
 }
 
 function readConfig() { return readJson(CONFIG, {}); }

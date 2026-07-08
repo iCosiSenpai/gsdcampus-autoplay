@@ -44,11 +44,14 @@ if [ -f "$PID_FILE" ]; then
   PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
   if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
     SCHED_ACTIVE=true
-    # Calcola durata attività dal tempo trascorso (etime), più robusto di lstart
-    local etime
+    # Calcola durata attività dal tempo trascorso (etime), più robusto di lstart.
+    # Niente `local` (siamo a top-level, non in una funzione: anti-pattern che in
+    # bash rompe; in zsh crea variabili di scope script, ma le evitiamo per
+    # portabilità coerente con il resto del file).
+    etime=""
     etime=$(ps -o etime= -p "$PID" 2>/dev/null | tr -d ' ' || echo "")
     if [ -n "$etime" ]; then
-      local uptime_min
+      uptime_min=""
       uptime_min=$(node -e "
         const t = '$etime';
         const m = t.match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/);

@@ -14,15 +14,27 @@ const path = require('path');
 
 const CF_FROM_URL_RE = /\/autologin\/([A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z])\//;
 
-// Cache per-processo della config letta.
+// Cache per-processo della config letta, con invalidazione su mtime: se
+// config.json cambia (es. AI/utente cambiano account o orari durante un run),
+// la prossima readConfig rilegge invece di restituire la copia stantia.
 let _cfgCache = null;
 let _cfgPath = null;
+let _cfgMtime = 0;
 
 function readConfig(root) {
   const p = path.join(root, 'config.json');
-  if (_cfgPath !== p || _cfgCache === null) {
-    try { _cfgCache = JSON.parse(fs.readFileSync(p, 'utf8')); _cfgPath = p; }
-    catch (e) { _cfgCache = {}; _cfgPath = p; }
+  try {
+    const st = fs.statSync(p);
+    if (_cfgPath === p && _cfgCache !== null && st.mtimeMs === _cfgMtime) {
+      return _cfgCache;
+    }
+    _cfgCache = JSON.parse(fs.readFileSync(p, 'utf8'));
+    _cfgPath = p;
+    _cfgMtime = st.mtimeMs;
+  } catch (e) {
+    _cfgCache = {};
+    _cfgPath = p;
+    _cfgMtime = 0;
   }
   return _cfgCache;
 }

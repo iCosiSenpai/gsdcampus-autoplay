@@ -2,9 +2,33 @@ const fs = require('fs');
 const path = require('path');
 const account = require('./account');
 const { askQuizQuestion } = require('./ollama-quiz');
+const { writeJsonAtomic, readJsonSafe } = require('./io');
+const { NeedHelpExit } = require('./errors');
 
 const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
 const tokenize = (s) => normalize(s).split(/\s+/).filter(t => t.length > 2);
+
+// Tetto di sicurezza sul numero di domande per quiz: evita loop infiniti se la
+// piattaforma renderizza una nuova domanda a ogni iterazione senza mai finire.
+// 200 è abbondante per i quiz del corso (tipicamente <50); superato emette warning.
+const MAX_QUIZ_QUESTIONS = 200;
+
+// Mappa lettera (A,B,C,D,E) → indice opzione.
+function letterToIndex(letter) {
+  const i = ['A', 'B', 'C', 'D', 'E'].indexOf(String(letter || '').toUpperCase());
+  return i; // -1 se non valido
+}
+
+// Locator delle opzioni risposta, scoped al form della domanda corrente.
+// Se il form id non è presente (layout anomalo), ricade sul selettore globale.
+// Scope: evita di cliccare l'opzione di un'altra domanda se la pagina ne
+// renderizza più di una contemporaneamente.
+async function optionsLocator(page) {
+  const scoped = page.locator('form#aggiungi_risposta .opzione-risposta');
+  const n = await scoped.count().catch(() => 0);
+  if (n > 0) return scoped;
+  return page.locator('.opzione-risposta');
+}
 
 // Similarità Jaccard normalizzata tra due stringhe (0..1). Ignora le stop word
 // italiane comuni per concentrarsi sulle parole semanticamente rilevanti.
@@ -61,15 +85,17 @@ function findKnownAnswer(question, options, knownAnswers) {
 function mergeIntoKnown(root, newAnswers, log) {
   if (!newAnswers || Object.keys(newAnswers).length === 0) return 0;
   const knownPath = path.join(root, 'data', 'known_answers.json');
-  let known = {};
-  try { known = JSON.parse(fs.readFileSync(knownPath, 'utf8')); } catch (e) { /* parte vuota */ }
+  // readJsonSafe: se la banca condivisa è corrotta, non la azzera silenziosamente:
+  // lo segnala e parte da {} (perdendo solo il merge di questo run, non tutto).
+  let known = readJsonSafe(knownPath, {});
   let added = 0;
   for (const [q, a] of Object.entries(newAnswers)) {
     if (!known[q]) { known[q] = a; added++; }
   }
   if (added > 0) {
     try {
-      fs.writeFileSync(knownPath, JSON.stringify(known, null, 2));
+      // Scrittura atomica (tmp + rename): un crash a metà non corrompe la banca.
+      writeJsonAtomic(knownPath, known);
       log(`Banca risposte aggiornata: +${added} risposte verificate (quiz superato).`);
     } catch (e) {
       log(`Impossibile aggiornare known_answers.json: ${e.message}`);
@@ -197,8 +223,9 @@ function saveNeedAnswer(root, questions, reason) {
   if (!questions || questions.length === 0) return;
   const needPath = account.stateFilePaths(root).needAnswer;
   try {
-    fs.mkdirSync(path.dirname(needPath), { recursive: true });
-    fs.writeFileSync(needPath, JSON.stringify({ reason, questions, savedAt: new Date().toISOString() }, null, 2));
+    // Scrittura atomica: il file need_answer è letto dall'AI per intervenire,
+    // non deve mai restare troncato a metà.
+    writeJsonAtomic(needPath, { reason, questions, savedAt: new Date().toISOString() });
   } catch (e) { /* ignora */ }
 }
 
@@ -278,7 +305,7 @@ async function solveActiveQuestions(page, root, log, monitor) {
   const capturedAnswers = {};      // TUTTE le domande con la risposta che abbiamo scelto
   const knownAnswersPath = path.join(root, 'data', 'known_answers.json');
 
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < MAX_QUIZ_QUESTIONS; i++) {
     await page.waitForTimeout(2000);
     await page.waitForSelector('form h1, form h2, form h3, form h4, form h5, .opzione-risposta, button:has-text("Conferma"), button[type="submit"]', { timeout: 10000 }).catch(() => {});
 
@@ -329,7 +356,8 @@ async function solveActiveQuestions(page, root, log, monitor) {
     if (knownMatch) {
       selectedOptionText = knownMatch.optionText;
       log(`Risposta nota (confidenza ${(knownMatch.score * 100).toFixed(0)}%): ${selectedOptionText.slice(0, 50)}...`);
-      await page.locator('.opzione-risposta').nth(knownMatch.optionIndex).click();
+      const optsLoc = await optionsLocator(page);
+      await optsLoc.nth(knownMatch.optionIndex).click();
       await page.waitForTimeout(500);
       await clickNextButton(page, log);
       found = true;
@@ -345,7 +373,24 @@ async function solveActiveQuestions(page, root, log, monitor) {
         selectedOptionText = ollamaAnswer.text;
         const conf = ollamaAnswer.confidence != null ? `${(ollamaAnswer.confidence * 100).toFixed(0)}%` : '?';
         log(`Ollama suggerisce: ${ollamaAnswer.letter}) ${selectedOptionText.slice(0, 50)}... (confidenza ${conf}, strategia ${ollamaAnswer.strategy || '?'})`);
-        await page.locator('.opzione-risposta').nth(q.opts.findIndex(o => o.text === ollamaAnswer.text)).click();
+
+        // Risolve l'indice dell'opzione in modo robusto: confronto normalizzato
+        // (non piu esatto, che fallisce su maiuscole/spazi/markdown) e fallback
+        // alla lettera restituita da Ollama. Se nessun match, NON clicca a caso
+        // (.nth(-1) lancerebbe): salva la domanda per intervento e continua.
+        let optIdx = q.opts.findIndex(o => normalize(o.text) === normalize(ollamaAnswer.text));
+        if (optIdx < 0 && ollamaAnswer.letter) {
+          const li = letterToIndex(ollamaAnswer.letter);
+          if (li >= 0 && li < q.opts.length) optIdx = li;
+        }
+        if (optIdx < 0) {
+          log(`Risposta di Ollama non riconducibile ad alcuna opzione ("${selectedOptionText}"). Salvo per intervento e passo oltre.`);
+          saveNeedAnswer(root, [{ question: q.text, options: q.opts.map(o => o.text), ollama: { text: ollamaAnswer.text, letter: ollamaAnswer.letter } }], 'risposta Ollama non riconducibile alle opzioni');
+          if (selectedOptionText) capturedAnswers[q.text] = selectedOptionText;
+          continue;
+        }
+        const optsLoc = await optionsLocator(page);
+        await optsLoc.nth(optIdx).click();
         await page.waitForTimeout(500);
         await clickNextButton(page, log);
         found = true;
@@ -353,10 +398,9 @@ async function solveActiveQuestions(page, root, log, monitor) {
 
         try {
           const pendingPath = account.stateFilePaths(root).pending;
-          fs.mkdirSync(path.dirname(pendingPath), { recursive: true });
-          const pending = fs.existsSync(pendingPath) ? JSON.parse(fs.readFileSync(pendingPath, 'utf8')) : {};
+          const pending = fs.existsSync(pendingPath) ? readJsonSafe(pendingPath, {}) : {};
           pending[q.text] = selectedOptionText;
-          fs.writeFileSync(pendingPath, JSON.stringify(pending, null, 2));
+          writeJsonAtomic(pendingPath, pending);
         } catch (e) { /* ignora */ }
       }
     }
@@ -370,10 +414,14 @@ async function solveActiveQuestions(page, root, log, monitor) {
     if (!found) {
       log("Sospendo l'automazione per intervento dell'agente.");
       saveNeedAnswer(root, [{ question: q.text, options: q.opts.map(o => o.text) }], 'domanda senza risposta nota');
-      process.exit(2);
+      // Non process.exit da una lib: orfanerebbe il browser e saltlerebbe il
+      // finally di runAutoplay. Lancia NeedHelpExit, catturata in runAutoplay
+      // che chiude browser + scrive phase:'need_help' prima di exit(2).
+      throw new NeedHelpExit('quiz sospeso: domanda senza risposta nota');
     }
   }
 
+  log(`ATTENZIONE: raggiunto il tetto di ${MAX_QUIZ_QUESTIONS} domande nel quiz. Esito valutato sulla pagina.`);
   return { sessionAnswers, capturedAnswers, status: 'max_iterations' };
 }
 
@@ -536,4 +584,4 @@ async function solveQuiz(page, root, log, monitor) {
   return { outcome: 'unknown', passed: false, score: null, resultText: 'ignoto' };
 }
 
-module.exports = { solveQuiz, extractScore, detectOutcomeFromText, extractQuestionsFromPage, saveNeedAnswer, dumpQuizDiagnostics };
+module.exports = { solveQuiz, extractScore, detectOutcomeFromText, extractQuestionsFromPage, saveNeedAnswer, dumpQuizDiagnostics, NeedHelpExit, MAX_QUIZ_QUESTIONS };

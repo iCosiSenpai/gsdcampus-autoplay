@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { writeJsonAtomic } = require('./io');
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -41,17 +42,28 @@ class Monitor {
   }
 
   _tick() {
-    setInterval(() => {
+    this._timer = setInterval(() => {
       this.status.uptimeSec = Math.floor((Date.now() - new Date(this.startedAt).getTime()) / 1000);
       this._write();
     }, 5000);
+    // unref: il timer non tiene vivo il event loop. Se mai runAutoplay dovesse
+    // terminare "naturalmente" senza process.exit, il processo può uscire.
+    if (this._timer.unref) this._timer.unref();
+  }
+
+  stop() {
+    if (this._timer) {
+      clearInterval(this._timer);
+      this._timer = null;
+    }
   }
 
   _write() {
     this.status.lastUpdate = new Date().toISOString();
     this.status.pid = process.pid;
     try {
-      fs.writeFileSync(path.join(this.logsDir, 'status.json'), JSON.stringify(this.status, null, 2));
+      // Scrittura atomica: uno status.json troncato confonderebbe il supervisore.
+      writeJsonAtomic(path.join(this.logsDir, 'status.json'), this.status);
     } catch (e) {
       // non bloccante
     }

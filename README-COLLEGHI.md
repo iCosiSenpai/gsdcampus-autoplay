@@ -10,6 +10,8 @@ Questo script completa in automatico le video-lezioni e i quiz del corso GSD Cam
 
 Tutto il resto (requisiti, orari, manutenzione) è più in basso e di solito non ti serve.
 
+> 🟡 **Regola d'oro.** L'unico comando manuale ammesso è il `curl` del capitolo 1 (e `./launch-ai-supervisor.sh` per riaprire l'AI). **Per tutto il resto — avviare, fermare, controllare lo stato, cambiare utente, cambiare orari, risolvere problemi — chiedi all'AI in chat.** Non lanciare a mano `start.sh`, `stop.sh`, `status.sh`, `setup.sh`, `members-cli` e simili: sono strumenti **interni** che usa l'AI, non comandi per te. Se ti viene in mente di lanciarne uno, fermati e scrivilo all'AI invece.
+
 ---
 
 ## ⭐ 1. Comando principale (installazione, aggiornamento, avvio)
@@ -104,9 +106,12 @@ La seconda volta è molto più veloce: salta l'installazione e apre subito l'AI.
 
 ---
 
-## 3. Vedere cosa sta facendo (senza AI)
+## 3. Vedere cosa sta facendo
 
-In qualsiasi momento puoi aprire un altro Terminale e scrivere:
+**Prima di tutto chiedi all'AI**: scrivi `come sta andando?` o `controlla il corso` e l'AI ti
+risponde con stato, corso/lezione, progresso ed eventuali errori. Quasi sempre non ti serve altro.
+
+Se vuoi davvero un'occhiata diretta (opzionale, non necessaria), puoi aprire un altro Terminale:
 
 ```bash
 cd ~/gsdcampus-autoplay && ./status.sh
@@ -128,18 +133,21 @@ Per i log in tempo reale: `tail -f logs/autoplay.log`.
    ```
 3. Scrivi: `controlla il corso`.
 
-Se in `./status.sh` vedi **"Autologin non valido/scaduto"**, il tuo link di accesso non funziona
+Se l'AI ti dice **"Autologin non valido/scaduto"**, il tuo link di accesso non funziona
 più: procurati un link aggiornato e chiedi all'AI di sostituirlo (lo fa lei in `config.json`).
 
 ### Comandi di emergenza (di rado necessari)
 
+> 🟡 **Prima di qualsiasi comando qui sotto**, scrivi all'AI `controlla il corso` o `riavvia`:
+> quasi sempre risolve lei. Questi comandi servono **solo se l'AI non parte proprio**.
+
 ```bash
 # Reinstalla/aggiorna tutto e riapre l'AI
 cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update && ./launch-ai-supervisor.sh
-
-# Reinserisci link autologin e orari da zero
-cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-ai-supervisor.sh
 ```
+
+Per ricominciare da zero (reinserire link autologin e orari) **non cancellare `config.json` a mano**:
+chiedi all'AI "ricomincia da zero" e lei rifà la configurazione guidata per te.
 
 ---
 
@@ -162,8 +170,9 @@ cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-a
   L'esito (superato/non superato + punteggio) compare in `./status.sh`.
 - **Stato personale**: ogni Mac tiene i propri progressi in `data/accounts/<tuo codice fiscale>/`
   (corsi, cookie di sessione, risposte quiz in attesa). La banca risposte `data/known_answers.json`
-  è condivisa. Per cambiare utente basta rilanciare `./scripts/setup.sh` e selezionare un altro
-  membro dall'elenco (non serve un nuovo link): lo stato del membro precedente resta salvato.
+  è condivisa. Per cambiare utente **basta chiedere all'AI** "cambia utente in Mario Rossi" (o
+  scrivi il nome/codice fiscale): l'AI seleziona il membro e riavvia. Lo stato del membro
+  precedente resta salvato.
 
 ---
 
@@ -192,8 +201,13 @@ Il pacchetto è già ripulito dai dati personali (niente `config.json`, sessioni
 
 ## 9. Disinstallazione
 
+Il modo più semplice è **rilanciare il comando `curl` del capitolo 1** e scegliere la voce
+**5. Disinstalla** dal menu. In alternativa puoi chiedere all'AI "disinstalla tutto" e lei ti guida.
+
+Se preferisci un comando diretto (manutentore):
+
 ```bash
-cd ~/gsdcampus-autoplay && ./scripts/uninstall.sh
+cd ~/gsdcampus-autoplay && ./scripts/setup.sh --uninstall
 ```
 
 Rimuove dipendenze, modello Ollama, Claude Code CLI, log e (se vuoi) la cartella del progetto.

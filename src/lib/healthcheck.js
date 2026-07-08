@@ -15,8 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 const { isLoginPage, isDashboardLoaded, countCourseLinks } = require('./page-detect');
-
-const DASHBOARD_URL = 'https://tecsial.gsdcampus.it/corso/listAllByUser';
+const { dashboardUrl, userAgent } = require('./platform');
 
 /**
  * @returns {Promise<{ok:boolean, reason:string, courseLinks:number, finalUrl:string|null, durationMs:number, checkedAt:string}>}
@@ -56,8 +55,7 @@ async function checkAutologin(root, opts = {}) {
     });
     const ctx = await browser.newContext({
       viewport: { width: 1440, height: 900 },
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      userAgent: userAgent(config),
     });
     const page = await ctx.newPage();
 
@@ -85,7 +83,7 @@ async function checkAutologin(root, opts = {}) {
         }
         await page.waitForTimeout(3000);
 
-        await page.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+        await page.goto(dashboardUrl(config), { waitUntil: 'domcontentloaded', timeout: timeoutMs });
         for (let w = 0; w < 30; w++) {
           if (await isDashboardLoaded(page)) break;
           if (await isLoginPage(page)) break;

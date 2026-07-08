@@ -9,6 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const account = require('./account');
+const { writeJsonAtomic, readJsonSafe } = require('./io');
 
 const STATE_FILE = 'course_state.json';
 
@@ -19,20 +20,16 @@ function stateFile(root) {
 
 function readState(root) {
   const file = stateFile(root);
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch (e) {
-    return {};
-  }
+  // readJsonSafe ritorna {} se assente; se il file è CORROTTO lo segnala su
+  // stderr (non silenzioso) e ricomincia da stato vuoto.
+  return readJsonSafe(file, {});
 }
 
 function writeState(root, state) {
   const file = stateFile(root);
   try {
-    // Assicura che la cartella account esista.
-    const dir = path.dirname(file);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(state, null, 2));
+    // Scrittura atomica (tmp + rename): un crash a metà non corrompe lo stato.
+    writeJsonAtomic(file, state);
   } catch (e) {
     // non bloccante: lo stato è un aiuto, non un requisito
   }
@@ -53,7 +50,36 @@ function updateCourse(root, state, url, updates) {
   const id = courseIdFromUrl(url);
   if (!id) return state;
   state[id] = { ...getCourse(state, url), ...updates, updatedAt: new Date().toISOString() };
-  writeState(root, state);
+  mergeWriteState(root, state, { currentId: id });
+  return state;
+}
+
+/**
+ * Scrittura consapevole del disco: autoplay è autorità SOLO sul corso corrente
+ * (o su quello da rimuovere); per gli ALTRI corsi vince il disco. Così le
+ * correzioni esterne fatte da AI/utente su course_state.json durante un run
+ * (es. resettare un corso need_help) non vengono sovrascritte al primo update
+ * di autoplay. Risincronizza anche la copia in memoria con eventuali corsi
+ * esterni nuovi.
+ *   - currentId: corso di cui autoplay è autorità (sovrascrive il disco).
+ *   - removeId:  corso da rimuovere (resetCourse): non viene scritto.
+ */
+function mergeWriteState(root, state, opts = {}) {
+  const { currentId = null, removeId = null } = opts;
+  const disk = readState(root);
+  const merged = { ...disk };
+  if (removeId) delete merged[removeId];
+  if (currentId && state[currentId]) merged[currentId] = state[currentId];
+  // Corsi presenti solo in memoria (non su disco): aggiungili.
+  for (const k of Object.keys(state)) {
+    if (k === removeId) continue;
+    if (!(k in merged)) merged[k] = state[k];
+  }
+  // Risincronizza la copia in memoria con i corsi esterni nuovi.
+  for (const k of Object.keys(merged)) {
+    if (!(k in state)) state[k] = merged[k];
+  }
+  try { writeJsonAtomic(stateFile(root), merged); } catch (e) { /* non bloccante */ }
   return state;
 }
 
@@ -106,7 +132,10 @@ function resetCourse(root, state, url) {
   const id = courseIdFromUrl(url);
   if (!id || !state[id]) return state;
   delete state[id];
-  writeState(root, state);
+  // Merge consapevole: scrive memoria + corsi esterni, SENZA il corso resettato
+  // (altrimenti, se un corso esterno fosse su disco ma non in memoria, verrebbe
+  // perso). removeId assicura che il corso resettato non rientri dal disco.
+  mergeWriteState(root, state, { removeId: id });
   return state;
 }
 

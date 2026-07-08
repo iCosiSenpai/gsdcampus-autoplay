@@ -16,6 +16,17 @@ log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') | $1" | tee -a "$DIR/logs/ollama.log"
 }
 
+# pid_matches <PID> <pattern>: il PID esiste E la sua command line contiene il
+# pattern. Protegge dal PID recycling: un PID recyclato a un processo non-Ollama
+# non verrebbe scambiato per un'istanza attiva (kill -0 puro direbbe solo "esiste").
+pid_matches() {
+  local p="$1"; local pat="$2"
+  [ -n "$p" ] || return 1
+  kill -0 "$p" 2>/dev/null || return 1
+  ps -o command= -p "$p" 2>/dev/null | grep -qE "$pat" || return 1
+  return 0
+}
+
 is_running() {
   # 1. Verifica via porta
   if curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
@@ -24,7 +35,7 @@ is_running() {
   # 2. Verifica via PID file (evita il PID del daemon stesso)
   if [ -f "$PID_FILE" ]; then
     local pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
-    if [ -n "$pid" ] && [ "$pid" -ne "$$" ] && kill -0 "$pid" 2>/dev/null; then
+    if [ -n "$pid" ] && [ "$pid" -ne "$$" ] && pid_matches "$pid" "ollama|Ollama"; then
       return 0
     fi
   fi
@@ -41,6 +52,22 @@ start() {
   if pgrep -x "Ollama" >/dev/null 2>&1; then
     osascript -e 'quit app "Ollama"' >/dev/null 2>&1 || true
     sleep 1
+  fi
+
+  # Lock atomica anti-doppio-avvio: noclobber crea il PID file solo se non esiste,
+  # in modo esclusivo. Previene che due `ollama-daemon.sh start` lanciati in rapida
+  # successione passino entrambi l'`is_running` (entrambi vedono "non attivo") e
+  # avviino due `ollama serve` concorrenti. Eventuale PID file stale (processo
+  # morto senza ripulire) viene rimosso prima della lock.
+  if [ -f "$PID_FILE" ]; then
+    local stale=$(cat "$PID_FILE" 2>/dev/null || echo "")
+    if [ -n "$stale" ] && ! pid_matches "$stale" "ollama|Ollama"; then
+      rm -f "$PID_FILE"
+    fi
+  fi
+  if ! (set -o noclobber; : > "$DIR/$PID_FILE") 2>/dev/null; then
+    echo "Impossibile acquisire il lock su $PID_FILE (avvio concorrente?)."
+    return 1
   fi
 
   mkdir -p logs
@@ -68,7 +95,7 @@ stop() {
   if [ -f "$PID_FILE" ]; then
     local pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
     if [ -n "$pid" ]; then
-      if kill -0 "$pid" 2>/dev/null; then
+      if pid_matches "$pid" "ollama|Ollama"; then
         echo "Arresto Ollama (PID $pid) con SIGTERM..."
         kill "$pid" 2>/dev/null || true
         for i in {1..10}; do
@@ -84,6 +111,8 @@ stop() {
           kill -9 "$pid" 2>/dev/null || true
           killed=true
         fi
+      else
+        echo "PID $pid nel file non corrisponde a Ollama (probabile PID recycling). Non lo kill."
       fi
     fi
     rm -f "$PID_FILE"

@@ -89,6 +89,30 @@ is_in_hours() {
 
 log "Scheduler avviato. IGNORE_HOURS=$IGNORE_HOURS"
 
+# Contatore crash consecutivi (exit code diverso da 0 e 4). Backoff crescente per
+# evitare di martellare autoplay quando crasha di fila (es. bug o piattaforma giù):
+# 60 -> 120 -> 300 -> 1800s. Dopo MAX_CRASHES crash consecutivi, esponiamo la fase
+# `crash_loop` in logs/status.json (atomico) e usciamo, così l'AI supervisore lo
+# nota e avvisa l'utente invece di restare invisibile in retry infiniti.
+CRASH_COUNT=0
+MAX_CRASHES=5
+
+# Scrive logs/status.json con phase=$1 in modo atomico (tmp+rename), mergendo i
+# campi preesistenti per non cancellare il resto dello stato.
+mark_crash_loop() {
+  local phase="$1"
+  node -e '
+    const fs=require("fs"); const path=require("path");
+    const f=path.join("'"$DIR"'","logs","status.json");
+    let s={}; try{s=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){}
+    s.phase=process.argv[1]; s.lastUpdate=new Date().toISOString();
+    s.crashLoop=true;
+    const tmp=f+".tmp";
+    fs.writeFileSync(tmp,JSON.stringify(s,null,2));
+    fs.renameSync(tmp,f);
+  ' "$phase" 2>/dev/null || true
+}
+
 while true; do
   if [[ "$IGNORE_HOURS" = true ]]; then
     log "Avvio autoplay (modalità ignore-hours)..."
@@ -100,6 +124,7 @@ while true; do
     if [[ "$EXIT_CODE" -eq 0 ]]; then
       # Uscita pulita: fine turno oppure tutti i corsi completati/in attesa di aiuto (need_help).
       # Non riavviare subito a vuoto; attendi 10 minuti così l'AI/utente può intervenire.
+      CRASH_COUNT=0
       log "Autoplay terminato con codice 0. Riavvio tra 10 minuti (evito loop a vuoto, need_help o fine turno)..."
       wait_ms 600000
     elif [[ "$EXIT_CODE" -eq 4 ]]; then
@@ -108,11 +133,25 @@ while true; do
       # (troppi hit nello stesso giorno). Re-hitare subito l'autologin peggiorerebbe
       # il degrado (raffica -> rate-limit della piattaforma). Lasciamo un cooldown
       # lungo così il token recupera e il prossimo run ha una sessione stabile.
+      CRASH_COUNT=0
       log "Autoplay terminato con codice 4 (session_unstable): token valido ma sessione instabile. Cooldown 30 minuti per far recuperare il token..."
       wait_ms 1800000
     else
-      log "Autoplay terminato con codice $EXIT_CODE. Riavvio tra 60 secondi..."
-      sleep 60
+      CRASH_COUNT=$((CRASH_COUNT + 1))
+      # Backoff esponenziale a gradini: 60s, 120s, 300s, poi 1800s (mezz'ora).
+      case "$CRASH_COUNT" in
+        1) BACKOFF=60 ;;
+        2) BACKOFF=120 ;;
+        3) BACKOFF=300 ;;
+        *) BACKOFF=1800 ;;
+      esac
+      log "Autoplay terminato con codice $EXIT_CODE. Crash consecutivi: $CRASH_COUNT. Riavvio tra ${BACKOFF}s..."
+      if [[ "$CRASH_COUNT" -ge "$MAX_CRASHES" ]]; then
+        log "Raggiunti $MAX_CRASHES crash consecutivi: crash_loop. Scrivo status.json ed esco (l'AI supervisore deve intervenire)."
+        mark_crash_loop "crash_loop"
+        exit 1
+      fi
+      sleep "$BACKOFF"
     fi
     continue
   fi

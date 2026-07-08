@@ -19,6 +19,8 @@ curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main
 - **aggiornamenti** successivi: scarica fix e banca risposte aggiornate, **verifica le dipendenze e le aggiorna solo se necessario**, senza toccare autologin e orari (`config.json`), poi apre l'AI;
 - **avvio** quotidiano: apre l'AI.
 
+> 🟡 **Regola d'oro.** L'unico comando manuale ammesso è questo `curl` (e `./launch-ai-supervisor.sh` per riaprire l'AI). **Per tutto il resto — avviare, fermare, controllare lo stato, cambiare utente, cambiare orari, risolvere problemi — chiedi all'AI in chat.** Non lanciare a mano `start.sh`, `stop.sh`, `status.sh`, `setup.sh`, `members-cli` e simili: sono strumenti **interni** usati dall'AI, non comandi per l'utente. Se ti viene in mente di lanciarne uno, scrivilo all'AI invece.
+
 Rilanciandolo su un'installazione esistente compare un menu:
 1. **Aggiorna e avvia** — pull del codice + check/aggiornamento condizionale delle dipendenze, poi apre l'AI (consigliato).
 2. **Cambia link autologin/orari** — reinserisci accesso e orari, poi avvia.
@@ -29,10 +31,12 @@ Rilanciandolo su un'installazione esistente compare un menu:
 
 In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e orari resta al suo posto.
 
-> Puoi avviare la disinstallazione anche da dentro la cartella del progetto con:  
+> Puoi avviare la disinstallazione anche dal menu 5 del comando `curl`, oppure chiedendo all'AI "disinstalla tutto". Da dentro la cartella del progetto (manutentore):  
 > `cd ~/gsdcampus-autoplay && ./scripts/setup.sh --uninstall`
 
 > **Nota sull'aggiornamento:** lo script confronta `package.json` e `package-lock.json` con lo stato di `node_modules`. Se sono cambiati (per esempio dopo un aggiornamento di Playwright), esegue automaticamente `npm install` e, se serve, reinstalla il browser Chromium. Se invece sono già allineati, salta tutto e parte subito.
+
+> 🔒 **Modello di fiducia (curl | bash).** Il comando qui sopra scarica ed esegue codice da Internet: è lo stesso livello di fiducia di qualsiasi `curl | bash`. Il sorgente vive su `github.com/iCosiSenpai/gsdcampus-autoplay` (branch `main`, **mobile**: ogni push su `main` cambia ciò che il comando esegue al prossimo lancio). Non c'è firma crittografica né verifica di checksum: ti fidi del proprietario del repository. Lo script scarica anche Ollama e Claude Code dai rispettivi canali ufficiali (senza checksum pubblicato da quei progetti), quindi la fiducia si estende anche a quegli installer. Per bloccare il codice a una versione verificata e immutabile, il manutentore può taggare una release (`git tag v0.1.0`) e impostare `PINNED_TAG` in `install.sh`: in quel caso la prima installazione clona esattamente quel tag invece del `main` mobile. Il vero signing/verifica dei binari resta un follow-up.
 
 ## Prima installazione
 
@@ -75,7 +79,7 @@ Salta l'installazione e apre subito l'AI. Una volta aperta, **non ricordare coma
 
 L'elenco di tutti i membri del corso è in un database SQLite (`data/members.db`), importato dal CSV esportato da Numbers. Ogni Mac tiene lo **stato personale** (corsi completati, cookie di sessione, risposte quiz in attesa) nella propria cartella `data/accounts/<codice fiscale>/`. La banca delle risposte `data/known_answers.json` è **condivisa** tra tutti i membri della classe.
 
-Comandi utili (da dentro `~/gsdcampus-autoplay`):
+Comandi **interni** (l'utente non li lancia: li usa l'AI su richiesta; riportati qui solo come riferimento per manutentori):
 
 ```bash
 # Importa/aggiorna l'elenco membri da CSV (default ~/Downloads/elenco utenti FNC.csv)
@@ -92,11 +96,11 @@ node scripts/lib/dashboard-cli.js summary
 node scripts/lib/dashboard-cli.js list
 ```
 
-Per cambiare utente basta rilanciare `./scripts/setup.sh` e selezionare un altro membro (non serve incollare un nuovo link): lo stato del membro precedente resta salvato nella sua cartella.
+Per cambiare utente **basta chiederlo all'AI** (es. "cambia utente in Mario Rossi"): l'AI esegue `members-cli set-active` e riavvia. Lo stato del membro precedente resta salvato nella sua cartella.
 
 ## Aggiornamento forzato
 
-Se vuoi davvero reinstallare/aggiornare tutto (Homebrew, npm, browser, Ollama, ecc.), poi apri Claude Code:
+Se vuoi davvero reinstallare/aggiornare tutto (Homebrew, npm, browser, Ollama, ecc.), di solito basta chiedere all'AI "aggiorna tutto". Per farlo a mano (manutentore):
 
 ```bash
 cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update && ./launch-ai-supervisor.sh
@@ -104,13 +108,15 @@ cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update && ./launch-a
 
 ## Ricominciare da zero (cancella membro attivo e orari)
 
-Se vuoi reinserire account e orari da capo:
+Se vuoi reinserire account e orari da capo, **non cancellare `config.json` a mano**: chiedi all'AI "ricomincia da zero" e lei rifà la configurazione guidata. Per farlo manualmente (manutentore):
 
 ```bash
 cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-ai-supervisor.sh
 ```
 
-## Altri comandi (opzionali)
+## Strumenti interni (manutentori / diagnostica)
+
+> 🟡 Questi comandi **non sono per l'utente**: li usa l'AI internamente quando glieli chiedi in chat, oppure un manutentore per diagnostica. L'utente standard non ha bisogno di lanciarli.
 
 ```bash
 ./start.sh                              # avvia scheduler autoplay (rispetta orari lavoro)
@@ -145,7 +151,7 @@ node scripts/lib/schedule-cli.js next-end      # prossima fine turno (ISO)
 - `logs/` — log, heartbeat, status.json, supervisor.log, ollama.log
 - `debug/` — screenshot e dump HTML in caso di errore
 - `backups/` — copie di sicurezza dello script
-- `README-COLLEGHI.md` — guida estesa per i colleghi
+- `README-COLLEGHI.md` — guida semplificata per i colleghi
 
 ## Modalità headless
 
@@ -159,7 +165,7 @@ Per questo lo script `src/autoplay.js`, dopo il login, naviga automaticamente su
 
 L'URL di autologin è **personale**: la prima volta lo script te lo chiede in terminale durante il setup. In seguito, l'AI mostrerà solo una conferma; se qualcosa non è corretto, basta scriverlo in chat e l'AI modificherà `config.json` al posto tuo.
 
-Gli orari di lavoro sono salvati in `config.json` nella chiave `workSchedule` (`days` + `shifts`). Puoi modificarli chattando con l'AI o eseguendo `./scripts/setup.sh`.
+Gli orari di lavoro sono salvati in `config.json` nella chiave `workSchedule` (`days` + `shifts`). Puoi modificarli **chattando con l'AI** (es. "cambia orari: 9-18 continuato") — l'AI edita `config.json` per te. In alternativa li reinserisci rilanciando il `curl` e scegliendo "Cambia link autologin/orari".
 
 ## Orari di lavoro automatici
 

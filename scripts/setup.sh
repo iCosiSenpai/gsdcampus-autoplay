@@ -60,11 +60,12 @@ step() {
 }
 
 # Legge il modello Ollama da config.json (campo `ollamaModel`).
-# Fallback a ${OLLAMA_MODEL} per retrocompatibilità.
+# Fallback a costante letterale (NON a ${OLLAMA_MODEL}: circolare — vedi check-requirements.sh).
+MODEL_FALLBACK="gemma4:cloud"
 get_ollama_model() {
-  node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${OLLAMA_MODEL}'); } catch(e){ console.log('${OLLAMA_MODEL}'); }" 2>/dev/null || echo '${OLLAMA_MODEL}'
+  node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${MODEL_FALLBACK}'); } catch(e){ console.log('${MODEL_FALLBACK}'); }" 2>/dev/null || echo "${MODEL_FALLBACK}"
 }
-OLLAMA_MODEL=$(get_ollama_model)
+OLLAMA_MODEL="$(get_ollama_model)"
 
 # Claude Code CLI installa in ~/.local/bin. Negli shell non interattivi .zshrc
 # non viene letto, quindi assicuriamo il PATH sia attivo qui e persistito nei
@@ -326,7 +327,7 @@ valid_autologin() {
 cf_from_url() {
   local url="$1"
   [[ "$url" =~ autologin/([A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z])/ ]]
-  echo "${match[1]:-${match[1]}}"
+  echo "${match[1]:-}"
 }
 who_are_you() {
   local result_file="$DIR/.whoareyou_result.json"
@@ -867,8 +868,10 @@ while true; do
       # come baseUrl, courseUrls e ollamaModel.
       ACTIVE_CF="$ACTIVE_CF" MEMBER_NAME="$MEMBER_NAME" AUTOLOGIN="$AUTOLOGIN" DAYS_JSON="$DAYS_JSON" SHIFTS_JSON="$SHIFTS_JSON" node -e "
         const fs = require('fs');
+        const path = require('path');
+        const cfgPath = '$CONFIG_FILE';
         let cfg = {};
-        try { cfg = JSON.parse(fs.readFileSync('$CONFIG_FILE', 'utf8')); } catch(e) {}
+        try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch(e) {}
         cfg.codice_fiscale = process.env.ACTIVE_CF;
         cfg.memberName = process.env.MEMBER_NAME;
         cfg.autologinUrl = process.env.AUTOLOGIN;
@@ -879,10 +882,15 @@ while true; do
           days: process.env.DAYS_JSON.split(',').map(Number).filter(Boolean),
           shifts: JSON.parse('[' + process.env.SHIFTS_JSON + ']')
         };
-        fs.writeFileSync('$CONFIG_FILE', JSON.stringify(cfg, null, 2));
+        // Scrittura atomica (tmp+rename): se il processo viene interrotto a metà
+        // (SIGTERM/SIGINT/Ctrl-C durante il setup), config.json non resta troncato.
+        const tmp = cfgPath + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
+        fs.renameSync(tmp, cfgPath);
       " 2>/dev/null || {
         err "Impossibile salvare config.json con JSON.stringify, uso fallback heredoc."
-        cat > "$CONFIG_FILE" <<EOF
+        # Fallback heredoc anch'esso atomico: scrivo su .tmp poi rinomino.
+        cat > "$CONFIG_FILE.tmp" <<EOF
 {
   "codice_fiscale": "$ACTIVE_CF",
   "memberName": "$MEMBER_NAME",
@@ -896,6 +904,7 @@ while true; do
   }
 }
 EOF
+        mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
       }
       ok "Configurazione salvata in config.json"
       CONFIG_CHANGED=true

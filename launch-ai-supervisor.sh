@@ -66,7 +66,10 @@ if [ -f "$DIR/.autoplay_pid" ]; then
   fi
   rm -f "$DIR/.autoplay_pid"
 fi
-pgrep -f "node src/autoplay.js" 2>/dev/null | while read orphan; do
+# Pattern path-indipendente: lo scheduler lancia `node /abs/path/src/autoplay.js`,
+# quindi "node src/autoplay.js" non matchava mai (lasciava orfani vivi). Usiamo il
+# nome file. Esclude autoplay.log (grep su "autoplay\.js").
+pgrep -f "autoplay\.js" 2>/dev/null | while read orphan; do
   kill -9 "$orphan" 2>/dev/null || true
 done
 pgrep -f "scheduler.sh" 2>/dev/null | while read orphan; do

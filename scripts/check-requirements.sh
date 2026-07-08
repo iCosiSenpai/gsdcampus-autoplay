@@ -1,6 +1,8 @@
 #!/bin/zsh
-set -e
-
+# Niente `set -e`: è uno script diagnostico che deve eseguire TUTTI i check e
+# riportare ogni mancanza, non fermarsi al primo comando in errore (es.
+# `ollama --version` che torna non-zero abortirebbe la diagnostica). L'esito
+# finale è deciso dal flag `missing` e dagli exit espliciti in fondo.
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
@@ -16,10 +18,14 @@ log_ok() {
 }
 
 # Legge il modello Ollama da config.json (campo `ollamaModel`).
+# Fallback a costante letterale (NON a ${OLLAMA_MODEL}: sarebbe circolare, perché
+# OLLAMA_MODEL viene valorizzato proprio da questa funzione → restituirebbe la
+# stringa vuota se config.json manca/corrotto). Stessa costante di launch-ai-supervisor.sh.
+MODEL_FALLBACK="gemma4:cloud"
 get_ollama_model() {
-  node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${OLLAMA_MODEL}'); } catch(e){ console.log('${OLLAMA_MODEL}'); }" 2>/dev/null || echo '${OLLAMA_MODEL}'
+  node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${MODEL_FALLBACK}'); } catch(e){ console.log('${MODEL_FALLBACK}'); }" 2>/dev/null || echo "${MODEL_FALLBACK}"
 }
-OLLAMA_MODEL=$(get_ollama_model)
+OLLAMA_MODEL="$(get_ollama_model)"
 
 # Verifica se package.json/package-lock.json sono allineati a node_modules
 package_hash_ok() {

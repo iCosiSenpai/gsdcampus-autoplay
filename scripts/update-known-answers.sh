@@ -10,7 +10,10 @@ cd "$DIR"
 
 LOCAL_FILE="$DIR/data/known_answers.json"
 PUBLIC_URL="https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/data/known_answers_public.json"
-REMOTE_FILE="/tmp/known_answers_public.json.$$"
+# mktemp (non /tmp/...$$): percorso univoco e sicuro, evita collisioni/symlink
+# e viene creato in modo atomico. Trappato per la pulizia in uscita.
+REMOTE_FILE="$(mktemp 2>/dev/null || echo "/tmp/known_answers_public.$$.tmp")"
+trap 'rm -f "$REMOTE_FILE" 2>/dev/null' EXIT
 
 mkdir -p "$DIR/data"
 
@@ -31,12 +34,14 @@ if curl -fsSL --max-time 20 "$PUBLIC_URL" -o "$REMOTE_FILE" 2>/dev/null; then
     try { remote = JSON.parse(fs.readFileSync(remotePath, 'utf8')); } catch (_) {}
     const merged = { ...remote, ...local };
     const added = Object.keys(remote).filter(k => !(k in local)).length;
-    fs.writeFileSync(localPath, JSON.stringify(merged, null, 2));
+    // Scrittura atomica (tmp+rename): un'interruzione a metà scrittura non lascia
+    // la banca risposte troncata/corrotta (verrebbe persa l'intera banca).
+    const tmp = localPath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(merged, null, 2));
+    fs.renameSync(tmp, localPath);
     console.log('[OK] Banca risposte aggiornata: +' + added + ' nuove risposte dalla repo pubblica.');
   "
-  rm -f "$REMOTE_FILE"
 else
   echo "[WARN] Impossibile scaricare la banca risposte pubblica (offline o non ancora creata)."
-  rm -f "$REMOTE_FILE"
   exit 0
 fi

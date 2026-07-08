@@ -1,3 +1,6 @@
+const { SessionError } = require('./errors');
+const { isLoginPage } = require('./page-detect');
+
 function formatTime(t) {
   if (!isFinite(t)) return '--:--';
   const m = Math.floor(t / 60);
@@ -122,7 +125,15 @@ async function watchVideo(page, log, monitor) {
         if (remounted) {
           await ensurePlaying(page);
         } else {
-          log('Video non rimontato dopo reload: probabilmente sessione caduta (redirect a /login). Esco.');
+          // Dopo reload il <video> non è rimontato: quasi sempre la sessione è
+          // caduta e la pagina è rimbalzata su /login. Prima si usciva in modo
+          // silenzioso e runCourse insisteva per 3 cicli marcando need_help;
+          // ora lanciamo SessionError -> runAutoplay esce con session_unstable
+          // (exit 4) e lo scheduler fa cooldown, lasciando riprendere il token.
+          if (await isLoginPage(page).catch(() => false)) {
+            throw new SessionError('Sessione caduta durante la riproduzione del video (redirect a /login dopo reload).');
+          }
+          log('Video non rimontato dopo reload (causa ignota). Esco.');
         }
         freezeCount = 0;
         lastTime = -1;

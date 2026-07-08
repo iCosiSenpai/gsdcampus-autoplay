@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const courseState = require('./course-state');
 const db = require('./db');
+const { writeJsonAtomic } = require('./io');
 
 function accountsDir(root) {
   return path.join(root, 'data', 'accounts');
@@ -77,8 +78,8 @@ function writeDashboard(root) {
   const dash = buildDashboard(root);
   const out = path.join(root, 'data', 'dashboard.json');
   try {
-    fs.mkdirSync(path.dirname(out), { recursive: true });
-    fs.writeFileSync(out, JSON.stringify(dash, null, 2));
+    // Scrittura atomica (tmp + rename).
+    writeJsonAtomic(out, dash);
   } catch (e) { /* best-effort */ }
   return dash;
 }
