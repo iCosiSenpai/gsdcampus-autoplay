@@ -5,15 +5,38 @@ function formatTime(t) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-async function watchVideo(page, log, monitor) {
-  log('Video in corso...');
+// Rimette in play il <video> corrente (mute + play). In headless il player viene
+// spesso messo in pausa dal throttle del tab o dall'heartbeat della piattaforma:
+// un play() basta a ripartire dallo stesso currentTime. È una recovery molto
+// più leggera di un page.reload(), che su sessioni fragili fa rimbalzare su
+// /login e consuma il token (vedi memoria sul "sovrauso del token").
+async function ensurePlaying(page) {
   await page.evaluate(() => {
     const v = document.querySelector('video');
     if (v) {
       v.muted = true;
-      v.play();
+      if (v.paused) v.play();
     }
-  });
+  }).catch(() => {});
+}
+
+// Aspetta che il <video> rimonti dopo un reload (la pagina può montarlo in lazy
+// o passare da un'interstitial "dichiarazione di fruizione"). Restituisce false
+// se entro timeoutMs non c'è, così il chiamante non scambia "video non ancora
+// montato" per "video scomparso = lezione finita".
+async function waitForVideo(page, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ok = await page.evaluate(() => !!document.querySelector('video')).catch(() => false);
+    if (ok) return true;
+    await page.waitForTimeout(1000);
+  }
+  return false;
+}
+
+async function watchVideo(page, log, monitor) {
+  log('Video in corso...');
+  await ensurePlaying(page);
 
   let finished = false;
   let lastTime = -1;
@@ -78,6 +101,11 @@ async function watchVideo(page, log, monitor) {
 
     if (status.t === lastTime) {
       freezeCount++;
+      // Recovery leggera: prima di ricaricare la pagina, prova a riavviare il play().
+      // Se il player era solo in pausa (caso headless tipico), al prossimo check il
+      // currentTime sarà avanzato e freezeCount si resetta. Niente reload -> niente
+      // stress sulla sessione.
+      await ensurePlaying(page);
       log(`Video progress stalled. Freeze count: ${freezeCount}/3`);
       if (freezeCount >= 3) {
         reloadCount++;
@@ -87,11 +115,15 @@ async function watchVideo(page, log, monitor) {
         }
         log(`Video frozen detected! Recovery action: reloading page (Attempt ${reloadCount}/${MAX_RELOADS})...`);
         await page.reload({ waitUntil: 'domcontentloaded' });
-        await page.waitForTimeout(5000);
-        await page.evaluate(() => {
-          const v = document.querySelector('video');
-          if (v) { v.muted = true; v.play(); }
-        }).catch(() => {});
+        // Dopo il reload il <video> può metterci qualche secondo a rimontare (lazy)
+        // o la pagina può essere rimbalzata su /login: aspettiamo il remount invece
+        // di dichiarare subito "video scomparso = finito" al primo check.
+        const remounted = await waitForVideo(page, 30000);
+        if (remounted) {
+          await ensurePlaying(page);
+        } else {
+          log('Video non rimontato dopo reload: probabilmente sessione caduta (redirect a /login). Esco.');
+        }
         freezeCount = 0;
         lastTime = -1;
       }
