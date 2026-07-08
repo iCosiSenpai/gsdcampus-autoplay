@@ -1,0 +1,17 @@
+# Configurazione Cloudflare Worker per il receiver delle issue.
+# Deploy:  cd worker && wrangler deploy
+#
+# ISSUE_TOKEN è un SECRET (il PAT GitHub issues:write del maintainer): impostalo
+# con  wrangler secret put ISSUE_TOKEN   (incolla il PAT quando te lo chiede).
+# NON scriverlo mai qui dentro — wrangler.toml è committato nella repo PUBBLICA.
+#
+# KEY è una chiave NON-segreta: filtra solo i bot più trivial. È pubblica (sta
+# anche in scripts/lib/issue-report.js come DEFAULT_ISSUE_KEY). Per ruotarla:
+# cambia il valore qui + in issue-report.js, poi  wrangler deploy + commit.
+
+name = "gsd-issue-report"
+main = "issue-receiver.js"
+compatibility_date = "2024-09-01"
+
+[vars]
+KEY = "gsd-autoplay-report-key-2026-7f3a9c"

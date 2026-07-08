@@ -75,7 +75,7 @@ L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso 
 - `node scripts/lib/dashboard-cli.js summary` — stato aggregato di tutti i membri (done/in_progress/need_help/not_started).
 - `node scripts/lib/dashboard-cli.js list` — riga per membro con stato e avanzamento corsi.
 - `node scripts/lib/dashboard-cli.js json` — dump completo di `data/dashboard.json`.
-- `node scripts/lib/issue-report.js draft "<phase>" ["<short-reason>"]` / `send` — (opt-in) prepara/spedisce un'issue GitHub al maintainer per un bug codice/infra non risolvibile in loco. Body redatto da CF/autologin/cookie/token. `send` refusa se `reportIssues` non attivo in `config.json`. Vedi sezione "Segnalazione problemi al maintainer".
+- `node scripts/lib/issue-report.js draft "<phase>" ["<short-reason>"]` / `send` — prepara/spedisce un'issue GitHub al maintainer per un bug codice/infra non risolvibile in loco. Attivo di default per tutti via receiver server-side (HTTP POST, nessun token per-user). Body redatto da CF/autologin/cookie/token. `send` refusa solo se `reportIssues:false` in `config.json` o se nessun receiver/token è configurato. Vedi sezione "Segnalazione problemi al maintainer".
 
 **Modello dati**: i membri vivono in `data/members.db` (SQLite). L'account attivo è in `config.json` (`codice_fiscale`). Lo stato personale (corsi, cookie, quiz pending) è in `data/accounts/<CF>/`, isolato per membro. `data/known_answers.json` è **condiviso** tra tutti i membri (banca risposte della classe).
 
@@ -165,7 +165,7 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 
 ## Limiti
 
-- **NON modificare il codice sorgente** (`src/**`, `scripts/**`, `*.sh`, `*.js`). Il tuo compito è **avviare e monitorare** il corso, non "riparare" l'automazione. Se sospetti un bug nel codice, **segnalalo all'utente** e fermati: non editare i file. Se `reportIssues` è attivo in `config.json`, apri un'issue al maintainer con `node scripts/lib/issue-report.js` (vedi "Segnalazione problemi al maintainer") **invece di editare `src/`**. L'unico file che puoi modificare è `config.json` (autologin/orari), preferendo comunque i comandi dedicati. Modificare il codice crea divergenze rispetto alla versione ufficiale su GitHub che l'utente distribuisce col comando curl.
+- **NON modificare il codice sorgente** (`src/**`, `scripts/**`, `*.sh`, `*.js`). Il tuo compito è **avviare e monitorare** il corso, non "riparare" l'automazione. Se sospetti un bug nel codice, **segnalalo all'utente** e fermati: non editare i file. La segnalazione issue è **attiva di default** per tutti: apri un'issue al maintainer con `node scripts/lib/issue-report.js` (vedi "Segnalazione problemi al maintainer") **invece di editare `src/`**. L'unico file che puoi modificare è `config.json` (autologin/orari), preferendo comunque i comandi dedicati. Modificare il codice crea divergenze rispetto alla versione ufficiale su GitHub che l'utente distribuisce col comando curl.
 - Non modificare file al di fuori di `~/gsdcampus-autoplay`.
 - Non cancellare `data/known_answers.json` (banca condivisa), `data/members.db` (elenco membri con credenziali) né i file sotto `data/accounts/<CF>/` (stato e cookie personali).
 - **Mai copiare `data/accounts/<CF>/storage_state.json` tra cartelle account diverse**: contiene i cookie di sessione di quel membro; mescolarli provoca accessi con l'identità sbagliata.
@@ -195,21 +195,23 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 4. Se il quiz era **non superato** (`need_help`), fai riprovare il corso: `node -e "require('./src/lib/course-state').resetCourse('.', require('./src/lib/course-state').readState('.'), 'URL_CORSO')"` poi `./start.sh` (o `--ignore-hours`). Se il quiz era **superato con domande a bassa confidenza**, non serve reset: la verifica è opportunistica (far crescere la banca trusted per i colleghi).
 5. Strumenti banca: `node scripts/lib/answers-cli.js stats|list|merge|set|audit`. `stats` mostra trusted + pending (per-account) + richieste AI in attesa. `audit` elenca le voci trusted da verificare (le storiche promosse da guess Ollama pre-redesign vanno controllate con WebSearch).
 
-## Segnalazione problemi al maintainer (issue GitHub, opt-in)
+## Segnalazione problemi al maintainer (issue GitHub, attiva per tutti)
 
 Quando l'AI **non riesce a risolvere in loco** un problema **codice/infra** — fasi `crash_loop`, `session_unstable`, `post_login_blocked`, `autologin_invalid` confermato dalla sonda live, `fatal`, o `need_help` non risolvibile con la banca + WebSearch — **NON modificare `src/`/`scripts/`** (vietato dal "Limiti"): **apri un'issue** sulla repo pubblica del maintainer (`iCosiSenpai/gsdcampus-autoplay`). L'issue la apri TU (AI supervisore), non l'autoplay.
 
 **NON sono issue** (gestiti in loco come da flusso esistente): quiz risolvibili con WebSearch + banca trusted, `resetCourse`, restart, end-of-shift/off-hours. Solo i bug codice/infra non risolvibili in loco diventano issue.
 
+**Attiva per tutti di default.** Il PAT GitHub **non** sta nel pacchetto pubblico (GitHub push-protection bloccherebbe il push e auto-revoca i PAT leakati): vive in un **receiver server-side** (Cloudflare Worker, vedi `worker/README.md`) come secret (`ISSUE_TOKEN`). Il pacchetto pubblico contiene solo l'endpoint URL + una chiave non-segreta (`DEFAULT_ISSUE_ENDPOINT` / `DEFAULT_ISSUE_KEY` in `scripts/lib/issue-report.js`, committate dal maintainer dopo il deploy del Worker). `send` fa HTTP POST del draft sanitizzato al receiver, che apre l'issue. **Nessun token sui Mac dei colleghi, nessun account GitHub richiesto.** Finché il maintainer non ha deployato il Worker e committato l'URL, `send` refusa graceful (non crasha).
+
 **Flusso (sempre con conferma umana prima di spedire):**
 1. `node scripts/lib/issue-report.js draft "<phase>" ["<short-reason>"]` → raccoglie contesto (`logs/status.json` + tail `logs/autoplay.log` + commit HEAD), **redae** CF / autologin URL / token / cookie / username, stampa il draft (title + body) e lo salva in `data/accounts/<CF>/.issue_draft.json`. Non spedice.
 2. **Mostra il draft all'utente/collega e chiedi conferma esplicita** ("spedisco questa issue?"). Verifica che nel body NON ci siano CF, autologin URL, cookie o token (il modulo redae, ma tu controlla).
-3. Su Sì → `node scripts/lib/issue-report.js send` → apre l'issue con `GH_TOKEN=<issueReporterToken> gh issue create --label auto-report` (senza label se non esiste) e stampa l'URL.
+3. Su Sì → `node scripts/lib/issue-report.js send` → HTTP POST al receiver (o, fallback maintainer, `GH_TOKEN=<issueReporterToken> gh issue create --label auto-report`) e stampa l'URL.
 4. Riporta l'URL all'utente.
 
-**Gate opt-in**: `send` refusa (senza spawnare `gh`) se `config.json` non ha `reportIssues: true` + `issueReporterToken`. In quel caso avvisa l'utente che la segnalazione non è attivata (attivabile via `./scripts/setup.sh` o Edit su `config.json`). Se il token è non valido/senza scope `issues:write`, `send` avvisa di ruotarlo in UI GitHub.
+**Gate**: `send` refusa (senza side-effect) se `config.json` ha `reportIssues: false` (disattivazione esplicita), o se non c'è nessun receiver (`issueEndpoint` / `DEFAULT_ISSUE_ENDPOINT` vuoto) né `issueReporterToken`. In quel caso avvisa l'utente. Se il receiver risponde `github_token` (PAT del Worker non valido/senza scope `issues:write`), avvisa che il maintainer deve ruotare `ISSUE_TOKEN` nel Worker (`wrangler secret put ISSUE_TOKEN`).
 
-**Token**: `issueReporterToken` = fine-grained PAT GitHub (scope **Issues: Read and write**, solo `iCosiSenpai/gsdcampus-autoplay`), creato dal maintainer in UI (Settings → Developer settings → Fine-grained personal access tokens), salvato nel **gitignored `config.json`** (mai nel repo/pacchetto). Distribuito out-of-band ai colleghi, come l'URL autologin. L'uso via `GH_TOKEN` non richiede account GitHub né `gh auth login`.
+**Fallback maintainer (opzionale)**: sul proprio Mac il maintainer può mettere in `config.json` (gitignored) `issueReporterToken` = fine-grained PAT GitHub (scope **Issues: Read and write**, solo `iCosiSenpai/gsdcampus-autoplay`): se `issueEndpoint` non è configurato, `send` usa `GH_TOKEN=<token> gh issue create` (richiede `gh`, nessun `gh auth login`). Comodo se il receiver non è ancora deployato o è down. Per i colleghi non serve: usano il receiver.
 
 **Strumento**: `node scripts/lib/issue-report.js draft "<phase>" ["<short-reason>"] | send`.
 

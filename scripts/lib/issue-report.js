@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * issue-report.js — segnalazione opt-in di bug al maintainer via issue GitHub.
+ * issue-report.js — segnalazione di bug al maintainer via issue GitHub.
  *
  * Strumento per l'AI supervisore. Quando l'AI NON riesce a risolvere in loco un
  * problema codice/infra (crash_loop, session_unstable, post_login_blocked,
@@ -9,9 +9,23 @@
  * di CLAUDE.md) apre un'issue sulla repo pubblica del maintainer
  * (iCosiSenpai/gsdcampus-autoplay).
  *
+ * ATTIVO PER TUTTI GLI UTENTI di default. Il PAT GitHub NON sta nel pacchetto
+ * pubblico (GitHub push-protection blocca il push + auto-revoca i PAT leakati):
+ * sta in un receiver server-side (Cloudflare Worker, vedi worker/README.md) come
+ * secret. Il pacchetto pubblico contiene solo l'endpoint URL + una chiave NON
+ * segreta (DEFAULT_ISSUE_ENDPOINT / DEFAULT_ISSUE_KEY). `send` HTTP-POSTa il
+ * draft sanitizzato al receiver, che apre l'issue. Nessun token sui Mac dei
+ * colleghi, nessun account GitHub richiesto.
+ *
+ * Fallback (maintainer): se issueEndpoint non è configurato MA config.json ha
+ * issueReporterToken (fine-grained PAT issues:write), `send` usa il path locale
+ * `GH_TOKEN=<token> gh issue create`. Comodo sul Mac del maintainer se il
+ * receiver non è ancora deployato o è down.
+ *
  * PRIVACY — la repo è PUBBLICA: il body non deve MAI contenere CF, autologin URL,
- * cookie, token o username Mac. redactText() redae automaticamente; l'AI deve
- * però verificare il draft prima di confermare l'invio.
+ * cookie, token o username Mac. redactText() redae automaticamente; il receiver
+ * re-redae (defense-in-depth); l'AI deve però verificare il draft prima di
+ * confermare l'invio.
  *
  * Comandi:
  *   node scripts/lib/issue-report.js draft "<phase>" ["<short-reason>"]
@@ -22,12 +36,11 @@
  *
  *   node scripts/lib/issue-report.js send
  *       Legge .issue_draft.json (rifiuta se mancante o stale >10min, così si
- *       spedisce ESATTAMENTE ciò che è stato revisionato). Gate opt-in:
- *       config.json deve avere reportIssues=true + issueReporterToken (fine-grained
- *       PAT, scope issues:write, solo iCosiSenpai/gsdcampus-autoplay). Apre l'issue
- *       con `GH_TOKEN=<token> gh issue create` (label `auto-report` se esiste,
- *       altrimenti senza). Stampa l'URL. Refusa senza spawnare `gh` se il gate
- *       non è soddisfatto.
+ *       spedisce ESATTAMENTE ciò che è stato revisionato). Gate:
+ *       config.json con reportIssues:false → refusa (default attivo). Path
+ *       primario: HTTP POST al receiver (issueEndpoint/issueReportKey, o i
+ *       DEFAULT_* committati). Fallback: issueReporterToken + `gh` locale.
+ *       Stampa l'URL. Refusa senza side-effect se non configurato.
  */
 
 const fs = require('fs');
@@ -42,6 +55,16 @@ const REPO = 'iCosiSenpai/gsdcampus-autoplay';
 const LABEL = 'auto-report';
 const LOG_TAIL_LINES = 40;
 const DRAFT_STALE_MS = 10 * 60 * 1000; // 10 min
+
+// --- Receiver server-side (attivo per tutti) -------------------------------
+// Il PAT GitHub sta nel Worker come secret (env.ISSUE_TOKEN), NON qui. Il
+// pacchetto pubblico contiene solo l'endpoint + una chiave non-segreta.
+// DEFAULT_ISSUE_ENDPOINT = '' finché il maintainer non deploya il Worker e
+// committa l'URL (vedi worker/README.md). Finché è vuoto, i colleghi senza
+// issueReporterToken non possono spedire (refusa graceful); il maintainer può
+// usare il fallback locale col suo token in config.json.
+const DEFAULT_ISSUE_ENDPOINT = ''; // TODO maintainer: incolla l'URL del Worker dopo `wrangler deploy`
+const DEFAULT_ISSUE_KEY = 'gsd-autoplay-report-key-2026-7f3a9c'; // non-segreta, allineata a worker/wrangler.toml
 
 // --- Redazione PII ---------------------------------------------------------
 // Ordine importante: prima l'URL autologin (contiene CF + token), poi i token
@@ -183,49 +206,46 @@ function labelExists(token) {
   }
 }
 
-function cmdSend() {
-  const file = draftPath();
-  let draft;
+/** Path primario: HTTP POST al receiver server-side. Nessun token, nessun gh. */
+async function postToReceiver(endpoint, key, draft) {
+  let res;
   try {
-    draft = JSON.parse(fs.readFileSync(file, 'utf8'));
+    res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, title: draft.title, body: draft.body, phase: draft.phase || '' })
+    });
   } catch (e) {
-    console.log('Nessun draft trovato. Genera prima: node scripts/lib/issue-report.js draft "<phase>"');
-    process.exit(0);
+    return { error: 'receiver non raggiungibile (' + redactText(e.message || String(e)).slice(0, 200) + '). Verifica connessione e che il Worker sia online (worker/README.md).' };
   }
-  if (!draft || !draft.title || !draft.body) {
-    console.log('Draft non valido. Rigenera con: node scripts/lib/issue-report.js draft "<phase>"');
-    process.exit(0);
+  const text = await res.text();
+  let json; try { json = JSON.parse(text); } catch (_) { json = null; }
+  if (res.status === 401) return { error: 'Chiave non valida (issueReportKey / DEFAULT_ISSUE_KEY non allineata a worker/wrangler.toml KEY).' };
+  if (res.status === 429) return { error: 'Rate limit del receiver raggiunto. Riprova più tardi.' };
+  if (res.status === 502 && json && json.error === 'github_token') {
+    return { error: 'Il PAT del receiver non è valido o senza scope issues:write. Il maintainer deve ruotare ISSUE_TOKEN nel Worker (wrangler secret put ISSUE_TOKEN).' };
   }
-  if (typeof draft.savedAt !== 'number' || Date.now() - draft.savedAt > DRAFT_STALE_MS) {
-    console.log('Draft troppo vecchio (>10 min) o senza timestamp. Rigenera con: node scripts/lib/issue-report.js draft "<phase>"');
-    process.exit(0);
+  if (!res.ok) {
+    const hint = json && json.error ? json.error : ('HTTP ' + res.status);
+    return { error: 'receiver: ' + hint + (json && json.detail ? ' — ' + redactText(String(json.detail)).slice(0, 160) : '') };
   }
+  if (!json || !json.url) return { error: 'Risposta receiver non valida: ' + redactText(text).slice(0, 200) };
+  return { url: json.url };
+}
 
-  const cfg = account.readConfig(ROOT);
-  if (cfg.reportIssues !== true) {
-    console.log('Segnalazione non attivata (reportIssues=false in config.json). Per attivarla: ./scripts/setup.sh oppure imposta reportIssues:true + issueReporterToken in config.json.');
-    process.exit(0);
-  }
-  const token = cfg.issueReporterToken ? String(cfg.issueReporterToken).trim() : '';
-  if (!token) {
-    console.log('Segnalazione attivata ma issueReporterToken mancante in config.json. Genera un fine-grained PAT (Issues: Read and write, solo ' + REPO + ') in UI GitHub e incollalo in config.json.');
-    process.exit(0);
-  }
+/** Fallback maintainer: `gh issue create` con GH_TOKEN=<issueReporterToken>. */
+function sendViaGh(token, draft, file) {
   if (!ghAvailable()) {
-    console.log('gh non installato. Installalo con: ./scripts/setup.sh (oppure: brew install gh).');
+    console.log('gh non installato. Installalo con: brew install gh (oppure ./scripts/setup.sh).');
     process.exit(0);
   }
-
   const tmpDir = os.tmpdir();
   const stamp = `${process.pid}-${Date.now()}`;
   const bodyFile = path.join(tmpDir, `issue-body-${stamp}.md`);
-  const titleFile = path.join(tmpDir, `issue-title-${stamp}.txt`);
   try {
     fs.writeFileSync(bodyFile, draft.body);
-    fs.writeFileSync(titleFile, draft.title);
     const args = ['issue', 'create', '--repo', REPO, '--title', draft.title, '--body-file', bodyFile];
     if (labelExists(token)) args.push('--label', LABEL);
-
     let out;
     try {
       out = execFileSync('gh', args, {
@@ -246,8 +266,51 @@ function cmdSend() {
     console.log('Issue creata: ' + out);
   } finally {
     try { fs.unlinkSync(bodyFile); } catch (_) {}
-    try { fs.unlinkSync(titleFile); } catch (_) {}
   }
+}
+
+async function cmdSend() {
+  const file = draftPath();
+  let draft;
+  try {
+    draft = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    console.log('Nessun draft trovato. Genera prima: node scripts/lib/issue-report.js draft "<phase>"');
+    process.exit(0);
+  }
+  if (!draft || !draft.title || !draft.body) {
+    console.log('Draft non valido. Rigenera con: node scripts/lib/issue-report.js draft "<phase>"');
+    process.exit(0);
+  }
+  if (typeof draft.savedAt !== 'number' || Date.now() - draft.savedAt > DRAFT_STALE_MS) {
+    console.log('Draft troppo vecchio (>10 min) o senza timestamp. Rigenera con: node scripts/lib/issue-report.js draft "<phase>"');
+    process.exit(0);
+  }
+
+  const cfg = account.readConfig(ROOT);
+  if (cfg.reportIssues === false) {
+    console.log('Segnalazione disattivata (reportIssues=false in config.json). Rimuovi/quella chiave o impostala a true per riattivarla.');
+    process.exit(0);
+  }
+
+  // Path primario: receiver server-side (attivo per tutti, no token per-user).
+  const endpoint = String(cfg.issueEndpoint || DEFAULT_ISSUE_ENDPOINT || '').trim();
+  const key = String(cfg.issueReportKey || DEFAULT_ISSUE_KEY || '').trim();
+  if (endpoint) {
+    const r = await postToReceiver(endpoint, key, draft);
+    if (r.error) { console.log('Invio issue fallito: ' + r.error); process.exit(0); }
+    try { fs.unlinkSync(file); } catch (_) {}
+    console.log('Issue creata: ' + r.url);
+    process.exit(0);
+  }
+
+  // Fallback: token locale + gh (maintainer). I colleghi di solito non ce l'hanno.
+  const token = cfg.issueReporterToken ? String(cfg.issueReporterToken).trim() : '';
+  if (!token) {
+    console.log('Segnalazione non configurata su questo Mac: nessun receiver (issueEndpoint vuoto — il maintainer deve deployare il Worker, vedi worker/README.md) né issueReporterToken in config.json.');
+    process.exit(0);
+  }
+  sendViaGh(token, draft, file);
 }
 
 module.exports = { redactText };
@@ -257,7 +320,7 @@ if (require.main === module) {
   if (cmd === 'draft') {
     cmdDraft(process.argv[3], process.argv[4]);
   } else if (cmd === 'send') {
-    cmdSend();
+    cmdSend().catch(e => { console.error('Errore inatteso in send: ' + redactText(e && e.message ? e.message : String(e))); process.exit(0); });
   } else {
     console.error('Uso:\n  node scripts/lib/issue-report.js draft "<phase>" ["<short-reason>"]\n  node scripts/lib/issue-report.js send');
     process.exit(1);
