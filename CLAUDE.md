@@ -113,6 +113,33 @@ Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
    5. Riavviare con `./start.sh` o `./start.sh --ignore-hours`.
    Se tutti i corsi sono `done` o `need_help`, l'autoplay esce con codice 0 e `phase: "need_help"`; lo scheduler in `ignore-hours` aspetta 10 minuti prima di riavviare, dando tempo all'AI/utente di intervenire.
 
+## Monitoraggio live automatico all'avvio del corso
+
+**Ogni volta che l'utente chiede di avviare/riavviare il corso** (o tu lo avvii tramite `./start.sh` / `./start.sh --ignore-hours`), **dopo averlo avviato devi SEMPRE anche attivare un monitoraggio live** con il tool `Monitor`. Non è opzionale: l'utente vuole essere avvisato in tempo reale quando lo script passa al prossimo corso e quando va in errore.
+
+**Cosa monitorare** (solo eventi rilevanti, per NON bruciare token a caso):
+- passaggio al prossimo corso / lezione (`Inizio corso`, `Controllo corso`, `Apertura:`, `Video finito`)
+- esito quiz (`Rilevato questionario`, `Quiz finale`, `superato`, `non superato`)
+- errori / problemi (`SESSIONE PERSA`, `AutologinError`, `session_unstable`, `need_help`, `frozen detected`, `Video element scomparso`, `Error`)
+
+**Come** — usa il tool `Monitor` con questo comando (filtro `grep` event-driven: emette una notifica SOLO quando compare una riga rilevante, mai per le righe di progresso video `Video: x / y` che arrivano ogni 30s):
+
+```
+tail -n 0 -F logs/autoplay.log | grep -E --line-buffered "Inizio corso|Controllo corso|Apertura:|Video finito|non risulta completata|Rilevato questionario|Quiz finale|superato|non superato|SESSIONE PERSA|AutologinError|session_unstable|need_help|frozen detected|Video element scomparso|Error"
+```
+
+Parametri del tool `Monitor`:
+- `description`: "corsi GSD Campus: cambio corso/lezione, quiz, errori"
+- `persistent: true` (il monitor vive per tutta la sessione del supervisore)
+
+**Regole per non bruciare token:**
+- NON fare polling di `./status.sh` o `cat logs/status.json` a intervalli fissi: ogni chiamata rilegge contesto e consuma token. Lo stato lo chiedi solo su esplicita richiesta dell'utente o quando un evento del Monitor lo giustifica.
+- Il Monitor è l'unica fonte di aggiornamenti live: lascialo girare e interveni solo quando un evento arriva.
+- Quando arriva un evento, sii conciso (1 riga): es. "✅ Corso completato → passato a corso 16983", "❌ Sessione persa sul corso 16983 (token degradato), scheduler in cooldown".
+- Se l'utente chiede di fermare tutto (`ferma tutto`), ferma anche il Monitor con `TaskStop`.
+
+**Quando NON attivare il Monitor:** se lo script non parte (es. autologin non valido confermato dalla sonda live, o fuori orario e l'utente sceglie "non fare nulla") non ha senso monitorare: avvisa l'utente e fermati.
+
 ## Orario di lavoro
 
 L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
