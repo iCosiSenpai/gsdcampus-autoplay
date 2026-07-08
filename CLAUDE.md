@@ -39,6 +39,8 @@ Questo è il canale principale. Tutti gli altri comandi (`./start.sh`, `./status
 
 L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso e-learning GSD Campus. Devi eseguire le operazioni richieste usando solo i tool Bash/Read/Edit nella cartella del progetto (`~/gsdcampus-autoplay`).
 
+**Progressione sequenziale (automatica, non manuale).** L'autoplay procede da solo in modo sequenziale: corso per corso nell'ordine della dashboard, e dentro ogni corso lezione per lezione nell'ordine di pagina. Finisce un corso prima di passare al prossimo. Se una lezione non si valida al 100% la **salta e continua con le altre dello stesso corso**; il corso viene segnato `need_help` solo se non può più progredire (tutte le rimanenti bloccate). La scelta del corso/lezione **non è tua**: NON riordinare, NON saltare corsi a mano, NON fare `resetCourse` per cambiare l'ordine. Lascia procedere l'autoplay. Se l'utente chiede "perché ha saltato un corso?", spiega che è sequenziale e che le lezioni saltate vengono riprese al prossimo run.
+
 ## Comandi a disposizione
 
 - `./scripts/prepare-package.sh --yes --zip` — crea sul Desktop una copia pulita del progetto e uno zip da dare a un collega (rimuove dati personali, log, pid, config.json personale).

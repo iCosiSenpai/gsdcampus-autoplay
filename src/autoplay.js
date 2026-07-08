@@ -46,7 +46,7 @@ const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const IGNORE_HOURS = process.argv.includes('--ignore-hours');
 const CHECK_INTERVAL_MS = 60000; // controlla orario ogni minuto
 const MAX_MISSING_PERMISSION = 3;
-const MAX_COURSE_ITER = 80;
+const MAX_COURSE_ITER = 120;
 const MAX_LOGIN_DROPS = 4;
 
 // Predicati di riconoscimento pagina (login vs dashboard) centralizzati in
@@ -291,6 +291,7 @@ async function getLessonProgressOnCoursePage(page, courseUrl, lessonHref) {
 
 async function runCourse(page, courseUrl, sessionState, state) {
   const emptyUrls = new Set();
+  const stuckUrls = new Set(); // lezioni bloccate al <100% dopo 3 tentativi: saltate, non abbandonano il corso
   const lessonAttempts = new Map();
   let missingPermissionCount = 0;
   let iter = 0;
@@ -467,10 +468,16 @@ async function runCourse(page, courseUrl, sessionState, state) {
     // Fonte di verità per l'avanzamento è la percentuale mostrata dalla piattaforma.
     // Se una lezione era stata segnata come completata localmente ma la piattaforma
     // mostra ancora < 100%, la riprendiamo. emptyUrls serve per saltare temporaneamente
-    // lezioni che non contengono video/quiz riconoscibili.
+    // lezioni che non contengono video/quiz riconoscibili; stuckUrls per le lezioni
+    // bloccate al <100% dopo 3 tentativi (skip persistente nel run, ri-provate nel
+    // prossimo run scheduler).
+    // SEQUENZIALE: scoredLinks è già in ordine di pagina (DOM, raccolto dal
+    // page.evaluate sopra). NON ordiniamo per percentuale: si prosegue nell'ordine
+    // naturale (lezione 1, 2, 3...), riprendendo al primo posto le lezioni già
+    // iniziate ma non a 100%. Prima il sort per pct saltava alla lezione meno
+    // avanzata → "come gli pare".
     const availableLinks = scoredLinks
-      .filter(l => l.pct < 100 && !emptyUrls.has(l.href))
-      .sort((x, y) => x.pct - y.pct);
+      .filter(l => l.pct < 100 && !emptyUrls.has(l.href) && !stuckUrls.has(l.href));
     const nextHref = availableLinks.length > 0 ? availableLinks[0].href : null;
 
     if (!nextHref) {
@@ -478,6 +485,18 @@ async function runCourse(page, courseUrl, sessionState, state) {
         log('Reset filtri vuoti...');
         emptyUrls.clear();
         continue;
+      }
+
+      // Restano solo lezioni bloccate al <100% (stuckUrls): il corso non può
+      // progredire oltre → need_help. A differenza del vecchio comportamento
+      // (che abbandonava il corso al 3° tentativo di UNA lezione e faceva sì che
+      // il for esterno saltasse al corso successivo nella stessa passata), ora
+      // abbiamo prima portato avanti tutte le altre lezioni del corso in ordine.
+      if (stuckUrls.size > 0) {
+        log(`Corso ${courseUrl}: ${stuckUrls.size} lezione/i bloccate al <100% dopo 3 tentativi, nessun'altra progressabile. Segnalo need_help.`);
+        courseState.markCourseNeedHelp(ROOT, state, courseUrl, `lezioni bloccate al <100%: ${[...stuckUrls].join(', ')}`);
+        monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
+        return;
       }
 
       const currentUrl = page.url();
@@ -635,11 +654,20 @@ async function runCourse(page, courseUrl, sessionState, state) {
         lessonAttempts.set(nextHref, attempts);
         log(`Lezione ${nextHref} non risulta completata sulla piattaforma (progresso: ${lessonProgress}%). Tentativo ${attempts}.`);
         if (attempts >= 3) {
-          courseState.markCourseNeedHelp(ROOT, state, courseUrl, `lezione ${nextHref} bloccata a ${lessonProgress}%`);
-          monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
-          return;
+          // NON abbandonare il corso per una singola lezione bloccata: la salto e
+          // continuo con le altre lezioni dello STESSO corso (progressione
+          // sequenziale). Il corso viene segnato need_help solo se TUTTE le
+          // lezioni rimanenti sono bloccate (ramo !nextHref sopra). Il vecchio
+          // return qui faceva sì che il for esterno saltasse al corso successivo
+          // nella stessa passata → "un po' di tutti i corsi" senza finirne nessuno.
+          // Le lezioni saltate sono ri-provate nel prossimo run scheduler
+          // (stuckUrls è in-memory), così i race temporanei (piattaforma che
+          // persiste il 100% in ritardo) si auto-risolvono.
+          log(`Lezione ${nextHref} bloccata a ${lessonProgress}% dopo 3 tentativi. La salto e continuo con le prossime lezioni del corso.`);
+          stuckUrls.add(nextHref);
+        } else {
+          emptyUrls.add(nextHref);
         }
-        emptyUrls.add(nextHref);
       }
       continue;
     }
