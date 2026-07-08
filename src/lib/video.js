@@ -88,16 +88,14 @@ async function watchVideo(page, log, monitor) {
       break;
     }
 
-    // Fonte di verità 2: currentTime a ridosso della fine.
+    // Fonte di verità 2: currentTime a ridosso della fine REALE (entro 1.5s).
+    // Importante: NON uscire al 95% della durata. La piattaforma salva la posizione
+    // di fruizione e fa ripartire il video da lì (es. al 94%); se uscissimo al 95%
+    // dopo pochi secondi dalla ripresa, il video non arriverebbe mai alla fine e la
+    // piattaforma NON accrediterrebbe l'ultimo tratto → lezione bloccata al 93-94%.
+    // Va lasciato arrivare all'evento 'ended' (o a d-1.5) perché la piattaforma
+    // accredita il 100% solo a fine reale (confirmato live: play 955→1014s → 100%).
     if (Number.isFinite(status.d) && status.d > 0 && status.t >= status.d - 1.5) {
-      finished = true;
-      break;
-    }
-
-    // Fonte di verità 3: il video ha avanzato significativamente (almeno 95% della
-    // durata nota) anche se ended non scatta.
-    if (Number.isFinite(status.d) && status.d > 0 && status.t >= status.d * 0.95) {
-      log(`Video al ${(status.t / status.d * 100).toFixed(0)}%: considero completato.`);
       finished = true;
       break;
     }

@@ -123,9 +123,18 @@ function summarize(state) {
   };
 }
 
+// True se TUTTI i corsi indicati sono 'done' o 'need_help'. Accetta sia URL
+// completi (/corso/show/123) sia ID nudi ("123"): lo stato è keyed per ID, ma
+// alcuni chiamanti passano Object.keys(state) (ID nudi). isCourseDoneOrNeedHelp
+// via courseIdFromUrl gestisce gli URL; per gli ID nudi guardiamo direttamente
+// state[id]. Un corso non presente in state NON conta come done/need_help.
 function allDoneOrNeedHelp(state, urls) {
   if (!urls || urls.length === 0) return false;
-  return urls.every(url => isCourseDoneOrNeedHelp(state, url));
+  return urls.every(u => {
+    const id = courseIdFromUrl(u);
+    const c = id ? getCourse(state, u) : state[u];
+    return c && (c.status === 'done' || c.status === 'need_help');
+  });
 }
 
 function resetCourse(root, state, url) {
