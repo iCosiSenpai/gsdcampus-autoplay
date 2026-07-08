@@ -63,7 +63,7 @@ const DRAFT_STALE_MS = 10 * 60 * 1000; // 10 min
 // committa l'URL (vedi worker/README.md). Finché è vuoto, i colleghi senza
 // issueReporterToken non possono spedire (refusa graceful); il maintainer può
 // usare il fallback locale col suo token in config.json.
-const DEFAULT_ISSUE_ENDPOINT = ''; // TODO maintainer: incolla l'URL del Worker dopo `wrangler deploy`
+const DEFAULT_ISSUE_ENDPOINT = 'https://gsd-issue-report.lookatale95.workers.dev'; // Worker deployato dal maintainer (worker/README.md)
 const DEFAULT_ISSUE_KEY = 'gsd-autoplay-report-key-2026-7f3a9c'; // non-segreta, allineata a worker/wrangler.toml
 
 // --- Redazione PII ---------------------------------------------------------
