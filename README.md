@@ -189,11 +189,11 @@ I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i tu
 
 ## Quiz e banca risposte condivisa
 
-- La **banca risposte condivisa** è in `data/known_answers.json` (committata nel repo: uguale per tutti i colleghi).
-- Se una domanda non è nota, lo script chiede a Ollama (modello configurabile in `config.json` tramite `ollamaModel`) la risposta usando la conoscenza del modello; la salva in `data/pending_quiz_answers.json`. Per monitor/autoplay il modello cloud più economico e sufficiente per quiz in italiano è `gemma4:cloud`.
-- **Verifica dall'esito**: solo quando un quiz viene **superato**, le risposte nuove di Ollama vengono promosse automaticamente nella banca condivisa. Così la banca cresce solo con risposte verificate. L'esito (superato/non superato + punteggio) finisce in `logs/status.json` (`lastQuizResult`) ed è mostrato da `./status.sh`.
-- Se Ollama non sa rispondere, il quiz si ferma e salva la domanda in `data/need_answer.json`.
-- Manutenzione banca (per chi prepara i rilasci): `node scripts/lib/answers-cli.js stats|list|merge` e `... set "domanda" "risposta"`.
+- La **banca risposte condivisa** è in `data/known_answers.json` (committata nel repo: uguale per tutti i colleghi). È una banca **TRUSTED**: cresce solo con risposte verificate — dalla piattaforma (scrape post-quiz delle risposte corrette) o dall'AI supervisore (ricerca online + ragionamento). I tentativi di Ollama **non** vengono mai promossi automaticamente (restano per-account in `pending_quiz_answers.json`): così un quiz superato al 24/30 = 80% non inserisce più risposte sbagliate nella banca condivisa di tutta la classe.
+- Se una domanda non è in banca, lo script chiede a Ollama (modello configurabile in `config.json` tramite `ollamaModel`) con **few-shot** (esempi verificati) + **self-consistency** (3 campionamenti + voto a maggioranza). Per monitor/autoplay il modello cloud più economico e sufficiente per quiz in italiano è `gemma4:cloud`.
+- Le domande sconosciute o a bassa confidenza finiscono in `data/accounts/<CF>/ai_quiz_request.json` (con i tentativi di Ollama e la confidenza): l'AI supervisore le risolve e scrive la risposta verificata nella banca TRUSTED. L'esito (superato/non superato + punteggio) finisce in `logs/status.json` (`lastQuizResult`) ed è mostrato da `./status.sh`.
+- Se Ollama non sa rispondere, il quiz si ferma e salva la domanda in `data/accounts/<CF>/need_answer.json` + `ai_quiz_request.json`.
+- Manutenzione banca (per chi prepara i rilasci): `node scripts/lib/answers-cli.js stats|list|merge|set|audit`.
 
 ## Robustezza autologin
 

@@ -101,15 +101,16 @@ Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
    1. Se `data/members.db` esiste, è probabile che contenga un token aggiornato: offri all'utente di **re-selezionare il membro** dal database (`node scripts/lib/members-cli.js search <query>` per trovarlo, poi `node scripts/lib/members-cli.js set-active <CF>`).
    2. Se il token nel database è anch'esso scaduto, l'utente deve fornire un nuovo elenco CSV: esegui `node scripts/import-members.js "<percorso csv>"` (esporta da Numbers: File ▸ Esporta ▸ CSV) e poi re-seleziona il membro.
    3. Fallback manuale: chiedi all'utente il link aggiornato, aggiorna `config.json` con il tool Edit (mantenendo `codice_fiscale` coerente) e riavvia con `./start.sh`.
-6. **Quiz non superato / corso in `need_help`**: se `logs/status.json` mostra `phase: "need_help"` o lo stesso `courseUrl` con lo stesso `lastQuizResult` (es. `non superato (24/30)`) ripetuto, lo script ha già automaticamente:
+6. **Quiz non superato / domande a bassa confidenza / corso in `need_help`**: se `logs/status.json` mostra `phase: "need_help"` o `"quiz_needs_answers"`, o il log emette `[AI_QUIZ_REQUEST] ... domande a bassa confidenza salvate in ai_quiz_request.json`, lo script ha già automaticamente:
    - catturato le domande del quiz in `data/accounts/<CF>/need_answer.json`;
-   - segnato il corso come `need_help` in `data/accounts/<CF>/course_state.json`;
+   - scritto l'handoff arricchito in `data/accounts/<CF>/ai_quiz_request.json` (domanda + opzioni + guess Ollama + confidenza);
+   - segnato il corso come `need_help` in `data/accounts/<CF>/course_state.json` (solo se il quiz non è superato);
    - passato al prossimo corso (se ce n'è uno).
-   Non serve fermare con `./stop.sh` a meno che l'utente non voglia intervenire subito. Devi invece:
-   1. Leggere `data/accounts/<CF>/need_answer.json` (CF = `config.codice_fiscale`, o derivato dall'URL di autologin).
-   2. Cercare la risposta corretta (online con `WebSearch`/`WebFetch`, oppure chiedendo all'utente).
-   3. Aggiungerla alla banca **condivisa** `data/known_answers.json` con `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
-   4. Se vuoi far riprovare subito quel corso, cancella il suo stato con `node -e "require('./src/lib/course-state').resetCourse('.', require('./src/lib/course-state').readState('.'), 'URL_CORSO')"`.
+   Non serve fermare con `./stop.sh` a meno che l'utente non voglia intervenire subito. Devi invece (dettagli e tool nella sezione **Quiz e domande sconosciute**):
+   1. Leggere `data/accounts/<CF>/ai_quiz_request.json` (CF = `config.codice_fiscale`, o derivato dall'URL di autologin). Se assente, leggi `need_answer.json`.
+   2. Risolvere ogni domanda con `WebSearch`/`WebFetch` + ragionamento (il guess Ollama + confidenza è un suggerimento, non la verità).
+   3. Scrivere la risposta verificata nella banca **TRUSTED** `data/known_answers.json` con `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
+   4. Se il quiz era **non superato** (`need_help`), fai riprovare il corso: `node -e "require('./src/lib/course-state').resetCourse('.', require('./src/lib/course-state').readState('.'), 'URL_CORSO')"`. Se era **superato con domande a bassa confidenza** (`quiz_needs_answers`), non serve reset: la verifica è opportunistica.
    5. Riavviare con `./start.sh` o `./start.sh --ignore-hours`.
    Se tutti i corsi sono `done` o `need_help`, l'autoplay esce con codice 0 e `phase: "need_help"`; lo scheduler in `ignore-hours` aspetta 10 minuti prima di riavviare, dando tempo all'AI/utente di intervenire.
 
@@ -125,7 +126,7 @@ Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
 **Come** — usa il tool `Monitor` con questo comando (filtro `grep` event-driven: emette una notifica SOLO quando compare una riga rilevante, mai per le righe di progresso video `Video: x / y` che arrivano ogni 30s):
 
 ```
-tail -n 0 -F logs/autoplay.log | grep -E --line-buffered "Inizio corso|Controllo corso|Apertura:|Video finito|non risulta completata|Rilevato questionario|Quiz finale|superato|non superato|SESSIONE PERSA|AutologinError|session_unstable|need_help|frozen detected|Video element scomparso|Error"
+tail -n 0 -F logs/autoplay.log | grep -E --line-buffered "Inizio corso|Controllo corso|Apertura:|Video finito|non risulta completata|Rilevato questionario|Quiz finale|superato|non superato|AI_QUIZ_REQUEST|quiz_needs_answers|SESSIONE PERSA|AutologinError|session_unstable|need_help|frozen detected|Video element scomparso|Error"
 ```
 
 Parametri del tool `Monitor`:
@@ -173,12 +174,25 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 
 ## Quiz e domande sconosciute
 
-- `src/lib/quiz.js` risolve i quiz usando prima `data/known_answers.json` (matching per similarità, soglia 0.75). Questa banca è **condivisa** tra tutti i membri.
-- Se una domanda non è presente in `known_answers.json`, lo script chiede a Ollama la risposta in base alla conoscenza generale del modello. **Il modello è quello in `config.json` (`ollamaModel`) — unica fonte di verità, usata da launcher, setup e autoplay.** Il parsing della risposta è multi-strategia (prefisso "Risposta: X", frase, lettera isolata, markdown, match testo) e, se la confidenza è bassa, viene fatto **un tentativo di conferma** con un prompt che forza una singola lettera.
-- Le risposte date da Ollama vengono salvate in `data/accounts/<CF>/pending_quiz_answers.json` (per-account). **Solo se il quiz viene superato**, quelle risposte vengono promosse automaticamente nella banca condivisa `data/known_answers.json` (la banca cresce solo con risposte verificate dall'esito).
-- Se Ollama non riesce a rispondere, lo script si ferma e salva la domanda in `data/accounts/<CF>/need_answer.json`: in quel caso puoi cercare la risposta online, aggiornare `known_answers.json` e riavviare.
-- Quando un quiz finale risulta non superato, lo script salva **tutte** le domande del quiz in `data/accounts/<CF>/need_answer.json` e segnala il corso come `need_help` in `data/accounts/<CF>/course_state.json`, in attesa di intervento AI/utente.
-- Strumenti manutenzione banca risposte: `node scripts/lib/answers-cli.js stats|list|merge` e `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
+**Modello trust-by-location (revisione 07/2026):**
+- `data/known_answers.json` = banca **TRUSTED** e **condivisa** tra tutti i membri. Ci vivono SOLO risposte verificate: dalla piattaforma (scrape post-quiz dei blocchi `.risposta-corretta`) o dall'**AI supervisore** (WebSearch + ragionamento, via `answers-cli set`). Il matching usa solo questa banca (similarità Jaccard ≥0.75 + match esatto; la sottostringa è gate-ata al ≥80% dei token per evitare falsi match).
+- `data/accounts/<CF>/pending_quiz_answers.json` = guess Ollama, per-account, **mai promossi automaticamente**. Usati solo per riprovare lo stesso quiz e consultabili dall'AI. (Prima del redesign, un quiz superato al 24/30 = 80% promuoveva ~6 risposte **sbagliate** nella banca condivisa per tutti i colleghi: bug capitale, ora chiuso.)
+- `data/accounts/<CF>/ai_quiz_request.json` = **handoff per l'AI supervisore**: ogni domanda sconosciuta o a bassa confidenza (Ollama confidence <0.8, o guess non mappabile, o Ollama nullo) finisce qui con domanda + opzioni + guess Ollama + confidenza. Scritto in merge (catture multiple non si perdono). L'AI lo risolve e scrive la risposta verificata nella banca TRUSTED.
+
+**Risoluzione (`src/lib/quiz.js` + `src/lib/ollama-quiz.js`):**
+- Prima cerca in `known_answers.json` (banca trusted).
+- Se non c'è, chiede a Ollama con **few-shot** (2-3 esempi verificati dalla banca trusted prepended al prompt) + **self-consistency** (3 campionamenti a temperature 0.4 + voto a maggioranza; confidence = voti/3). Il modello è `config.json: ollamaModel` (riletto a ogni domanda, cache mtime: cambio modello senza restart). Il vecchio confirmation-retry (che poteva sovrascrivere un buon parse con una conferma peggiore) è rimosso.
+- Il best-guess Ollama viene usato per far procedere il quiz, ma se la confidence è bassa la domanda è segnalata all'AI in `ai_quiz_request.json` (marker di log `[AI_QUIZ_REQUEST]`).
+- Su quiz superato, **non** si promuovono i guess Ollama: si promuovono solo le risposte verificate dallo scrape della piattaforma (se le mostra). I guess restano in `pending_quiz_answers.json`.
+- Se Ollama non risponde, lo script salva la domanda in `need_answer.json` + `ai_quiz_request.json` e si ferma (`NeedHelpExit` → `phase:'need_help'`).
+- Quando un quiz finale non è superato, salva le domande in `need_answer.json` + `ai_quiz_request.json` (con i guess) e segna il corso `need_help` in `course_state.json`.
+
+**Intervento AI supervisore (flusso `quiz_needs_answers` / `need_help`):**
+1. Leggi `data/accounts/<CF>/ai_quiz_request.json` (CF = `config.codice_fiscale`, o derivato dall'URL di autologin). Ogni voce ha `question`, `options`, `ollamaGuess` (lettera + testo + confidence + strategy). Se assente, leggi anche `need_answer.json`.
+2. Risolvi ogni domanda con `WebSearch`/`WebFetch` + ragionamento (le domande sono su competenze digitali, privacy, sicurezza: il materiale del corso è citato nel testo). Il guess Ollama e la confidenza sono un suggerimento, non la verità.
+3. Scrivi la risposta verificata nella banca TRUSTED: `node scripts/lib/answers-cli.js set "domanda" "risposta"` (overwrite: corregge anche risposte sbagliate pre-esistenti).
+4. Se il quiz era **non superato** (`need_help`), fai riprovare il corso: `node -e "require('./src/lib/course-state').resetCourse('.', require('./src/lib/course-state').readState('.'), 'URL_CORSO')"` poi `./start.sh` (o `--ignore-hours`). Se il quiz era **superato con domande a bassa confidenza**, non serve reset: la verifica è opportunistica (far crescere la banca trusted per i colleghi).
+5. Strumenti banca: `node scripts/lib/answers-cli.js stats|list|merge|set|audit`. `stats` mostra trusted + pending (per-account) + richieste AI in attesa. `audit` elenca le voci trusted da verificare (le storiche promosse da guess Ollama pre-redesign vanno controllate con WebSearch).
 
 ## Domande che l'utente può fare
 

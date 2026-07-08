@@ -138,7 +138,7 @@ function saveSession(state) {
 
 async function solveQuizWrapper(page, courseUrl) {
   try {
-    const result = await solveQuiz(page, ROOT, log, monitor);
+    const result = await solveQuiz(page, ROOT, log, monitor, courseUrl);
     // Backward compat: solveQuiz restituisce un oggetto.
     if (result && typeof result === 'object') {
       return result;

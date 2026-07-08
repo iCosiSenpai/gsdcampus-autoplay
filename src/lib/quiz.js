@@ -13,6 +13,12 @@ const tokenize = (s) => normalize(s).split(/\s+/).filter(t => t.length > 2);
 // 200 è abbondante per i quiz del corso (tipicamente <50); superato emette warning.
 const MAX_QUIZ_QUESTIONS = 200;
 
+// Soglia di confidenza Ollama sotto la quale una domanda (anche se Ollama ha
+// dato un best-guess e il quiz procede) viene segnalata all'AI supervisore in
+// ai_quiz_request.json, per far crescere la banca TRUSTED con risposte verificate
+// (WebSearch + ragionamento) prima che il collega successivo ci sbatta contro.
+const AI_REQUEST_CONFIDENCE_THRESHOLD = 0.8;
+
 // Mappa lettera (A,B,C,D,E) → indice opzione.
 function letterToIndex(letter) {
   const i = ['A', 'B', 'C', 'D', 'E'].indexOf(String(letter || '').toUpperCase());
@@ -42,21 +48,35 @@ function similarity(a, b) {
   return intersection.size / union.size;
 }
 
-// Cerca una risposta nota usando matching esatto, sottostringa e similarità.
+// Normalizza una chiave domanda togliendo il prefisso di numerazione ("1. ",
+// "2. "…) che la piattaforma a volte aggiunge: senza questo, la banca duplicava
+// la stessa domanda come "X" e "1. X" e non le riconciliava. Va applicata sia
+// in lettura (findKnownAnswer) che in scrittura (mergeIntoKnown/scrape).
+function normKey(s) {
+  return normalize(s).replace(/^\d+\s+/, '').trim();
+}
+
+// Cerca una risposta nota usando matching esatto, sottostringa (con copertura
+// minima) e similarità Jaccard.
 function findKnownAnswer(question, options, knownAnswers) {
-  const normQ = normalize(question);
+  const normQ = normKey(question);
   const labels = ['A','B','C','D'];
   let bestMatch = null;
   let bestScore = 0;
 
   for (const [knownQ, knownA] of Object.entries(knownAnswers)) {
-    const normKnownQ = normalize(knownQ);
-    // Match esatto o sottostringa: punteggio alto
+    const normKnownQ = normKey(knownQ);
     let score = 0;
     if (normQ === normKnownQ) {
       score = 1;
     } else if (normQ.includes(normKnownQ) || normKnownQ.includes(normQ)) {
-      score = 0.9;
+      // Sottostringa: accetta SOLO se la domanda più corta copre >=80% dei token
+      // di quella più lunga. Senza questo gate, una domanda corta nota hijackava
+      // una domanda lunga nuova (falso match a 0.9).
+      const tokShort = new Set(tokenize(normQ.length < normKnownQ.length ? normQ : normKnownQ));
+      const tokLong  = new Set(tokenize(normQ.length < normKnownQ.length ? normKnownQ : normQ));
+      const coverage = tokLong.size > 0 ? (new Set([...tokShort].filter(t => tokLong.has(t))).size / tokLong.size) : 0;
+      score = coverage >= 0.8 ? 0.9 : 0;
     } else {
       score = similarity(question, knownQ);
     }
@@ -80,23 +100,33 @@ function findKnownAnswer(question, options, knownAnswers) {
   return null;
 }
 
-// Promuove nella banca condivisa (known_answers.json) le risposte date in questo quiz,
-// ma solo se il quiz è stato superato.
+// Promuove nella banca condivisa TRUSTED (known_answers.json) SOLO risposte
+// verificate: dalla piattaforma (scrape post-quiz di .risposta-corretta) o
+// dall'AI supervisore. I guess Ollama NON passano di qui (vanno in pending).
+// Non sovrascrive entry esistenti (l'overwrite esplicito lo fa l'AI via
+// answers-cli set). Normalizza le chiavi (normKey) per non duplicare "X" / "1. X".
 function mergeIntoKnown(root, newAnswers, log) {
   if (!newAnswers || Object.keys(newAnswers).length === 0) return 0;
   const knownPath = path.join(root, 'data', 'known_answers.json');
   // readJsonSafe: se la banca condivisa è corrotta, non la azzera silenziosamente:
   // lo segnala e parte da {} (perdendo solo il merge di questo run, non tutto).
   let known = readJsonSafe(knownPath, {});
+  // Indice delle chiavi normalizzate già presenti (per dedup "X" vs "1. X").
+  const existingNorm = new Set(Object.keys(known).map(normKey));
   let added = 0;
   for (const [q, a] of Object.entries(newAnswers)) {
-    if (!known[q]) { known[q] = a; added++; }
+    const nk = normKey(q);
+    if (!known[q] && !existingNorm.has(nk)) {
+      known[q] = a;
+      existingNorm.add(nk);
+      added++;
+    }
   }
   if (added > 0) {
     try {
       // Scrittura atomica (tmp + rename): un crash a metà non corrompe la banca.
       writeJsonAtomic(knownPath, known);
-      log(`Banca risposte aggiornata: +${added} risposte verificate (quiz superato).`);
+      log(`Banca trusted aggiornata: +${added} risposte verificate (piattaforma/AI).`);
     } catch (e) {
       log(`Impossibile aggiornare known_answers.json: ${e.message}`);
     }
@@ -193,25 +223,30 @@ async function extractQuestionsFromPage(page) {
   }
 }
 
-// Estrae le risposte corrette dalla pagina di esito, se la piattaforma le mostra.
+// Estrae le risposte corrette dalla pagina di esito, se la piattaforma le mostra
+// in blocchi domanda+risposta-corretta. Ritorna SOLO coppie {question, answer}
+// complete (niente question:null): senza la domanda accoppiata, una risposta
+// non è promuovibile nella banca trusted. Se la piattaforma non espone i blocchi
+// strutturati, ritorna [] (nessuna promozione: sicuro, non possiamo verificare).
 async function extractCorrectAnswers(page) {
   try {
     return await page.evaluate(() => {
       const out = [];
-      const blocks = document.querySelectorAll('.question-block, .domanda, .quiz-question, form .card, .risposta-corretta, [class*="corretta"]');
+      const seen = new Set();
+      const blocks = document.querySelectorAll('.question-block, .domanda, .quiz-question, form .card, [class*="corretta"]');
       blocks.forEach(block => {
-        const qEl = block.querySelector('h4, .question-text, .domanda-testo, p');
+        const qEl = block.querySelector('h1, h2, h3, h4, h5, .question-text, .domanda-testo, legend');
         const aEl = block.querySelector('.risposta-corretta, .correct-answer, .text-success, .bg-success');
         if (qEl && aEl) {
-          out.push({ question: qEl.innerText.trim(), answer: aEl.innerText.trim() });
+          const q = qEl.innerText.trim();
+          const a = aEl.innerText.trim();
+          // Scarta heading vuoti o che sono solo numerazione/punteggiatura.
+          if (q && a && q.length > 3 && !seen.has(q)) {
+            seen.add(q);
+            out.push({ question: q, answer: a });
+          }
         }
       });
-      const body = document.body ? document.body.innerText : '';
-      const regex = /risposta\s+corretta[\s:]*(.+?)(?=\n|risposta\s+corretta|$)/gi;
-      let m;
-      while ((m = regex.exec(body)) !== null) {
-        out.push({ question: null, answer: m[1].trim() });
-      }
       return out;
     });
   } catch (e) {
@@ -219,14 +254,62 @@ async function extractCorrectAnswers(page) {
   }
 }
 
+// Dedup di una lista di domande per testo domanda (normalizzato): tiene la
+// prima occorrenza, ma se una successiva porta più info (es. ha ollamaGuess)
+// la fonde nella prima. Usato da saveNeedAnswer e saveAiQuizRequest.
+function mergeQuestionList(existing, incoming) {
+  const byKey = new Map();
+  for (const item of [...(existing || []), ...(incoming || [])]) {
+    if (!item || !item.question) continue;
+    const k = normKey(item.question);
+    if (!byKey.has(k)) {
+      byKey.set(k, { ...item });
+    } else {
+      const prev = byKey.get(k);
+      // Arricchisci: se il nuovo ha campi che il vecchio non aveva, copiali.
+      for (const f of ['options', 'ollama', 'ollamaGuess']) {
+        if (item[f] && !prev[f]) prev[f] = item[f];
+      }
+    }
+  }
+  return [...byKey.values()];
+}
+
 function saveNeedAnswer(root, questions, reason) {
   if (!questions || questions.length === 0) return;
   const needPath = account.stateFilePaths(root).needAnswer;
   try {
+    // Merge (non overwrite): catture multiple nello stesso run non si perdono.
+    const prev = fs.existsSync(needPath) ? readJsonSafe(needPath, null) : null;
+    const merged = mergeQuestionList(prev && Array.isArray(prev.questions) ? prev.questions : [], questions);
     // Scrittura atomica: il file need_answer è letto dall'AI per intervenire,
     // non deve mai restare troncato a metà.
-    writeJsonAtomic(needPath, { reason, questions, savedAt: new Date().toISOString() });
+    writeJsonAtomic(needPath, { reason, questions: merged, savedAt: new Date().toISOString() });
   } catch (e) { /* ignora */ }
+}
+
+// Handoff arricchito per l'AI supervisore: per ogni domanda sconosciuta o a
+// bassa confidenza salva domanda + opzioni + guess Ollama + confidenza, così
+// l'AI può risolvere con WebSearch + ragionamento e scrivere la risposta
+// verificata nella banca TRUSTED (answers-cli set). Merge non overwrite.
+// Artefatto per-account: data/accounts/<CF>/ai_quiz_request.json.
+function saveAiQuizRequest(root, items, reason, ctx) {
+  if (!items || items.length === 0) return 0;
+  const paths = account.stateFilePaths(root);
+  const reqPath = path.join(paths.accountDir, 'ai_quiz_request.json');
+  try {
+    const prev = fs.existsSync(reqPath) ? readJsonSafe(reqPath, null) : null;
+    const merged = mergeQuestionList(prev && Array.isArray(prev.questions) ? prev.questions : [], items);
+    writeJsonAtomic(reqPath, {
+      reason,
+      courseUrl: (ctx && ctx.courseUrl) || null,
+      courseId: (ctx && ctx.courseId) || null,
+      questions: merged,
+      savedAt: new Date().toISOString()
+    });
+    return merged.length;
+  } catch (e) { /* ignora */ }
+  return 0;
 }
 
 // Salva HTML + screenshot + bodyText della pagina del quiz in debug/quiz/.
@@ -303,6 +386,7 @@ async function clickNextButton(page, log) {
 async function solveActiveQuestions(page, root, log, monitor) {
   const sessionAnswers = {};       // risposte date da Ollama in questo quiz
   const capturedAnswers = {};      // TUTTE le domande con la risposta che abbiamo scelto
+  const aiRequests = [];           // domande a bassa confidenza/sconosciute → handoff AI
   const knownAnswersPath = path.join(root, 'data', 'known_answers.json');
 
   for (let i = 0; i < MAX_QUIZ_QUESTIONS; i++) {
@@ -337,7 +421,7 @@ async function solveActiveQuestions(page, root, log, monitor) {
 
     if (!q || !q.text) {
       // Non c'è più domanda attiva: potremmo essere finiti o sulla pagina esito.
-      return { sessionAnswers, capturedAnswers, status: 'no_active_question' };
+      return { sessionAnswers, capturedAnswers, aiRequests, status: 'no_active_question' };
     }
 
     log(`Domanda ${i + 1}: ${q.text.slice(0, 60)}...`);
@@ -367,7 +451,7 @@ async function solveActiveQuestions(page, root, log, monitor) {
       log(`!!! DOMANDA SCONOSCIUTA: ${q.text}`);
       log('Provo a chiedere a Ollama (modello cloud) la risposta...');
 
-      const ollamaAnswer = await askQuizQuestion(q.text, q.opts.map(o => o.text), log);
+      const ollamaAnswer = await askQuizQuestion(q.text, q.opts.map(o => o.text), log, root);
 
       if (ollamaAnswer) {
         selectedOptionText = ollamaAnswer.text;
@@ -385,6 +469,12 @@ async function solveActiveQuestions(page, root, log, monitor) {
         }
         if (optIdx < 0) {
           log(`Risposta di Ollama non riconducibile ad alcuna opzione ("${selectedOptionText}"). Salvo per intervento e passo oltre.`);
+          // Non-mappabile = a maggior ragione a bassa confidenza: segnala all'AI.
+          aiRequests.push({
+            question: q.text,
+            options: q.opts.map(o => o.text),
+            ollamaGuess: { letter: ollamaAnswer.letter, text: ollamaAnswer.text, confidence: ollamaAnswer.confidence, strategy: ollamaAnswer.strategy }
+          });
           saveNeedAnswer(root, [{ question: q.text, options: q.opts.map(o => o.text), ollama: { text: ollamaAnswer.text, letter: ollamaAnswer.letter } }], 'risposta Ollama non riconducibile alle opzioni');
           if (selectedOptionText) capturedAnswers[q.text] = selectedOptionText;
           continue;
@@ -395,6 +485,16 @@ async function solveActiveQuestions(page, root, log, monitor) {
         await clickNextButton(page, log);
         found = true;
         sessionAnswers[q.text] = selectedOptionText;
+
+        // Best-guess a bassa confidenza: usato per far procedere il quiz, MA
+        // segnalato all'AI supervisore per verifica (popola la banca trusted).
+        if (ollamaAnswer.confidence == null || ollamaAnswer.confidence < AI_REQUEST_CONFIDENCE_THRESHOLD) {
+          aiRequests.push({
+            question: q.text,
+            options: q.opts.map(o => o.text),
+            ollamaGuess: { letter: ollamaAnswer.letter, text: ollamaAnswer.text, confidence: ollamaAnswer.confidence, strategy: ollamaAnswer.strategy }
+          });
+        }
 
         try {
           const pendingPath = account.stateFilePaths(root).pending;
@@ -413,6 +513,15 @@ async function solveActiveQuestions(page, root, log, monitor) {
 
     if (!found) {
       log("Sospendo l'automazione per intervento dell'agente.");
+      aiRequests.push({ question: q.text, options: q.opts.map(o => o.text), ollamaGuess: null });
+      // Persisti l'handoff AI ora: il throw sottostante viene catturato come
+      // 'unknown (eccezione)' da solveQuiz e non arriverebbe a scrivere
+      // ai_quiz_request dai aiRequests accumulati. Così l'AI ha comunque la
+      // domanda + i guess precedenti a bassa confidenza.
+      if (aiRequests.length > 0) {
+        const n = saveAiQuizRequest(root, aiRequests, 'Ollama senza risposta valida (domanda senza risposta nota)', null);
+        log(`[AI_QUIZ_REQUEST] ${n} domande a bassa confidenza salvate in ai_quiz_request.json per verifica AI.`);
+      }
       saveNeedAnswer(root, [{ question: q.text, options: q.opts.map(o => o.text) }], 'domanda senza risposta nota');
       // Non process.exit da una lib: orfanerebbe il browser e saltlerebbe il
       // finally di runAutoplay. Lancia NeedHelpExit, catturata in runAutoplay
@@ -422,10 +531,30 @@ async function solveActiveQuestions(page, root, log, monitor) {
   }
 
   log(`ATTENZIONE: raggiunto il tetto di ${MAX_QUIZ_QUESTIONS} domande nel quiz. Esito valutato sulla pagina.`);
-  return { sessionAnswers, capturedAnswers, status: 'max_iterations' };
+  return { sessionAnswers, capturedAnswers, aiRequests, status: 'max_iterations' };
 }
 
-async function solveQuiz(page, root, log, monitor) {
+// Se solveActiveQuestions ha accumulato domande a bassa confidenza (aiRequests),
+// scrive l'handoff ai_quiz_request.json (merge) ed emette il marker di log
+// [AI_QUIZ_REQUEST] che il Monitor del supervisore cattura. Non blocca il corso:
+// l'AI risolve in autonomia (WebSearch + ragionamento) e popola la banca trusted.
+function writeAiRequestIfAny(root, solveResult, reason, courseUrl, log, monitor) {
+  const items = solveResult && solveResult.aiRequests ? solveResult.aiRequests : [];
+  if (items.length === 0) return;
+  let courseId = null;
+  if (courseUrl) {
+    const m = String(courseUrl).match(/\/corso\/show\/(\d+)/);
+    if (m) courseId = m[1];
+  }
+  const n = saveAiQuizRequest(root, items, reason, { courseUrl, courseId });
+  log(`[AI_QUIZ_REQUEST] ${n} domande a bassa confidenza salvate in ai_quiz_request.json per verifica AI (reason: ${reason}).`);
+  // phase 'quiz_needs_answers' come segnale morbido: autoplay può poi
+  // sovrascriverlo con done/need_help a seconda dell'esito. Il marker di log
+  // sopra resta la fonte affidabile per il Monitor.
+  try { monitor?.update({ phase: 'quiz_needs_answers' }); } catch (_) {}
+}
+
+async function solveQuiz(page, root, log, monitor, courseUrl) {
   log('Rilevato questionario. Inizio risoluzione autonoma...');
   await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
 
@@ -534,18 +663,24 @@ async function solveQuiz(page, root, log, monitor) {
     const resultText = finalScoreText ? `superato (${finalScoreText})` : 'superato';
     log(`Quiz terminato con successo! Esito: ${resultText}`);
     monitor?.update({ lastQuizResult: resultText });
-    // Promuovi sia le risposte Ollama che tutte le risposte catturate.
-    mergeIntoKnown(root, solveResult.sessionAnswers, log);
-    mergeIntoKnown(root, solveResult.capturedAnswers, log);
-    // Estrai anche eventuali risposte corrette mostrate nella pagina esito.
+    // NON promuoviamo i guess Ollama (sessionAnswers/capturedAnswers) nella banca
+    // trusted: un quiz superato al 24/30 = 80% contiene comunque ~6 risposte
+    // SBAGLIATE che, promosse, verrebbero riusate per tutti i colleghi. La banca
+    // trusted cresce SOLO da risposte verificate dalla piattaforma (scrape) o
+    // dall'AI supervisore. I guess restano in pending_quiz_answers.json.
     const extracted = await extractCorrectAnswers(page);
     if (extracted.length > 0) {
+      log(`Scrape post-quiz: ${extracted.length} risposte verificate dalla piattaforma.`);
       const extra = {};
       for (const item of extracted) {
         if (item.question && item.answer) extra[item.question] = item.answer;
       }
       mergeIntoKnown(root, extra, log);
     }
+    // Handoff AI per le domande a bassa confidenza: anche se il quiz è superato,
+    // l'AI può verificare i guess dubbi e far crescere la banca trusted (opportuno,
+    // non bloccante: il corso procede, niente reset).
+    writeAiRequestIfAny(root, solveResult, 'quiz superato con domande a bassa confidenza', courseUrl, log, monitor);
     return { outcome: 'solved', passed: true, score: finalScoreText, resultText };
   }
 
@@ -564,16 +699,27 @@ async function solveQuiz(page, root, log, monitor) {
         captured = await extractQuestionsFromPage(page);
       }
     }
+    // Se la cattura dalla pagina fallisce ma abbiamo le domande negli aiRequests
+    // (catturate durante la risoluzione), usiamo quelle per need_answer: così
+    // l'AI ha comunque le domande anche se la pagina esito non le espone più.
+    if (captured.length === 0 && solveResult.aiRequests && solveResult.aiRequests.length > 0) {
+      captured = solveResult.aiRequests.map(r => ({ question: r.question, options: r.options }));
+    }
     saveNeedAnswer(root, captured, `quiz non superato (${resultText})`);
     if (captured.length === 0) {
       await dumpQuizDiagnostics(page, root, 'failed_nocapture', finalOutcome.bodyText);
     }
+    // Handoff arricchito: ai_quiz_request porta anche i guess Ollama + confidenza.
+    writeAiRequestIfAny(root, solveResult, `quiz non superato (${resultText})`, courseUrl, log, monitor);
     return { outcome: 'need_help', passed: false, score: finalScoreText, resultText, reason: 'quiz non superato' };
   }
 
   log('Quiz in stato ignoto: nessun esito chiaro rilevato. Catturo le domande per sicurezza...');
   monitor?.update({ lastQuizResult: 'ignoto' });
-  const captured = await extractQuestionsFromPage(page);
+  let captured = await extractQuestionsFromPage(page);
+  if (captured.length === 0 && solveResult.aiRequests && solveResult.aiRequests.length > 0) {
+    captured = solveResult.aiRequests.map(r => ({ question: r.question, options: r.options }));
+  }
   if (captured.length > 0) {
     saveNeedAnswer(root, captured, 'esito quiz non chiaro');
   } else {
@@ -581,7 +727,8 @@ async function solveQuiz(page, root, log, monitor) {
     // (a prova di bomba: mai un fallimento silenzioso senza poter capire perché).
     await dumpQuizDiagnostics(page, root, 'ignoto_nocapture', finalOutcome.bodyText);
   }
+  writeAiRequestIfAny(root, solveResult, 'esito quiz non chiaro', courseUrl, log, monitor);
   return { outcome: 'unknown', passed: false, score: null, resultText: 'ignoto' };
 }
 
-module.exports = { solveQuiz, extractScore, detectOutcomeFromText, extractQuestionsFromPage, saveNeedAnswer, dumpQuizDiagnostics, NeedHelpExit, MAX_QUIZ_QUESTIONS };
+module.exports = { solveQuiz, extractScore, detectOutcomeFromText, extractQuestionsFromPage, saveNeedAnswer, saveAiQuizRequest, dumpQuizDiagnostics, NeedHelpExit, MAX_QUIZ_QUESTIONS };
