@@ -177,7 +177,9 @@ I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i tu
 - I formati orari accettati sono flessibili: `9`, `16`, `9:30`, `09:30`, `9.30`, `0930`, `1630`.
 - Default: lunedì–venerdì, 09:00–13:00 e 16:00–20:00.
 - Se avvii `start.sh` fuori orario, lo scheduler aspetta l'inizio del prossimo turno e poi avvia l'autoplay.
-- A fine turno, `src/autoplay.js` esce gracefulmente; lo scheduler aspetta il turno successivo e lo riavvia.
+- A fine turno, `src/autoplay.js` esce gracefulmente; lo scheduler aspetta il turno successivo e lo riavvia. Tutto autonomo: lanciato una volta, si ferma e riprende da solo a ogni cambio turno (il check di fine turno gira anche durante un video, con 15 min di tolleranza per completare il contenuto in corso).
+- `start.sh` attiva anche `caffeinate` (built-in macOS) per tenere il Mac sveglio finché gira lo scheduler.
+- `./start.sh --ignore-hours` ignora gli orari e non si ferma mai (pausa 10 min tra i run): solo se vuoi girare fuori orario senza fermarti.
 - Nessun cron richiesto.
 
 ## Monitoring

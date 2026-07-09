@@ -1,4 +1,4 @@
-const { SessionError } = require('./errors');
+const { SessionError, OffHoursExit } = require('./errors');
 const { isLoginPage } = require('./page-detect');
 
 function formatTime(t) {
@@ -37,7 +37,7 @@ async function waitForVideo(page, timeoutMs) {
   return false;
 }
 
-async function watchVideo(page, log, monitor) {
+async function watchVideo(page, log, monitor, shiftCheck) {
   log('Video in corso...');
   await ensurePlaying(page);
 
@@ -53,6 +53,21 @@ async function watchVideo(page, log, monitor) {
 
   while (!finished) {
     await page.waitForTimeout(30000);
+
+    // Check fine turno anche in mezzo al video: senza questo, l'autoplay
+    // attraversava la fine turno senza fermarsi (il check viveva solo nel loop
+    // esterno di autoplay.js, raggiunto solo a corsi finiti). Con shiftCheck
+    // condiviso, l'extra-time (15 min) concede di completare il video in corso;
+    // scaduta, esco graceful (la piattaforma salva la posizione di fruizione,
+    // lo scheduler riprende al turno successivo dal punto esatto).
+    if (shiftCheck) {
+      const s = shiftCheck.evaluate();
+      if (s.extraTimeArmed) log(`Turno appena terminato. Extra-time fino alle ${s.extraTimeUntil ? new Date(s.extraTimeUntil).toISOString() : 'N/A'} per completare il video in corso.`);
+      if (s.stop) {
+        log(`Fine turno durante il video (extra-time scaduto). Esco graceful: la piattaforma salva la posizione, lo scheduler riprederà al prossimo turno.`);
+        throw new OffHoursExit('Fine turno durante il video');
+      }
+    }
 
     if (Date.now() - startedAt > MAX_WATCH_MS) {
       log('Tetto massimo tempo video raggiunto (3h). Passo al contenuto successivo.');

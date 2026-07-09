@@ -160,10 +160,12 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 - I formati orari accettati sono flessibili: `9:30`, `09:30`, `9.30`, `0930`, `930`.
 - Ogni Mac usa il proprio fuso orario locale: uno store può essere fuori orario mentre un altro è ancora in orario.
 - `start.sh` avvia uno scheduler che, se fuori orario, aspetta l'inizio del prossimo turno e poi avvia `node src/autoplay.js`.
-- `src/autoplay.js` controlla l'orario ogni minuto: se arriva a fine turno, esce gracefulmente; lo scheduler aspetta il turno successivo e lo riavvia.
-- I Mac sono accesi 24/7, quindi questo ciclo è automatico: non serve cron.
+- **L'autoplay si ferma da solo a fine turno e lo scheduler riprende da solo al turno successivo** — totalmente autonomo, niente intervento manuale. Il check di fine turno gira anche DURANTE un video/lezione (non solo tra un corso e l'altro), con 15 min di tolleranza (extra-time) per completare il contenuto in corso; scaduta, esce graceful e la piattaforma salva la posizione, così il prossimo turno riparte dal punto esatto. (`src/lib/shift-watch.js`.)
+- `start.sh` avvia anche `caffeinate -w <scheduler-PID>` (built-in macOS) che tiene il Mac sveglio finché gira lo scheduler: lo sleep di sistema non blocca l'autoplay. I Mac sono accesi 24/7, quindi questo ciclo è automatico: non serve cron.
 
-**Non avviare mai automaticamente fuori orario senza avvisare l'utente.** Se l'utente chiede di avviare e siamo fuori orario, digli: "Vedo che siamo fuori orario lavorativo. Vuoi che attenda il prossimo turno, che avvii subito ignorando gli orari, o non faccia nulla?".
+**Per "avvia corso" usa la modalità NORMALE (`./start.sh`), NON `--ignore-hours`.** La modalità normale è quella autonoma: rispetta i turni, si ferma a fine turno, riprende al prossimo — lanciata una volta fa tutto da sola. `./start.sh --ignore-hours` invece ignora gli orari e NON si ferma mai (gira continuamente, pausa 10 min tra i run): usalo SOLO se l'utente chiede esplicitamente "avvia subito e fermati solo quando te lo dico io" / "ignora gli orari".
+
+**Non avviare mai automaticamente fuori orario senza avvisare l'utente.** Se l'utente chiede di avviare e siamo fuori orario, digli: "Vedo che siamo fuori orario lavorativo. Vuoi che attenda il prossimo turno (modalità normale: si ferma e riprende da solo a fine turno), che avvii subito ignorando gli orari (non si ferma più finché non lo fermi), o non faccia nulla?".
 
 ## Limiti
 

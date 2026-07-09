@@ -131,6 +131,18 @@ fi
 PID=$!
 echo "$PID" > "$PID_FILE"
 
+# macOS: tieni il Mac sveglio finché gira lo scheduler. I Mac sono sempre accesi,
+# ma lo sleep di sistema (idle/display su batteria, sospensione notturna) bloccherebbe
+# l'autoplay. `caffeinate` è built-in su macOS: -i (no idle sleep), -s (no system
+# sleep su corrente), -m (no disk idle), -w <PID> (esce da solo quando lo scheduler
+# termina, rilasciando l'assertion di sleep). Non usiamo il PID file: stop.sh uccide
+# per pattern (scheduler|autoplay), e caffeinate -w segue la vita del PID scheduler.
+# Se caffeinate manca (non macOS) lo saltiamo silenziosamente.
+if command -v caffeinate >/dev/null 2>&1 && [ -n "$PID" ]; then
+  nohup caffeinate -i -s -m -w "$PID" >/dev/null 2>&1 &
+  info "Caffeinate attivo: il Mac resta sveglio finché gira lo scheduler."
+fi
+
 echo ""
 echo "────────────────────────────"
 if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then

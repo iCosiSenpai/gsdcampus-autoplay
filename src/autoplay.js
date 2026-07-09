@@ -6,7 +6,8 @@ const { createLogger } = require('./lib/logger');
 const { Monitor } = require('./lib/monitor');
 const { solveQuiz } = require('./lib/quiz');
 const { watchVideo } = require('./lib/video');
-const { isWorkTime, nextWorkEnd, nextWorkStart, describeSchedule, minutesUntilShiftEnd } = require('./lib/schedule');
+const { describeSchedule } = require('./lib/schedule');
+const { makeShiftChecker } = require('./lib/shift-watch');
 const courseState = require('./lib/course-state');
 const { writeDashboard } = require('./lib/dashboard');
 const { writeJsonAtomic } = require('./lib/io');
@@ -44,7 +45,6 @@ if (ACTIVE_CF) {
 const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 const IGNORE_HOURS = process.argv.includes('--ignore-hours');
-const CHECK_INTERVAL_MS = 60000; // controlla orario ogni minuto
 const MAX_MISSING_PERMISSION = 3;
 const MAX_COURSE_ITER = 120;
 const MAX_LOGIN_DROPS = 4;
@@ -289,7 +289,7 @@ async function getLessonProgressOnCoursePage(page, courseUrl, lessonHref) {
   }
 }
 
-async function runCourse(page, courseUrl, sessionState, state) {
+async function runCourse(page, courseUrl, sessionState, state, shiftCheck) {
   const emptyUrls = new Set();
   const stuckUrls = new Set(); // lezioni bloccate al <100% dopo 3 tentativi: saltate, non abbandonano il corso
   const lessonAttempts = new Map();
@@ -302,6 +302,18 @@ async function runCourse(page, courseUrl, sessionState, state) {
     if (++iter > MAX_COURSE_ITER) {
       log(`Corso ${courseUrl}: superato il limite di ${MAX_COURSE_ITER} iterazioni senza completamento. Passo al prossimo.`);
       return;
+    }
+    // Check fine turno anche qui, in cima a ogni iterazione del corso: senza
+    // questo, il while sulle lezioni poteva girare a lungo (un video lungo) e
+    // oltrepassare la fine turno. Con shiftCheck condiviso, la tolleranza di
+    // extra-time è la stessa del loop esterno e di watchVideo.
+    if (shiftCheck && !IGNORE_HOURS) {
+      const s = shiftCheck.evaluate();
+      if (s.extraTimeArmed) log(`Turno appena terminato. Extra-time fino alle ${s.extraTimeUntil ? new Date(s.extraTimeUntil).toISOString() : 'N/A'} per completare il contenuto in corso (corso ${courseUrl}).`);
+      if (s.stop) {
+        log(`Fuori orario durante il corso ${courseUrl}. Fermo graceful: lo scheduler riprenderà al prossimo turno.`);
+        throw new OffHoursExit('Fine turno durante il corso');
+      }
     }
     monitor.update({ phase: 'checking', courseUrl });
 
@@ -642,7 +654,7 @@ async function runCourse(page, courseUrl, sessionState, state) {
     if (hasVideo) {
       monitor.update({ phase: 'video', lessonUrl: nextHref });
       emptyUrls.clear();
-      await watchVideo(page, log, monitor);
+      await watchVideo(page, log, monitor, shiftCheck);
 
       // Verifica che la piattaforma abbia effettivamente registrato il progresso a 100%.
       const lessonProgress = await getLessonProgressOnCoursePage(page, courseUrl, nextHref);
@@ -736,6 +748,12 @@ async function runAutoplay() {
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   process.on('uncaughtException', (err) => fatalShutdown('uncaughtException', err));
   process.on('unhandledRejection', (err) => fatalShutdown('unhandledRejection', err));
+
+  // Checker di fine turno condiviso tra il loop esterno, runCourse e watchVideo:
+  // così il check dell'orario avviene anche IN MEZZO a un video/lezione lunghi,
+  // non solo in cima al loop esterno (raggiunto solo a corsi finiti). Senza questo,
+  // l'autoplay attraversava la fine turno senza fermarsi (v. src/lib/shift-watch.js).
+  const shiftCheck = makeShiftChecker();
 
   while (outerRetries < MAX_OUTER_RETRIES) {
     outerRetries++;
@@ -976,41 +994,28 @@ async function runAutoplay() {
       }
 
       const sessionState = { loginDrops: 0, maxLoginDrops: MAX_LOGIN_DROPS };
-      let lastHourCheck = 0;
-      let extraTimeUntil = 0; // timestamp entro cui completare il contenuto in corso
       while (true) {
         if (!IGNORE_HOURS) {
-          const now = Date.now();
-          if (now - lastHourCheck > CHECK_INTERVAL_MS) {
-            lastHourCheck = now;
-            if (!isWorkTime()) {
-              const end = nextWorkEnd(new Date());
-              const start = nextWorkStart(new Date());
-              // Tolleranza: se il turno è appena finito (meno di 15 min fa) e stavamo
-              // guardando un video o completando una lezione, concediamo extra-time per
-              // terminare il contenuto in corso. Altrimenti ci fermiamo regolarmente.
-              if (end) {
-                const minutesSinceEnd = (now - end.getTime()) / 60000;
-                if (minutesSinceEnd <= 15) {
-                  extraTimeUntil = now + 15 * 60000;
-                  log(`Turno appena terminato. Extra-time attivo fino alle ${new Date(extraTimeUntil).toISOString()} per completare il contenuto in corso.`);
-                }
-              }
-              if (now < extraTimeUntil) {
-                log('Sono fuori orario ma in extra-time per completare il contenuto in corso.');
-              } else {
-                log(`Fuori orario lavorativo. Stop programmato: ${end ? end.toISOString() : 'N/A'}, prossimo avvio: ${start ? start.toISOString() : 'N/A'}`);
-                monitor.update({ phase: 'off_hours', nextStart: start ? start.toISOString() : null, nextEnd: end ? end.toISOString() : null, running: false });
-                throw new OffHoursExit('Fine turno lavorativo');
-              }
-            }
+          // Check fine turno condiviso (v. shift-watch.js): il checker è lo stesso
+          // usato da runCourse e watchVideo, così ci si ferma anche a metà di un
+          // video lungo, non solo a corsi finiti. extraTimeArmed è true una sola
+          // volta (sul reale passaggio in→out): lo logghiamo qui; gli inner loop
+          // lo loggheranno a loro volta con il loro contesto.
+          const s = shiftCheck.evaluate();
+          if (s.extraTimeArmed) {
+            log(`Turno appena terminato. Extra-time attivo fino alle ${s.extraTimeUntil ? new Date(s.extraTimeUntil).toISOString() : 'N/A'} per completare il contenuto in corso.`);
+          }
+          if (s.stop) {
+            log(`Fuori orario lavorativo. Stop programmato: ${s.end ? s.end.toISOString() : 'N/A'}, prossimo avvio: ${s.start ? s.start.toISOString() : 'N/A'}`);
+            monitor.update({ phase: 'off_hours', nextStart: s.start ? s.start.toISOString() : null, nextEnd: s.end ? s.end.toISOString() : null, running: false });
+            throw new OffHoursExit('Fine turno lavorativo');
           }
         }
 
         let worked = false;
         for (const courseUrl of courseUrls) {
           log(`Controllo corso: ${courseUrl}`);
-          await runCourse(page, courseUrl, sessionState, state);
+          await runCourse(page, courseUrl, sessionState, state, shiftCheck);
           worked = true;
         }
 
