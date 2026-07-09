@@ -106,7 +106,18 @@ update_repo() {
   if git merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
     ok "Progetto aggiornato."
   else
-    warn "Impossibile aggiornare in modo pulito (modifiche locali?). Uso la versione attuale."
+    # L'ff-only è fallito per altri file tracciati sporchi (non known_answers, già
+    # gestito). Riallineo forzato a origin: la repo è la source of truth, i file
+    # tracciati non dovrebbero avere modifiche locali (quelle legittime sono tutte
+    # gitignorate: config.json, logs/, data/accounts/, known_answers.json). Così il
+    # "Aggiorna e avvia" non si ferma mai su uno stato sporco imprevisto. Le risposte
+    # del collega sono preservate dal backup .__keep (ripristinato sotto).
+    warn "Aggiornamento pulito non riuscito (altri file locali modificati?). Riallineo a origin/$BRANCH..."
+    if git reset --hard "origin/$BRANCH" >/dev/null 2>&1; then
+      ok "Codice riallineato a origin/$BRANCH."
+    else
+      warn "Impossibile riallineare il codice; proseguo con la versione attuale."
+    fi
   fi
 
   # Ripristino le risposte verificate del collega sul file ora gitignorato.
