@@ -30,6 +30,15 @@
  *   node scripts/lib/answers-cli.js audit
  *       Elenca le voci della banca trusted (utile per il cleanup: le voci storiche
  *       promosse in passato da guess Ollama andrebbero verificate con WebSearch).
+ *
+ *   node scripts/lib/answers-cli.js publish
+ *       Merges la banca trusted LOCALE (known_answers.json, gitignorata) nella banca
+ *       CONDIVISA tracciata (known_answers_public.json): le risposte locali verificate
+ *       diventano disponibili a tutti i colleghi al prossimo "Aggiorna e avvia"
+ *       (update-known-answers.sh le scarica e le mergia nel loro file locale). Le
+ *       risposte locali NON sovrascrivono voci pubbliche già presenti (la pubblica è
+ *       curata); aggiunge solo le nuove. Stampa quante ne ha aggiunte e promemoria
+ *       di commit/push. Scrittura atomica. È l'unico canale local→pubblico.
  */
 
 const fs = require('fs');
@@ -119,7 +128,29 @@ if (cmd === 'stats') {
   entries.forEach(([q, a], i) => {
     console.log(`${String(i + 1).padStart(3)}. ${q.slice(0, 80)}  →  ${String(a).slice(0, 40)}`);
   });
+} else if (cmd === 'publish') {
+  // Local (gitignorato, trusted) -> pubblico (tracciato, condiviso). Le risposte
+  // locali verificate diventano disponibili ai colleghi al loro prossimo aggiornamento.
+  // NON sovrascrive voci pubbliche esistenti (la banca pubblica è curata): aggiunge
+  // solo le chiavi nuove. È l'unico canale local→pubblico.
+  const known = readJson(KNOWN, {});
+  const PUBLIC = path.join(DATA, 'known_answers_public.json');
+  const pub = readJson(PUBLIC, {});
+  let added = 0;
+  const addedList = [];
+  for (const [q, a] of Object.entries(known)) {
+    if (!pub[q]) { pub[q] = a; added++; addedList.push(q); }
+  }
+  if (added > 0) {
+    writeJsonAtomic(PUBLIC, pub);
+    console.log(`Aggiunte ${added} risposte alla banca condivisa (known_answers_public.json):`);
+    addedList.forEach(q => console.log(`  + ${q.slice(0, 80)}`));
+    console.log('\nOra rendile effettive per i colleghi:');
+    console.log('  git add data/known_answers_public.json && git commit -m "banca: +N risposte" && git push');
+  } else {
+    console.log('Nessuna nuova risposta da pubblicare (tutte già nella banca pubblica).');
+  }
 } else {
-  console.error(`Comando sconosciuto: ${cmd}\nComandi: stats | list | merge | set | audit`);
+  console.error(`Comando sconosciuto: ${cmd}\nComandi: stats | list | merge | set | audit | publish`);
   process.exit(1);
 }
