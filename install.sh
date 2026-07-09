@@ -88,10 +88,30 @@ ok "git disponibile."
 update_repo() {
   info "Aggiorno il progetto all'ultima versione..."
   git fetch --quiet origin "$BRANCH" || warn "fetch non riuscito, proseguo con la versione locale."
+
+  # Transizione known_answers.json -> gitignorato. Nei commit vecchi questo file è
+  # TRACCIATO e l'autoplay lo riscrive a ogni quiz risolto, quindi ogni collega attivo
+  # ce l'ha modificato localmente. L'ff-merge al commit che lo destraccia fallirebbe
+  # ("Your local changes would be overwritten by merge"). Qui: se è ancora tracciato e
+  # modificato, ne back up le risposte verificate, lo resetto al HEAD (così il ff
+  # procede pulito e il nuovo commit lo rimuove dal tree), poi ripristino il backup
+  # sul file ormai gitignorato. Zero perdita di risposte del collega.
+  local ka_restore=""
+  if git ls-files --error-unmatch data/known_answers.json >/dev/null 2>&1 \
+     && ! git diff --quiet -- data/known_answers.json 2>/dev/null; then
+    cp data/known_answers.json data/known_answers.json.__keep 2>/dev/null && ka_restore="data/known_answers.json.__keep"
+    git checkout -- data/known_answers.json 2>/dev/null || true
+  fi
+
   if git merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
     ok "Progetto aggiornato."
   else
     warn "Impossibile aggiornare in modo pulito (modifiche locali?). Uso la versione attuale."
+  fi
+
+  # Ripristino le risposte verificate del collega sul file ora gitignorato.
+  if [ -n "$ka_restore" ] && [ -f "$ka_restore" ]; then
+    mv -f "$ka_restore" data/known_answers.json 2>/dev/null || rm -f "$ka_restore" 2>/dev/null
   fi
 }
 
@@ -187,10 +207,18 @@ case "$MODE" in
   clean)
     info "Reinstallazione pulita."
     git fetch --quiet origin "$BRANCH" || true
+    # Preservo known_answers.json (banca trusted locale, ora gitignorata): il
+    # reset --hard al commit che la destraccia la rimuoverebbe dal disco, perdendo
+    # le risposte verificate del collega. Backup prima del reset, restore dopo.
+    ka_clean_keep=""
+    [ -f data/known_answers.json ] && cp data/known_answers.json data/known_answers.json.__keep 2>/dev/null && ka_clean_keep="data/known_answers.json.__keep"
     if git reset --hard "origin/$BRANCH" >/dev/null 2>&1; then
       ok "Codice riallineato a origin/$BRANCH (config.json e dati personali restano)."
     else
       warn "Impossibile riallineare il codice; proseguo con la versione attuale."
+    fi
+    if [ -n "$ka_clean_keep" ] && [ -f "$ka_clean_keep" ]; then
+      mv -f "$ka_clean_keep" data/known_answers.json 2>/dev/null || rm -f "$ka_clean_keep" 2>/dev/null
     fi
     if [ -n "$TTY_REDIR" ] && [ -f config.json ]; then
       info "Reinstallo/aggiorno tutte le dipendenze (può richiedere qualche minuto)..."

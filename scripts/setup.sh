@@ -129,6 +129,10 @@ ensure_ollama_server() {
 
   if ! curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
     err "Impossibile avviare il server Ollama."
+    if [ -f "$DIR/logs/ollama.log" ]; then
+      info "Ultimi log Ollama (logs/ollama.log):"
+      tail -n 25 "$DIR/logs/ollama.log" 2>/dev/null | sed 's/^/    /'
+    fi
     info "Prova a eseguire manualmente in un altro terminale:  ollama serve"
     info "Poi riesegui questo script."
     exit 1
@@ -998,6 +1002,18 @@ install_ollama_official() {
   # noi headless (ollama-daemon.sh). L'installer esce 0 pulito.
   if ! curl -fsSL https://ollama.com/install.sh | OLLAMA_NO_START=1 sh; then
     warn "Installer Ollama ha segnalato un errore (es. avvio GUI non riuscito). Verifico comunque il CLI..."
+  fi
+  # Rimuovo il com.apple.quarantine dall'app appena installata. Con OLLAMA_NO_START=1
+  # l'installer NON fa `open -a Ollama`, quindi l'app non viene mai "aperta" via
+  # LaunchServices e il Gatekeeper non sgombra il quarantine. Il nostro daemon poi
+  # lancia il binario Contents/MacOS/Ollama DIRETTAMENTE (non via `open`): macOS
+  # SIGKILLa un binario lanciato direttamente da un bundle ancora in quarantine →
+  # il server non silega mai su 11434 ("Ollama non ha risposto entro 15s" e poi il
+  # processo muore). Su un Mac dove Ollama è stato `open`-ato una volta il quarantine
+  # è già pulito e l'xattr è un no-op, quindi è sicuro ribadirlo qui.
+  if [ -d "/Applications/Ollama.app" ]; then
+    xattr -dr com.apple.quarantine "/Applications/Ollama.app" 2>/dev/null \
+      || sudo xattr -dr com.apple.quarantine "/Applications/Ollama.app" 2>/dev/null || true
   fi
   # Best-effort: se non riesco a mettere ollama in PATH, non abortire qui;
   # ci pensa il controllo successivo (CLI o app binary mancanti) con un messaggio utile.

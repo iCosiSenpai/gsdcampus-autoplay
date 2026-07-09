@@ -134,6 +134,23 @@ function mergeIntoKnown(root, newAnswers, log) {
   return added;
 }
 
+// Seede la banca trusted locale (data/known_answers.json) dalla banca condivisa
+// (data/known_answers_public.json) se il file locale manca. known_answers.json è
+// gitignorato (banca di lavoro mutata a runtime dall'autoplay): su un clone fresco
+// è assente e va inizializzato dalla banca pubblica tracciata, altrimenti il primo
+// quiz partirebbe con banca vuota. Idempotente: se il file esiste già non fa nulla
+// (l'autoplay e update-known-answers.sh lo arricchiscono a runtime).
+function ensureKnownBankSeeded(root) {
+  const knownPath = path.join(root, 'data', 'known_answers.json');
+  if (fs.existsSync(knownPath)) return;
+  const publicPath = path.join(root, 'data', 'known_answers_public.json');
+  let pub = {};
+  try { pub = JSON.parse(fs.readFileSync(publicPath, 'utf8')); } catch (_) { pub = {}; }
+  if (pub && Object.keys(pub).length > 0) {
+    try { writeJsonAtomic(knownPath, pub); } catch (_) { /* non bloccante */ }
+  }
+}
+
 function extractScore(text) {
   const t = (text || '').toLowerCase();
   // 1) Priorità: frazione vicino alle parole chiave "punteggio" o "voto [finale]".
@@ -388,6 +405,7 @@ async function solveActiveQuestions(page, root, log, monitor) {
   const capturedAnswers = {};      // TUTTE le domande con la risposta che abbiamo scelto
   const aiRequests = [];           // domande a bassa confidenza/sconosciute → handoff AI
   const knownAnswersPath = path.join(root, 'data', 'known_answers.json');
+  ensureKnownBankSeeded(root);
 
   for (let i = 0; i < MAX_QUIZ_QUESTIONS; i++) {
     await page.waitForTimeout(2000);
@@ -559,6 +577,7 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
   await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
 
   const knownAnswersPath = path.join(root, 'data', 'known_answers.json');
+  ensureKnownBankSeeded(root);
 
   // 1) Verifica se la pagina mostra già un esito (quiz già completato o tentato).
   const outcomeCheck = await page.evaluate(() => {

@@ -71,6 +71,13 @@ start() {
   fi
 
   mkdir -p logs
+  # Safety net anti-quarantine: se l'app è stata (re)installata e mai `open`-ata,
+  # il com.apple.quarantine fa SIGKILL del binario lanciato direttamente (vedi
+  # setup.sh install_ollama_official). Lo strip anche qui copre il caso di
+  # reinstall manuale di Ollama senza ripassare da setup.sh.
+  if [ -d "/Applications/Ollama.app" ]; then
+    xattr -dr com.apple.quarantine "/Applications/Ollama.app" 2>/dev/null || true
+  fi
   log "Avvio Ollama in background (headless)..."
   nohup "$OLLAMA_BIN" serve >> "$DIR/logs/ollama.log" 2>&1 &
   local pid=$!

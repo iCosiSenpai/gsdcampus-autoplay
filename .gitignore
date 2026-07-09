@@ -17,6 +17,14 @@ data/course_state.json
 data/extracted_full.json
 data/summary_dump.json
 data/quiz-domande.txt
+# Banca trusted LOCALE (data/known_answers.json): mutata a runtime dall'autoplay a
+# ogni quiz risolto/verificato. È stato gitignorato perché tracciandolo ogni
+# collega si ritrovava modifiche locali su un file tracciato → `git merge --ff-only`
+# in "Aggiorna e avvia" falliva SEMPRE ("modifiche locali?") e i fix non arrivavano
+# mai. La banca condivisa distribuita è known_answers_public.json (tracciata); i
+# clone freschi si seedano da lì a runtime (src/lib/quiz.js ensureKnownBankSeeded)
+# e via scripts/update-known-answers.sh agli aggiornamenti.
+data/known_answers.json
 # NOTA: known_answers_public.json è intenzionalmente tracciato da git come banca condivisa
 # database membri: tracciato da git (con esplicito consenso del titolare) così i colleghi
 # che fanno git clone hanno subito l'elenco membri e la sezione "Chi sei?" funziona senza
