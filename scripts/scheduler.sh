@@ -4,6 +4,16 @@ set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
+# Neutralizza FORCE_COLOR: alcuni ambienti (es. il supervisore AI / Claude Code)
+# esportano FORCE_COLOR=3, che fa colorizzare a `node` anche su pipe. Uno snippet
+# `node -e "console.log(42)"` emetterebbe allora \x1b[33m42\x1b[39m, e l'aritmetica
+# shell `$((NEXT_MS / 60000))` crasherebbe sotto set -e uccidendo lo scheduler
+# silenziosamente a ogni fine turno (visto: scheduler morto dopo "Attendo prossimo
+# turno..."). FORCE_COLOR ha la precedenza su NO_COLOR/NODE_NO_COLOR, quindi va
+# proprio UNSETtato. Così tutti i figli node (autoplay incluso) ereditano env pulito.
+unset FORCE_COLOR
+export NO_COLOR=1
+
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 
 IGNORE_HOURS=false
@@ -39,12 +49,14 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Calcola i millisecondi fino al prossimo inizio turno lavorativo
+# Calcola i millisecondi fino al prossimo inizio turno lavorativo.
+# Usa process.stdout.write (NON console.log): quest'ultimo colorizzerebbe il
+# numero sotto FORCE_COLOR, inquadrando l'aritmetica shell $((NEXT_MS/60000)).
 ms_until_next_start() {
   node -e "
     const { nextWorkStart, msUntil } = require('./src/lib/schedule');
     const d = nextWorkStart(new Date());
-    console.log(d ? msUntil(d) : 0);
+    process.stdout.write(String(d ? msUntil(d) : 0) + '\n');
   " 2>/dev/null
 }
 

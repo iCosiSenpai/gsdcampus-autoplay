@@ -4,6 +4,12 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
+# Neutralizza FORCE_COLOR (v. scripts/scheduler.sh): impedisce a `node` di
+# colorizzare l'output su pipe e rompere grep/aritmetica shell. Lo scheduler
+# che lanciamo da qui eredita questo env pulito.
+unset FORCE_COLOR
+export NO_COLOR=1
+
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 
 # Colori

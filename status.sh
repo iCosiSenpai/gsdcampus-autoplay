@@ -3,6 +3,12 @@
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
+# Neutralizza FORCE_COLOR (v. scripts/scheduler.sh): senza questo, gli snippet
+# `node -e "console.log(numero)"` qui sotto (uptime) emetterebbero codici ANSI
+# e l'output di stato mostrerebbe caratteri di escape.
+unset FORCE_COLOR
+export NO_COLOR=1
+
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 HEALTHCHECK_CLI="$DIR/scripts/lib/healthcheck-cli.js"
 
