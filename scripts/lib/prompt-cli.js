@@ -13,6 +13,7 @@
  */
 
 const readline = require('readline');
+const fs = require('fs');
 
 function clearScreen() {
   // Usa ANSI clear; se non supportato, stampa solo a capo.
@@ -247,8 +248,9 @@ module.exports = {
 // Wrapper CLI: `node prompt-cli.js select --title T [--subtitle S] [--default N] -- A B C`
 // Stampa su stdout l'indice 1-based della voce scelta (0 = annulla/EOF).
 // Exit code SEMPRE 0: i top script girano in set -e e catturano l'indice con $();
-// un exit non-zero abortirebbe setup/install. console.log è rediretto su stderr
-// dentro main() così i disegni del menu non inquadrano l'indice catturato.
+// un exit non-zero abortirebbe setup/install. Il menu è renderizzato su /dev/tty
+// dentro main() (fallback stderr) così i disegni del menu non inquadrano l'indice
+// catturato su stdout e non vengono nascosti da `2>/dev/null` ai call site.
 // ────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
   const args = argv.slice(2); // tolgo 'node' e lo script
@@ -271,14 +273,25 @@ function parseArgs(argv) {
 
 async function cliMain() {
   // stdout è catturato da $() negli script shell: deve portare SOLO l'indice
-  // finale. Tutto il resto (clearScreen ANSI, cursori ▶, console.log del box)
-  // va su stderr, che in $() non è catturato e finisce sul terminale reale.
-  // Sovrascriviamo process.stdout.write per redirigerlo su stderr e teniamo da
-  // parte il vero write per l'indice.
+  // finale. Il menu (clearScreen ANSI, cursori ▶, box, voci) va sul terminale
+  // REALE dell'utente. Lo scriviamo direttamente su /dev/tty INVECE che su
+  // stderr: così i call site che fanno `2>/dev/null` (per silenziare il rumore
+  // di node) NON nascondono anche il menu. Bug storico: il menu era su stderr e
+  // `2>/dev/null` lo rendeva invisibile (opzioni vuote, solo il cursore ▶).
+  // /dev/tty è il terminale dell'utente sia sotto `curl|bash` sia lanciando
+  // ./setup.sh direttamente. Se /dev/tty non è apribile (es. non interattivo),
+  // fallback su stderr (in modalità non-TTY si usa numericMenu, senza UI).
   const realStdoutWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = (chunk, ...rest) => process.stderr.write(chunk, ...rest);
-  console.log = (...a) => process.stderr.write(a.join(' ') + '\n');
-  console.error = (...a) => process.stderr.write(a.join(' ') + '\n');
+  let menuFd = null;
+  try { menuFd = fs.openSync('/dev/tty', 'w'); } catch (_) { menuFd = null; }
+  const menuWrite = (chunk) => {
+    const s = typeof chunk === 'string' ? chunk : String(chunk);
+    if (menuFd !== null) { try { fs.writeSync(menuFd, s); return; } catch (_) {} }
+    process.stderr.write(s);
+  };
+  process.stdout.write = (chunk, ...rest) => { menuWrite(chunk); return true; };
+  console.log = (...a) => { menuWrite(a.join(' ') + '\n'); };
+  console.error = (...a) => { menuWrite(a.join(' ') + '\n'); };
 
   // SIGINT inatteso: ripristina raw mode e stampa 0 (cancel) — exit 0.
   process.on('SIGINT', () => {
