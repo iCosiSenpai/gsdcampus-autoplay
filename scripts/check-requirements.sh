@@ -70,15 +70,17 @@ else
   log_missing "Dipendenze npm obsolete (esegui: npm install o ./scripts/setup.sh)"
 fi
 
-# 4. Chromium / Chrome browser for Playwright
-if command -v chromium &>/dev/null || \
-   [ -d "$HOME/Library/Caches/ms-playwright" ] || \
-   [ -f "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] || \
-   [ -f "/Applications/Google Chrome.app/Contents/MacOS/Chrome" ] || \
-   [ -d "$HOME/Applications/Google Chrome.app" ]; then
-  log_ok "Playwright browsers / Google Chrome"
+# 4. Google Chrome — l'autoplay usa channel:'chrome' (Chrome reale, non il
+# Chromium bundled di Playwright). Il solo cache ms-playwright NON basta: senza
+# Chrome.app Playwright fallisce a runtime. Verifichiamo Chrome.app esplicito.
+CHROME_APP=""
+[ -f "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] && CHROME_APP="/Applications/Google Chrome.app"
+[ -z "$CHROME_APP" ] && [ -f "/Applications/Google Chrome.app/Contents/MacOS/Chrome" ] && CHROME_APP="/Applications/Google Chrome.app"
+[ -z "$CHROME_APP" ] && [ -d "$HOME/Applications/Google Chrome.app" ] && CHROME_APP="$HOME/Applications/Google Chrome.app"
+if [ -n "$CHROME_APP" ]; then
+  log_ok "Google Chrome ($CHROME_APP)"
 else
-  log_missing "Playwright browsers / Google Chrome (esegui: npx playwright install chromium oppure installa Chrome)"
+  log_missing "Google Chrome (esegui: brew install --cask google-chrome oppure ./scripts/setup.sh)"
 fi
 
 # 5. Ollama

@@ -82,18 +82,46 @@ fi
 
 # Cleanup orfani di autoplay e scheduler
 echo ""
-step "3/3" "Pulizia eventuali processi orfani"
-# Pattern path-indipendente: lo scheduler lancia `node /abs/path/src/autoplay.js`,
-# quindi "node src/autoplay.js" (sottostringa) NON matchava mai. Usiamo il nome
-# file, che matcha qualsiasi path. Esclude autoplay.log (grep su "autoplay\.js").
-ORPHANS=$(pgrep -f "autoplay\.js" 2>/dev/null || true)
-if [ -n "$ORPHANS" ]; then
-  echo "$ORPHANS" | while read orphan; do
-    [ "$orphan" != "$$" ] && kill -9 "$orphan" 2>/dev/null || true
+step "3/3" "Arresto graceful + pulizia orfani"
+
+# 3a. Graceful shutdown dei processi autoplay (node .../autoplay.js): SIGTERM
+# prima così autoplay.js gracefulShutdown() esegue browser.close() (niente leak
+# di processi chromium), poi SIGKILL solo se ancora vivi dopo ~8s. Pattern
+# path-indipendente ("autoplay\.js" matcha qualsiasi path; esclude autoplay.log).
+AUTO_ORPHANS=$(pgrep -f "autoplay\.js" 2>/dev/null || true)
+if [ -n "$AUTO_ORPHANS" ]; then
+  echo "$AUTO_ORPHANS" | while read orphan; do
+    [ "$orphan" != "$$" ] && kill -TERM "$orphan" 2>/dev/null || true
   done
-  ok "Orfani autoplay rimossi."
+  echo "Attesa graceful shutdown (max 8s, Invio nel frattempo non serve)..."
+  for i in {1..8}; do
+    AUTO_ORPHANS=$(pgrep -f "autoplay\.js" 2>/dev/null || true)
+    [ -z "$AUTO_ORPHANS" ] && break
+    sleep 1
+  done
+  AUTO_ORPHANS=$(pgrep -f "autoplay\.js" 2>/dev/null || true)
+  if [ -n "$AUTO_ORPHANS" ]; then
+    warn "Ancora attivi dopo 8s. SIGKILL dei processi autoplay..."
+    echo "$AUTO_ORPHANS" | while read orphan; do
+      [ "$orphan" != "$$" ] && kill -9 "$orphan" 2>/dev/null || true
+    done
+  fi
+  ok "Processi autoplay arrestati."
 fi
 
+# 3b. Orfani Chrome/Chromium lanciati dall'autoplay: riconosciuti dal flag
+# --remote-debugging-port (Playwright lo usa per channel 'chrome'; il Chrome
+# normale dell'utente non lo ha). Solo DOPO il grace period: se browser.close()
+# è girato, qui non resta nulla. matcha solo debug-port per non toccare Chrome utente.
+CHROME_ORPHANS=$(pgrep -f "remote-debugging-port" 2>/dev/null || true)
+if [ -n "$CHROME_ORPHANS" ]; then
+  echo "$CHROME_ORPHANS" | while read orphan; do
+    [ "$orphan" != "$$" ] && kill -9 "$orphan" 2>/dev/null || true
+  done
+  ok "Orfani Chrome (remote-debugging) rimossi."
+fi
+
+# 3c. Orfani scheduler (non hanno browser da chiudere graceful): SIGKILL diretto.
 SCH_ORPHANS=$(pgrep -f "scheduler.sh" 2>/dev/null || true)
 if [ -n "$SCH_ORPHANS" ]; then
   echo "$SCH_ORPHANS" | while read orphan; do

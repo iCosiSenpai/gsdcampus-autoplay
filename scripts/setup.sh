@@ -59,6 +59,9 @@ step() {
   echo -e "${BOLD}▶ $1${NC}"
 }
 
+# Helper countdown "Timer + Invio per saltare" per i messaggi che l'utente deve leggere.
+source "$DIR/scripts/lib/read-timer.sh"
+
 # Legge il modello Ollama da config.json (campo `ollamaModel`).
 # Fallback a costante letterale (NON a ${OLLAMA_MODEL}: circolare — vedi check-requirements.sh).
 MODEL_FALLBACK="gemma4:cloud"
@@ -106,16 +109,22 @@ save_package_hash() {
 }
 
 # Attende che il server Ollama risponda su http://127.0.0.1:11434.
-# Se non risponde, tenta di avviarlo tramite il daemon interno o, in fallback,
-# con 'ollama serve' direttamente. Fallisce se il server non si avvia.
+# Se non risponde, tenta di avviarlo tramite il daemon interno. NON bloccante: se
+# il server non parte, setta OLLAMA_AVAILABLE=false e retorna 1 — il setup prosegue
+# (l'autoplay può ancora eseguire i quiz a risposta nota) e l'AI supervisore
+# gestirà Ollama più tardi. Il daemon ora retorna non-zero se non binda 11434.
+OLLAMA_AVAILABLE=true
 ensure_ollama_server() {
   if curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
+    OLLAMA_AVAILABLE=true
     return 0
   fi
 
   info "Server Ollama non attivo. Avvio in corso..."
   if [ -f "$DIR/scripts/ollama-daemon.sh" ]; then
-    "$DIR/scripts/ollama-daemon.sh" start
+    # `|| true`: sotto set -e, un daemon che retorna 1 (server non bindato) non
+    # deve abortire tutto il setup. La verifica finale decide cosa fare.
+    "$DIR/scripts/ollama-daemon.sh" start || true
   else
     warn "Daemon Ollama non trovato. Avvio 'ollama serve' manualmente..."
     nohup ollama serve >> "$DIR/logs/ollama.log" 2>&1 &
@@ -127,17 +136,33 @@ ensure_ollama_server() {
     done
   fi
 
-  if ! curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
-    err "Impossibile avviare il server Ollama."
-    if [ -f "$DIR/logs/ollama.log" ]; then
-      info "Ultimi log Ollama (logs/ollama.log):"
-      tail -n 25 "$DIR/logs/ollama.log" 2>/dev/null | sed 's/^/    /'
-    fi
-    info "Prova a eseguire manualmente in un altro terminale:  ollama serve"
-    info "Poi riesegui questo script."
-    exit 1
+  if curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
+    OLLAMA_AVAILABLE=true
+    ok "Server Ollama attivo."
+    return 0
   fi
-  ok "Server Ollama attivo."
+
+  warn "Impossibile avviare il server Ollama."
+  if [ -f "$DIR/logs/ollama.log" ]; then
+    info "Ultimi log Ollama (logs/ollama.log):"
+    tail -n 25 "$DIR/logs/ollama.log" 2>/dev/null | sed 's/^/    /'
+  fi
+  if [ "$AUTO_YES" = false ]; then
+    read -q "RETRY?Riprovo ad avviare Ollama? [y/N] "
+    echo ""
+    if [[ "$RETRY" =~ ^[Yy]$ ]]; then
+      "$DIR/scripts/ollama-daemon.sh" start || true
+      if curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
+        OLLAMA_AVAILABLE=true
+        ok "Server Ollama attivo."
+        return 0
+      fi
+    fi
+  fi
+  warn "Continuo senza server Ollama: l'autoplay esegue comunque i quiz a risposta nota."
+  warn "L'AI supervisore tenterà di avviare Ollama più tardi (launch-ai-supervisor.sh)."
+  OLLAMA_AVAILABLE=false
+  return 1
 }
 
 # Assicura che il CLI `ollama` sia raggiungibile nel PATH dopo l'installazione.
@@ -264,6 +289,7 @@ print_header() {
   warn "Se il Terminale chiede di installare/aggiornare qualcosa (anche 'y/n'), rispondi SEMPRE sì."
   warn "Tranquillo: serve tutto per far funzionare il corso, e non tocca i tuoi dati personali."
   echo ""
+  read_with_timer 6 "${BOLD}Leggi bene qui sopra: tra 6s proseguo (Invio per saltare).${NC}"
 }
 
 print_footer() {
@@ -600,7 +626,7 @@ prompt_time() {
       LAST_M=$m
       return 0
     fi
-    warn "Orario non valido. Formati accettati: HH:MM, H:MM, HH.MM, H.MM, HHMM (es. 9:30)."
+    warn "Orario non valido. Formati accettati: H, HH, HH:MM, H:MM, HH.MM, HHMM (es. 9, 16, 9:30, 1630)."
   done
 }
 
@@ -714,81 +740,80 @@ render_shifts() {
   fi
 }
 
-# Scelta giorni lavorativi con modelli rapidi
+# Scelta giorni lavorativi con modelli rapidi (menu a frecce)
 configure_days() {
   echo ""
   echo -e "${BOLD}Giorni lavorativi${NC}"
-  echo "  1) Lun–Ven  (5 giorni)"
-  echo "  2) Lun–Sab  (6 giorni)"
-  echo "  3) Tutti i giorni"
-  echo "  4) Personalizzati"
-  echo ""
+  echo "  Usa le frecce ↑/↓ e Invio per scegliere."
   local choice
-  while true; do
-    read "choice?Scelta [1]: "
-    [ -z "$choice" ] && choice=1
-    case "$choice" in
-      1) DAYS="1,2,3,4,5"; break ;;
-      2) DAYS="1,2,3,4,5,6"; break ;;
-      3) DAYS="0,1,2,3,4,5,6"; break ;;
-      4)
-        while true; do
-          echo "Numeri: 0=dom 1=lun 2=mar 3=mer 4=gio 5=ven 6=sab"
-          read "DAYS?Giorni separati da virgola (es. 1,2,3,4,5): "
-          if valid_days "$DAYS"; then break; fi
-          warn "Input non valido. Usa solo numeri da 0 a 6 separati da virgola."
-        done
-        break ;;
-      *) warn "Scelta non valida (1-4)." ;;
-    esac
-  done
+  choice=$(node "$DIR/scripts/lib/prompt-cli.js" select \
+    --title "Giorni lavorativi" --default 1 -- \
+    "Lun–Ven  (5 giorni)" \
+    "Lun–Sab  (6 giorni)" \
+    "Tutti i giorni" \
+    "Personalizzati (inserisci i numeri a mano)" 2>/dev/null || echo 1)
+  case "$choice" in
+    1) DAYS="1,2,3,4,5" ;;
+    2) DAYS="1,2,3,4,5,6" ;;
+    3) DAYS="0,1,2,3,4,5,6" ;;
+    4)
+      while true; do
+        echo "Numeri: 0=dom 1=lun 2=mar 3=mer 4=gio 5=ven 6=sab"
+        read "DAYS?Giorni separati da virgola (es. 1,2,3,4,5): "
+        if valid_days "$DAYS"; then break; fi
+        warn "Input non valido. Usa solo numeri da 0 a 6 separati da virgola."
+      done ;;
+    *) DAYS="1,2,3,4,5" ;;   # cancel/EOF → default
+  esac
   DAYS_JSON=$(format_days "$DAYS")
   ok "Giorni: $(days_human "$DAYS_JSON")"
 }
 
-# Configurazione turni: modello di partenza + editor interattivo (aggiungi/rimuovi/svuota)
+# Configurazione turni: modello di partenza (menu a frecce) + editor interattivo
 configure_shifts() {
   echo ""
   echo -e "${BOLD}Turni di lavoro${NC}"
-  echo "Scegli un modello di partenza, poi potrai aggiungere o rimuovere turni a piacere."
-  echo "  1) Classico        — 09:30-13:00 e 16:30-20:00"
-  echo "  2) Continuato      — 09:00-18:00"
-  echo "  3) Solo mattina    — 09:00-13:00"
-  echo "  4) Solo pomeriggio — 14:00-18:00"
-  echo "  5) Parto da zero   — nessun turno, li aggiungo io"
-  echo ""
+  echo "Scegli un modello di partenza (frecce ↑/↓ + Invio), poi potrai aggiungere/rimuovere turni."
   local seed
-  while true; do
-    read "seed?Modello di partenza [1]: "
-    [ -z "$seed" ] && seed=1
-    case "$seed" in
-      1) SHIFT_SPECS=("9,30,13,0" "16,30,20,0"); break ;;
-      2) SHIFT_SPECS=("9,0,18,0"); break ;;
-      3) SHIFT_SPECS=("9,0,13,0"); break ;;
-      4) SHIFT_SPECS=("14,0,18,0"); break ;;
-      5) SHIFT_SPECS=(); break ;;
-      *) warn "Scelta non valida (1-5)." ;;
-    esac
-  done
+  seed=$(node "$DIR/scripts/lib/prompt-cli.js" select \
+    --title "Turni di lavoro — scegli un modello di partenza" --default 1 -- \
+    "Classico — 09:00-13:00 e 16:00-20:00" \
+    "Continuato — 09:00-18:00" \
+    "Solo mattina — 09:00-13:00" \
+    "Solo pomeriggio — 14:00-18:00" \
+    "Parto da zero — nessun turno, li aggiungo io" 2>/dev/null || echo 1)
+  case "$seed" in
+    1) SHIFT_SPECS=("9,0,13,0" "16,0,20,0") ;;   # nuovo default
+    2) SHIFT_SPECS=("9,0,18,0") ;;
+    3) SHIFT_SPECS=("9,0,13,0") ;;
+    4) SHIFT_SPECS=("14,0,18,0") ;;
+    5) SHIFT_SPECS=() ;;
+    *) SHIFT_SPECS=("9,0,13,0" "16,0,20,0") ;;   # cancel/EOF → default
+  esac
 
-  # Editor interattivo dei turni
-  local act ridx le def_start
+  # Editor interattivo dei turni (menu a frecce dinamico sullo stato corrente)
+  local act ridx le def_start pick acts labels rlabels rpick
   while true; do
     sort_shifts
     echo ""
     echo -e "${BOLD}── I tuoi turni ──${NC}"
     render_shifts
     echo ""
-    echo -e "${BOLD}Cosa vuoi fare?${NC}"
-    echo "  [a] aggiungi un turno"
-    [ ${#SHIFT_SPECS} -gt 0 ] && echo "  [r] rimuovi un turno"
-    [ ${#SHIFT_SPECS} -gt 0 ] && echo "  [s] svuota tutti i turni"
-    echo "  [c] conferma e continua"
-    echo ""
-    read "act?Scelta [c]: "
-    [ -z "$act" ] && act="c"
+    # Costruisco le azioni disponibili in base allo stato (turni presenti o no).
+    acts=(); labels=()
+    acts+=("add");    labels+=("Aggiungi un turno")
+    if [ ${#SHIFT_SPECS} -gt 0 ]; then
+      acts+=("rm");   labels+=("Rimuovi un turno")
+      acts+=("clr");  labels+=("Svuota tutti i turni")
+    fi
+    acts+=("conf");   labels+=("Conferma e continua")
+    # Default sull'ultima voce (Conferma): Invio-only = conferma, come il vecchio [c].
+    pick=$(node "$DIR/scripts/lib/prompt-cli.js" select \
+      --title "I tuoi turni — cosa vuoi fare?" --default ${#labels[@]} -- "${labels[@]}" 2>/dev/null || echo ${#labels[@]})
+    act="${acts[$pick]}"
+    [ -z "$act" ] && act="conf"   # cancel/EOF → conferma
     case "$act" in
-      a|A)
+      add)
         if [ ${#SHIFT_SPECS} -ge 4 ]; then
           warn "Hai raggiunto il massimo di 4 turni."
         else
@@ -800,31 +825,27 @@ configure_shifts() {
           fi
         fi
         ;;
-      r|R)
-        if [ ${#SHIFT_SPECS} -eq 0 ]; then
-          warn "Non c'è nessun turno da rimuovere."
-        else
-          read "ridx?Numero del turno da rimuovere: "
-          if [[ "$ridx" =~ ^[0-9]+$ ]] && [ "$ridx" -ge 1 ] && [ "$ridx" -le ${#SHIFT_SPECS} ]; then
-            remove_shift "$ridx"
-            ok "Turno $ridx rimosso."
-          else
-            warn "Numero non valido."
-          fi
+      rm)
+        rlabels=()
+        for spec in "${SHIFT_SPECS[@]}"; do rlabels+=("$(spec_to_label "$spec")"); done
+        rpick=$(node "$DIR/scripts/lib/prompt-cli.js" select \
+          --title "Quale turno rimuovere?" -- "${rlabels[@]}" 2>/dev/null || echo 0)
+        if [[ "$rpick" -ge 1 && "$rpick" -le ${#SHIFT_SPECS} ]]; then
+          remove_shift "$rpick"
+          ok "Turno $rpick rimosso."
         fi
         ;;
-      s|S)
+      clr)
         SHIFT_SPECS=()
         ok "Tutti i turni rimossi."
         ;;
-      c|C)
+      conf)
         if [ ${#SHIFT_SPECS} -eq 0 ]; then
-          warn "Devi avere almeno un turno per continuare. Aggiungine uno con [a]."
+          warn "Devi avere almeno un turno per continuare. Aggiungine uno con 'Aggiungi un turno'."
         else
           break
         fi
         ;;
-      *) warn "Azione non valida. Usa a, r, s oppure c." ;;
     esac
   done
   sort_shifts
@@ -973,14 +994,37 @@ else
   ok "Dipendenze npm già aggiornate. Salto."
 fi
 
-# 4. Playwright browsers / Chrome — solo se necessario
-step "4/7 - Browser per Playwright"
+# 4. Playwright browsers + Google Chrome (channel 'chrome' usato da autoplay.js)
+step "4/7 - Browser per Playwright (Chrome)"
 if [ "$FORCE_UPDATE" = true ] || [ "$NEEDS_NPM" = true ] || [ ! -d "$HOME/Library/Caches/ms-playwright" ]; then
-  info "Installazione/aggiornamento Chromium..."
-  npx playwright install chromium
-  ok "Browser Playwright pronto."
+  info "Installazione/aggiornamento componenti Playwright..."
+  npx playwright install chromium || warn "playwright install chromium non riuscito (non bloccante)."
+  ok "Componenti Playwright pronti."
 else
-  ok "Browser Playwright già presente. Salto."
+  ok "Componenti Playwright già presenti. Salto."
+fi
+
+# Google Chrome: canale 'chrome' in autoplay.js/healthcheck.js/explore.js risolve a
+# Chrome.app. Su un Mac vergine Chrome non c'è → l'autoplay si bloccherebbe a runtime.
+# Lo installiamo via Homebrew cask. Idempotente (salta se Chrome.app presente).
+# NON bloccante: se brew non c'è o l'install fallisce, warn e l'utente può metterlo
+# a mano da google.com/chrome (check-requirements.sh lo segnalerà pre-flight).
+CHROME_APP=""
+[ -d "/Applications/Google Chrome.app" ] && CHROME_APP="/Applications/Google Chrome.app"
+[ -z "$CHROME_APP" ] && [ -d "$HOME/Applications/Google Chrome.app" ] && CHROME_APP="$HOME/Applications/Google Chrome.app"
+if [ -n "$CHROME_APP" ]; then
+  ok "Google Chrome già presente ($CHROME_APP)."
+else
+  if command -v brew &>/dev/null; then
+    info "Installazione Google Chrome via Homebrew cask..."
+    if brew install --cask google-chrome; then
+      ok "Google Chrome installato."
+    else
+      warn "Installazione Google Chrome non riuscita via brew. Installalo manualmente da google.com/chrome, oppure rilancia ./scripts/setup.sh."
+    fi
+  else
+    warn "Homebrew non disponibile: impossibile installare Google Chrome automaticamente. Installalo da google.com/chrome."
+  fi
 fi
 
 # Salva l'hash aggiornato solo se abbiamo toccato le dipendenze o se mancava
@@ -1014,6 +1058,38 @@ install_ollama_official() {
   if [ -d "/Applications/Ollama.app" ]; then
     xattr -dr com.apple.quarantine "/Applications/Ollama.app" 2>/dev/null \
       || sudo xattr -dr com.apple.quarantine "/Applications/Ollama.app" 2>/dev/null || true
+  fi
+  # Consenso Gatekeeper preventivo: `open -a Ollama` subito dopo l'install fallisce
+  # ("application named 'Ollama' not found") perché LaunchServices non ha ancora
+  # registrato il bundle appena spostato. Riprovo con delay. Quando l'utente clicca
+  # "Apri" nel dialogo di consenso, macOS sgombra com.apple.quarantine per i lanci
+  # diretti futuri (altrimenti il daemon's `ollama serve` viene SIGKILLato). Gated
+  # sul flag quarantine: no-op su un Mac dove Ollama è già stato aperto una volta.
+  # Questo triggera preventivamente i permessi che su un Mac nuovo non sono ancora
+  # stati concessi (il terminale "non aveva ancora tutti i permessi").
+  if [ -d "/Applications/Ollama.app" ]; then
+    if xattr -l "/Applications/Ollama.app" 2>/dev/null | grep -q 'com.apple.quarantine'; then
+      info "Primo avvio Ollama: si aprirà il dialogo di consenso Gatekeeper. Clicca 'Apri'."
+      local consented=false
+      for attempt in 1 2 3; do
+        if open -a Ollama 2>/dev/null; then
+          for s in $(seq 1 15); do
+            if pgrep -x Ollama >/dev/null 2>&1; then consented=true; break; fi
+            sleep 1
+          done
+          break
+        fi
+        sleep 3   # delay di registrazione LaunchServices prima di ritentare
+      done
+      if [ "$consented" = true ]; then
+        ok "Consenso Gatekeeper concesso. Chiudo l'app GUI e proseguo headless."
+        osascript -e 'quit app "Ollama"' >/dev/null 2>&1 || true
+        sleep 1
+      else
+        warn "Non sono riuscito ad aprire Ollama in automatico (LaunchServices non registrato o hai annullato)."
+        warn "Se l'avvio headless fallisce, apri Ollama una volta dal Finder, poi rilancia."
+      fi
+    fi
   fi
   # Best-effort: se non riesco a mettere ollama in PATH, non abortire qui;
   # ci pensa il controllo successivo (CLI o app binary mancanti) con un messaggio utile.
@@ -1051,17 +1127,22 @@ else
 fi
 
 # Prima di interrogare i modelli, assicurati che il server Ollama sia attivo.
-ensure_ollama_server
+# Non bloccante: se non parte, OLLAMA_AVAILABLE=false e saltiamo il pull del modello.
+ensure_ollama_server || true
 
 # 6. Modello ${OLLAMA_MODEL} (cloud, richiede login Ollama)
 step "6/7 - Modello Ollama ${OLLAMA_MODEL}"
-if ! ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
+if [ "$OLLAMA_AVAILABLE" = false ]; then
+  warn "Salto il download del modello ${OLLAMA_MODEL}: server Ollama non disponibile."
+  warn "L'AI supervisore (launch-ai-supervisor.sh) riproverà ad avviare Ollama e scaricare il modello."
+elif ! ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
   warn "Il modello ${OLLAMA_MODEL} è un modello CLOUD e richiede il login Ollama."
   echo ""
   echo -e "${BOLD}Tra pochi secondi si aprirà una finestra del browser per il login su ollama.com.${NC}"
   echo -e "${BOLD}Se il browser NON si apre da solo, copia nel browser l'URL che compare qui sotto${NC}"
   echo -e "${BOLD}(la riga con https://ollama.com/...).${NC}"
   echo ""
+  read_with_timer 5 "${BOLD}Leggi con calma: tra 5s parte il login (Invio per saltare).${NC}"
 
   # login + pull in una funzione: sotto `set -e` usiamo `|| return 1` per non abortire,
   # così possiamo fare un secondo tentativo se il popup del browser non si è aperto.
@@ -1083,6 +1164,7 @@ if ! ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
     err "Download del modello ${OLLAMA_MODEL} non riuscito."
     warn "Verifica di aver completato il login su ollama.com nel browser e di avere connessione,"
     warn "poi rilancia con:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
+    warn "Nel frattempo l'autoplay può girare senza AI con:  ./start.sh"
     exit 1
   fi
 else
@@ -1094,7 +1176,9 @@ step "7/7 - Claude Code CLI"
 ensure_local_bin_in_path
 if ! command -v claude &>/dev/null; then
   info "Claude Code CLI non trovato. Installazione in corso..."
-  curl -fsSL https://claude.ai/install.sh | bash
+  # Non bloccante: se l'install fallisce (rete), warn e prosegui — il check finale
+  # sotto rileverà claude mancante e darà un messaggio chiaro invece di abortire opaco.
+  curl -fsSL https://claude.ai/install.sh | bash || warn "Installazione Claude Code non riuscita (rete?). Il check finale segnalerà se manca."
   ensure_local_bin_in_path
 else
   CLAUDE_VER=$(claude --version 2>/dev/null | extract_version)

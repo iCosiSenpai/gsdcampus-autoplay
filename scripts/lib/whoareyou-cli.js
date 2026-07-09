@@ -15,7 +15,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const readline = require('readline');
 
 const ROOT = path.join(__dirname, '..', '..');
 const CONFIG = path.join(ROOT, 'config.json');
@@ -121,234 +120,38 @@ function updateConfigForAccount(result) {
   return writeConfig(cfg);
 }
 
-function clearScreen() {
-  // Usa ANSI clear; se non supportato, stampa solo a capo.
-  process.stdout.write('\x1b[2J\x1b[H');
-}
-
-function printBox(title, lines) {
-  console.log('============================================');
-  console.log(title);
-  console.log('============================================');
-  lines.forEach(l => console.log(l));
-}
-
-// ────────────────────────────────────────────────────────────────
-// Menu interattivo TTY (frecce + invio)
-// ────────────────────────────────────────────────────────────────
-// Menu a frecce basato SOLO su keypress in raw mode (niente readline.Interface:
-// avere insieme un'interfaccia readline e i keypress sullo stesso stdin faceva
-// "consumare" l'Invio di selezione al prompt di testo successivo, che riceveva
-// una riga vuota — di qui il bug "non mi fa scrivere il nome").
-function ttyMenu(items, title, subtitle) {
-  return new Promise((resolve) => {
-    let selected = 0;
-
-    function draw() {
-      clearScreen();
-      printBox(title, []);
-      if (subtitle) console.log(subtitle);
-      console.log('');
-      items.forEach((it, i) => {
-        const cursor = i === selected ? '▶ ' : '  ';
-        const label = typeof it === 'string' ? it : it.label;
-        console.log(`${cursor}${label}`);
-      });
-      console.log('');
-      console.log('↑/↓: muovi  •  Invio: seleziona  •  q: annulla');
-    }
-
-    readline.emitKeypressEvents(process.stdin);
-    if (process.stdin.isTTY) process.stdin.setRawMode(true);
-    process.stdin.resume();
-
-    function cleanup() {
-      process.stdin.removeListener('keypress', onKeypress);
-      if (process.stdin.isTTY) process.stdin.setRawMode(false);
-    }
-
-    function onKeypress(str, key) {
-      if (!key) return;
-      if (key.name === 'q' || (key.ctrl && key.name === 'c')) {
-        cleanup();
-        resolve(null);
-        return;
-      }
-      if (key.name === 'up') {
-        selected = (selected - 1 + items.length) % items.length;
-        draw();
-      } else if (key.name === 'down') {
-        selected = (selected + 1) % items.length;
-        draw();
-      } else if (key.name === 'return' || key.name === 'enter') {
-        cleanup();
-        resolve(items[selected]);
-      }
-    }
-
-    process.stdin.on('keypress', onKeypress);
-    draw();
-  });
-}
-
-// Lettura di una riga su TTY basata su keypress (stessa "modalità" del menu, così
-// non c'è conflitto di consumer su stdin). Gestisce echo, backspace, Ctrl-C e
-// ignora un eventuale Invio "residuo" che arriva subito dopo la selezione del menu.
-function readLineTTY(question) {
-  return new Promise((resolve) => {
-    process.stdout.write(question);
-    let buf = '';
-    const startedAt = Date.now();
-    readline.emitKeypressEvents(process.stdin);
-    if (process.stdin.isTTY) process.stdin.setRawMode(true);
-    process.stdin.resume();
-
-    function done(val) {
-      process.stdin.removeListener('keypress', onKey);
-      if (process.stdin.isTTY) process.stdin.setRawMode(false);
-      process.stdout.write('\n');
-      resolve(val);
-    }
-
-    function onKey(str, key) {
-      if (!key) return;
-      if (key.ctrl && key.name === 'c') {
-        process.stdout.write('\n');
-        process.exit(1);
-      }
-      if (key.name === 'return' || key.name === 'enter') {
-        // Scarta un Invio vuoto immediato (< 120ms): è quasi certamente quello
-        // con cui l'utente ha appena confermato la voce di menu, non una riga vuota.
-        if (buf.length === 0 && Date.now() - startedAt < 120) return;
-        done(buf.trim());
-        return;
-      }
-      if (key.name === 'backspace') {
-        if (buf.length > 0) {
-          buf = buf.slice(0, -1);
-          process.stdout.write('\b \b');
-        }
-        return;
-      }
-      // Carattere stampabile (ignora tasti di controllo come frecce, tab, ecc.)
-      if (str && !key.ctrl && !key.meta && str.length === 1 && str >= ' ') {
-        buf += str;
-        process.stdout.write(str);
-      }
-    }
-
-    process.stdin.on('keypress', onKey);
-  });
-}
-
-// Reader di linee robusto per stdin pipe/TTY. Legge linee complete, bufferizza
-// l'input residuo e risolve ogni Promise in ordine.
-let inputBuffer = '';
-let lineQueue = [];
-let lineResolvers = [];
-let lineReaderInitialized = false;
-
-function initLineReader() {
-  if (lineReaderInitialized) return;
-  lineReaderInitialized = true;
-  process.stdin.setEncoding('utf8');
-  process.stdin.on('data', (chunk) => {
-    inputBuffer += chunk;
-    let idx;
-    while ((idx = inputBuffer.indexOf('\n')) !== -1) {
-      const line = inputBuffer.slice(0, idx).trim();
-      inputBuffer = inputBuffer.slice(idx + 1);
-      if (lineResolvers.length > 0) {
-        lineResolvers.shift()(line);
-      } else {
-        lineQueue.push(line);
-      }
-    }
-  });
-  process.stdin.on('end', () => {
-    if (inputBuffer.length > 0) {
-      const line = inputBuffer.trim();
-      inputBuffer = '';
-      if (lineResolvers.length > 0) {
-        lineResolvers.shift()(line);
-      } else {
-        lineQueue.push(line);
-      }
-    }
-    while (lineResolvers.length > 0) {
-      lineResolvers.shift()('');
-    }
-  });
-}
-
-async function readLine(question) {
-  // Su TTY usiamo il lettore basato su keypress (coerente con il menu a frecce);
-  // su input reindirizzato (pipe) usiamo il lettore a buffer di righe, che gestisce
-  // correttamente più righe arrivate in un unico chunk.
-  if (process.stdin.isTTY) {
-    return readLineTTY(question);
-  }
-  initLineReader();
-  process.stdout.write(question);
-  if (lineQueue.length > 0) {
-    return Promise.resolve(lineQueue.shift());
-  }
-  return new Promise((resolve) => {
-    lineResolvers.push(resolve);
-  });
-}
-
-function closeLineReader() {
-  // non chiude stdin per non interferire con altri processi in pipe
-  lineResolvers = [];
-  lineQueue = [];
-}
-
-// ────────────────────────────────────────────────────────────────
-// Menu numerico fallback per non-TTY
-// ────────────────────────────────────────────────────────────────
-function numericMenu(items, title, subtitle) {
-  return new Promise((resolve) => {
-    function draw() {
-      console.log('');
-      printBox(title, []);
-      if (subtitle) console.log(subtitle);
-      console.log('');
-      items.forEach((it, i) => {
-        const label = typeof it === 'string' ? it : it.label;
-        console.log(`  [${i + 1}] ${label}`);
-      });
-      console.log('  [0] Annulla');
-    }
-
-    draw();
-    readLine('\nScelta: ').then((answer) => {
-      const n = parseInt(answer, 10);
-      if (answer === '0' || Number.isNaN(n)) {
-        resolve(null);
-        return;
-      }
-      if (n >= 1 && n <= items.length) {
-        resolve(items[n - 1]);
-      } else {
-        resolve(null);
-      }
-    });
-  });
-}
-
-async function menu(items, title, subtitle) {
-  if (process.stdin.isTTY) {
-    return ttyMenu(items, title, subtitle);
-  }
-  return numericMenu(items, title, subtitle);
-}
+// TUI helpers (menu a frecce, lettura riga) condivisi con gli script shell via
+// wrapper CLI. Estratti in scripts/lib/prompt-cli.js.
+const {
+  ttyMenu, numericMenu, menu,
+  readLine, readLineTTY, closeLineReader,
+  clearScreen, printBox,
+} = require(path.join(__dirname, 'prompt-cli'));
 
 // ────────────────────────────────────────────────────────────────
 // Flussi di ricerca e selezione membri
 // ────────────────────────────────────────────────────────────────
 async function promptText(question) {
   return readLine(question);
+}
+
+// Mostra la lista numerata dei membri (output di `members-cli search/list`) e ne
+// permette la selezione con un menu a frecce (su TTY) o numerico (non-TTY).
+// Ritorna il numero 1-based scelto, oppure null se annullato o lista vuota.
+// Il contratto `members-cli select <n>` resta invariato: qui scegliamo solo il n.
+async function pickMemberFromList(listOut, title) {
+  if (!listOut) return null;
+  const items = listOut
+    .split('\n')
+    .map(l => {
+      const m = l.match(/^\s*(\d+)\)\s*(.+)$/);
+      return m ? { label: m[2].trim(), value: parseInt(m[1], 10) } : null;
+    })
+    .filter(Boolean);
+  if (items.length === 0) return null;
+  const pick = await menu(items, title, '↑/↓ muovi · Invio seleziona · q annulla');
+  if (!pick || pick.value == null) return null;
+  return pick.value;
 }
 
 async function searchAndSelectMember(mode) {
@@ -377,9 +180,8 @@ async function searchAndSelectMember(mode) {
 
     console.log('');
     console.log(listOut);
-    const num = await promptText('Numero del membro (0 per annullare): ');
-    const n = parseInt(num, 10);
-    if (num === '0' || Number.isNaN(n)) return null;
+    const n = await pickMemberFromList(listOut, 'Seleziona il membro');
+    if (n == null) return null;
 
     const json = execMembersCliJson(['select', String(n)]);
     if (!json) {
@@ -409,9 +211,8 @@ async function listAndSelectMember() {
 
     console.log('');
     console.log(listOut);
-    const num = await promptText('Numero del membro (0 per annullare): ');
-    const n = parseInt(num, 10);
-    if (num === '0' || Number.isNaN(n)) return null;
+    const n = await pickMemberFromList(listOut, 'Seleziona il membro');
+    if (n == null) return null;
 
     const json = execMembersCliJson(['select', String(n)]);
     if (!json) {

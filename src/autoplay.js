@@ -707,6 +707,7 @@ async function runAutoplay() {
   // Senza questi handler, uno SIGTERM (es. da ./stop.sh) o un crash uccide il
   // processo saltando il finally -> il chromium resta orfano (leak a ogni stop).
   let shuttingDown = false;
+  let fatalShuttingDown = false;
   async function gracefulShutdown(signal) {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -717,6 +718,14 @@ async function runAutoplay() {
     process.exit(0);
   }
   async function fatalShutdown(reason, err) {
+    // Re-entrancy guard: uncaughtException e unhandledRejection possono scatenarsi
+    // a raffica (es. un errore in cleanup genera un'altra eccezione). Senza guard,
+    // fatalShutdown si re-invocherebbe più volte lanciando browser.close() su
+    // browser già chiuso e process.exit() più volte. shuttingDown copre solo il
+    // path graceful; qui serve un flag separato perché fatal deve comunque
+    // eseguire anche se graceful era partito.
+    if (fatalShuttingDown) return;
+    fatalShuttingDown = true;
     try { log(`FATAL (${reason}):`, err?.message || err); } catch (_) {}
     try { monitor.update({ running: false, phase: 'fatal', lastError: String(err?.message || err) }); } catch (_) {}
     if (browser) { try { await browser.close(); } catch (_) {} browser = null; }

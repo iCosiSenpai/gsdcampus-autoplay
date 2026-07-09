@@ -5,8 +5,13 @@ DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 PID_FILE=".ollama_pid"
 
-# Usa il binario interno dell'app per evitare l'apertura della GUI nella barra di stato
-if [ -x "/Applications/Ollama.app/Contents/MacOS/Ollama" ]; then
+# Preferisci il CLI headless `ollama` (entrypoint documentato per `serve`, non
+# instanzia l'icona nella barra di stato). Fall back al binario GUI dell'app solo
+# se il CLI non è in PATH. Il binario Contents/MacOS/Ollama è il launcher GUI:
+# lanciarlo direttamente è proprio il path che Gatekeeper SIGKilla in quarantina.
+if command -v ollama >/dev/null 2>&1; then
+  OLLAMA_BIN="$(command -v ollama)"
+elif [ -x "/Applications/Ollama.app/Contents/MacOS/Ollama" ]; then
   OLLAMA_BIN="/Applications/Ollama.app/Contents/MacOS/Ollama"
 else
   OLLAMA_BIN="ollama"
@@ -73,18 +78,24 @@ start() {
   mkdir -p logs
   # Safety net anti-quarantine: se l'app è stata (re)installata e mai `open`-ata,
   # il com.apple.quarantine fa SIGKILL del binario lanciato direttamente (vedi
-  # setup.sh install_ollama_official). Lo strip anche qui copre il caso di
-  # reinstall manuale di Ollama senza ripassare da setup.sh.
+  # setup.sh install_ollama_official). Strip + VERIFY: se il flag persiste riprovo
+  # con sudo; se resta ancora, avviso (il binario potrebbe essere SIGKILLato).
   if [ -d "/Applications/Ollama.app" ]; then
     xattr -dr com.apple.quarantine "/Applications/Ollama.app" 2>/dev/null || true
+    if xattr -l "/Applications/Ollama.app" 2>/dev/null | grep -q 'com.apple.quarantine'; then
+      sudo xattr -dr com.apple.quarantine "/Applications/Ollama.app" 2>/dev/null || true
+      if xattr -l "/Applications/Ollama.app" 2>/dev/null | grep -q 'com.apple.quarantine'; then
+        log "Attenzione: com.apple.quarantine ancora presente su Ollama.app; il binario potrebbe essere SIGKILLato."
+      fi
+    fi
   fi
-  log "Avvio Ollama in background (headless)..."
+  log "Avvio Ollama in background (headless: $OLLAMA_BIN serve)..."
   nohup "$OLLAMA_BIN" serve >> "$DIR/logs/ollama.log" 2>&1 &
   local pid=$!
   echo "$pid" > "$PID_FILE"
-  echo "Ollama avviato (PID $pid), attendo prontezza..."
+  echo "Ollama avviato (PID $pid), attendo prontezza su 11434..."
 
-  for i in $(seq 1 30); do
+  for i in $(seq 1 60); do            # 30s @ 0.5s
     if curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
       echo "Ollama pronto"
       return 0
@@ -92,8 +103,23 @@ start() {
     sleep 0.5
   done
 
-  echo "Attenzione: Ollama non ha risposto entro 15s, ma il processo è attivo"
-  return 0
+  # Fallback: bind diretto non riuscito (quarantine SIGKILL, entitlements mancanti,
+  # ...). open -a Ollama avvia l'app GUI che a sua volta fa partire il server su 11434.
+  log "Bind diretto non riuscito entro 30s. Fallback: open -a Ollama (GUI)..."
+  open -a Ollama 2>/dev/null || true
+  for i in $(seq 1 40); do            # 20s
+    if curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
+      local gui_pid=$(pgrep -x Ollama 2>/dev/null | head -1)
+      [ -n "$gui_pid" ] && echo "$gui_pid" > "$PID_FILE"
+      echo "Ollama pronto (via GUI)"
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  log "Ollama non ha bindato 11434 entro ~50s."
+  echo "Attenzione: Ollama non ha risposto su 11434." >&2
+  return 1
 }
 
 stop() {

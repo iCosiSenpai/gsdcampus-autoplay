@@ -21,6 +21,9 @@ warn() { echo -e "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
 err() { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
 step() { echo -e "${BOLD}[PASSO $1]${NC} $2"; }
 
+# Helper countdown "Timer + Invio per saltare" per i messaggi che l'utente deve leggere.
+source "$DIR/scripts/lib/read-timer.sh"
+
 # Assicurati che ~/.local/bin sia nel PATH, anche se .zshrc non è ancora stato sourceato
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
@@ -133,12 +136,23 @@ else
   fi
 fi
 
-# 4. Avvia Ollama se necessario
+# 4. Avvia Ollama se necessario (report onesto: verifichiamo 11434 davvero, non
+# ci fidiamo del solo ritorno del daemon).
 step "4/5" "Avvio/controllo Ollama"
+OLLAMA_UP=false
 if [ -f "$DIR/scripts/ollama-daemon.sh" ]; then
-  "$DIR/scripts/ollama-daemon.sh" start
+  # `|| true`: il daemon ora retorna 1 se non binda 11434; sotto set -e non deve
+  # abortire il launcher. La verifica indipendente sotto decide lo stato reale.
+  "$DIR/scripts/ollama-daemon.sh" start || true
 fi
-ok "Ollama pronto."
+if curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
+  OLLAMA_UP=true
+  ok "Server Ollama attivo su 11434."
+else
+  OLLAMA_UP=false
+  warn "Server Ollama NON raggiungibile su 11434."
+  warn "L'autoplay può girare comunque senza AI con:  ./start.sh"
+fi
 
 # 5. Verifica che Claude Code CLI sia accessibile
 step "5/5" "Claude Code CLI"
@@ -164,6 +178,7 @@ if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
   echo -e "${BOLD}Se il browser NON si apre da solo, copia nel browser l'URL che compare qui sotto${NC}"
   echo -e "${BOLD}(la riga con https://ollama.com/...).${NC}"
   echo ""
+  read_with_timer 5 "${BOLD}Leggi con calma: tra 5s parte il login (Invio per saltare).${NC}"
 
   # login + pull in una funzione: sotto `set -e` usiamo `|| return 1` per non abortire,
   # così possiamo fare un secondo tentativo se il popup del browser non si è aperto.
@@ -187,6 +202,7 @@ if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
     err "Modello $MODEL non disponibile."
     warn "Verifica di aver completato il login su ollama.com nel browser e di avere connessione,"
     warn "poi rilancia con:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
+    warn "Nel frattempo l'autoplay può girare senza AI con:  ./start.sh"
     exit 1
   fi
 fi

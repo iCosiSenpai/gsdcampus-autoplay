@@ -95,7 +95,12 @@ rm -f "$OUTPUT_DIR/data/pending_quiz_answers.json"
 rm -f "$OUTPUT_DIR/data/summary_dump.json" 2>/dev/null || true
 rm -f "$OUTPUT_DIR/data/extracted_full.json" 2>/dev/null || true
 rm -f "$OUTPUT_DIR/data/quiz-domande.txt" 2>/dev/null || true
-ok "Dati personali rimossi."
+# data/accounts/<CF>/ contiene storage_state.json (cookie/sessione) di ogni
+# collega: NON devono finire nel pacchetto per un nuovo utente (leak di identità).
+# Rimuoviamo l'intera cartella per-account. Conserviamo known_answers_public.json
+# (banca condivisa), members.db e le mappe corsi.
+rm -rf "$OUTPUT_DIR/data/accounts" 2>/dev/null || true
+ok "Dati personali rimossi (inclusi data/accounts/ per-account)."
 
 step "4/6" "Pulizia log, debug e temporanei"
 find "$OUTPUT_DIR/logs" -type f -delete 2>/dev/null || true

@@ -140,27 +140,25 @@ if [ -d "$TARGET/.git" ]; then
     fi
     echo ""
     printf "${BOLD}Perché stai rilanciando l'installer?${NC}\n"
-    echo "  1) Aggiorna e avvia          — scarica fix e risposte quiz aggiornate, poi apre l'AI (consigliato)"
-    echo "  2) Cambia account/orari        — riconfigura account (elenco membri) e orari, poi avvia"
-    echo "  3) Reinstallazione pulita     — riallinea il codice e reinstalla tutte le dipendenze"
-    echo "  4) Solo avvia                 — apre l'AI senza modificare nulla"
-    echo "  5) Disinstalla                — rimuove dipendenze, modello, CLI (con conferma)"
-    echo "  6) Annulla"
+    echo "  Usa le frecce ↑/↓ e Invio per scegliere."
     echo ""
-    while true; do
-      printf "Scelta [1]: "
-      IFS= read -r CHOICE < "$TTY_REDIR" || CHOICE=""
-      [ -z "$CHOICE" ] && CHOICE=1
-      case "$CHOICE" in
-        1) MODE="update";    break ;;
-        2) MODE="reconfig";  break ;;
-        3) MODE="clean";     break ;;
-        4) MODE="launch";    break ;;
-        5) MODE="uninstall"; break ;;
-        6) MODE="cancel";    break ;;
-        *) warn "Scelta non valida (1-6)." ;;
-      esac
-    done
+    CHOICE=$(node "$TARGET/scripts/lib/prompt-cli.js" select \
+      --title "Perché stai rilanciando l'installer?" --default 1 -- \
+      "Aggiorna e avvia — scarica fix e risposte quiz, poi apre l'AI (consigliato)" \
+      "Cambia account/orari — riconfigura account e orari, poi avvia" \
+      "Reinstallazione pulita — riallinea il codice e reinstalla le dipendenze" \
+      "Solo avvia — apre l'AI senza modificare nulla" \
+      "Disinstalla — rimuove dipendenze, modello, CLI (con conferma)" \
+      "Annulla" < "$TTY_REDIR" 2>/dev/null || echo 1)
+    case "$CHOICE" in
+      1) MODE="update" ;;
+      2) MODE="reconfig" ;;
+      3) MODE="clean" ;;
+      4) MODE="launch" ;;
+      5) MODE="uninstall" ;;
+      0|6) MODE="cancel" ;;
+      *) MODE="update" ;;   # node failure / EOF → safest default
+    esac
   else
     # Nessun terminale interattivo: posso solo aggiornare il codice.
     MODE="update"

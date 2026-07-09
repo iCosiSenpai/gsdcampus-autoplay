@@ -29,6 +29,17 @@ warn() { echo -e "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
 err() { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
 info() { echo -e "${BLUE}${BOLD}[INFO]${NC} $1"; }
 
+# pid_matches <PID> <pattern>: il PID esiste E la sua command line contiene il
+# pattern. Protegge dal PID recycling: un PID recyclato a un processo non nostro
+# non verrebbe scambiato per scheduler attivo (kill -0 puro direbbe solo "esiste").
+pid_matches() {
+  local p="$1"; local pat="$2"
+  [ -n "$p" ] || return 1
+  kill -0 "$p" 2>/dev/null || return 1
+  ps -o command= -p "$p" 2>/dev/null | grep -qE "$pat" || return 1
+  return 0
+}
+
 echo ""
 echo "============================================"
 echo -e "${BOLD}  Stato GSD Campus Autoplay${NC}"
@@ -42,7 +53,7 @@ info "Processo scheduler"
 SCHED_ACTIVE=false
 if [ -f "$PID_FILE" ]; then
   PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+  if [ -n "$PID" ] && pid_matches "$PID" "scheduler|autoplay"; then
     SCHED_ACTIVE=true
     # Calcola durata attività dal tempo trascorso (etime), più robusto di lstart.
     # Niente `local` (siamo a top-level, non in una funzione: anti-pattern che in
@@ -158,13 +169,14 @@ if [ "$RUN_LIVE" = true ] && [ -f "$HEALTHCHECK_CLI" ]; then
       # falso da status.json, così chi lo legge (anche l'AI) non viene più ingannato.
       if [ "$SCHED_ACTIVE" = false ]; then
         node -e "
+          const { writeJsonAtomic } = require('./src/lib/io');
           const fs=require('fs');const p='logs/status.json';
           let s={};try{s=JSON.parse(fs.readFileSync(p,'utf8'))}catch(e){}
           s.phase='idle';s.running=false;s.lastError=null;
           s.lastUpdate=new Date().toISOString();
           s.note='Autologin verificato VALIDO con healthcheck (stato precedente obsoleto).';
           s.autologinHealth={ok:true,checkedAt:s.lastUpdate};
-          fs.writeFileSync(p,JSON.stringify(s,null,2));
+          writeJsonAtomic(p, s);
         " 2>/dev/null && info "Stato salvato corretto (autologin risulta valido)."
       fi
     fi

@@ -113,7 +113,46 @@ mark_crash_loop() {
   ' "$phase" 2>/dev/null || true
 }
 
+# Backoff per crash consecutivi (exit code diverso da 0 e 4). Ladder 60 -> 120 ->
+# 300 -> 1800s. A MAX_CRASHES consecutivi scrive crash_loop in status.json e
+# retorna 1 (il caller esce, così l'AI supervisore interviene invece di restare in
+# retry invisibile). Resetta CRASH_COUNT a 0 per exit 0/4. Va chiamato per OGNI
+# run di autoplay (entrambi i branch). Ritorna 1 se crash_loop, 0 dopo aver dormito.
+apply_crash_backoff() {
+  local code="$1"
+  if [[ "$code" -eq 0 || "$code" -eq 4 ]]; then
+    CRASH_COUNT=0
+    return 0
+  fi
+  CRASH_COUNT=$((CRASH_COUNT + 1))
+  local BACKOFF
+  case "$CRASH_COUNT" in
+    1) BACKOFF=60 ;;
+    2) BACKOFF=120 ;;
+    3) BACKOFF=300 ;;
+    *) BACKOFF=1800 ;;
+  esac
+  log "Autoplay terminato con codice $code. Crash consecutivi: $CRASH_COUNT. Attesa ${BACKOFF}s..."
+  if [[ "$CRASH_COUNT" -ge "$MAX_CRASHES" ]]; then
+    log "Raggiunti $MAX_CRASHES crash consecutivi: crash_loop. Scrivo status.json ed esco (l'AI supervisore deve intervenire)."
+    mark_crash_loop "crash_loop"
+    return 1
+  fi
+  sleep "$BACKOFF"
+  return 0
+}
+
 while true; do
+  # STOP_FILE check in cima al loop: copre entrambi i branch mid-run. Oggi solo
+  # wait_ms lo controlla, e il branch ignore-hours fa `continue` bypassandolo —
+  # così ./stop.sh veniva onorato solo tra un run e l'altro. Ora il segnale di stop
+  # viene visto subito dopo il run corrente in entrambi i rami.
+  if [[ -f "$STOP_FILE" ]]; then
+    log "Ricevuto segnale di stop. Fermo lo scheduler."
+    rm -f "$STOP_FILE"
+    exit 0
+  fi
+
   if [[ "$IGNORE_HOURS" = true ]]; then
     log "Avvio autoplay (modalità ignore-hours)..."
     node "$DIR/src/autoplay.js" --ignore-hours 2>&1 | tee -a "$LOG_FILE"
@@ -137,21 +176,7 @@ while true; do
       log "Autoplay terminato con codice 4 (session_unstable): token valido ma sessione instabile. Cooldown 30 minuti per far recuperare il token..."
       wait_ms 1800000
     else
-      CRASH_COUNT=$((CRASH_COUNT + 1))
-      # Backoff esponenziale a gradini: 60s, 120s, 300s, poi 1800s (mezz'ora).
-      case "$CRASH_COUNT" in
-        1) BACKOFF=60 ;;
-        2) BACKOFF=120 ;;
-        3) BACKOFF=300 ;;
-        *) BACKOFF=1800 ;;
-      esac
-      log "Autoplay terminato con codice $EXIT_CODE. Crash consecutivi: $CRASH_COUNT. Riavvio tra ${BACKOFF}s..."
-      if [[ "$CRASH_COUNT" -ge "$MAX_CRASHES" ]]; then
-        log "Raggiunti $MAX_CRASHES crash consecutivi: crash_loop. Scrivo status.json ed esco (l'AI supervisore deve intervenire)."
-        mark_crash_loop "crash_loop"
-        exit 1
-      fi
-      sleep "$BACKOFF"
+      apply_crash_backoff "$EXIT_CODE" || exit 1
     fi
     continue
   fi
@@ -159,7 +184,22 @@ while true; do
   if is_in_hours; then
     log "In orario lavorativo. Avvio autoplay..."
     node "$DIR/src/autoplay.js" 2>&1 | tee -a "$LOG_FILE"
-    log "Autoplay terminato (fine turno o errore). Calcolo prossimo turno..."
+    # zsh pipestatus (1-indexed): va letto SUBITO dopo la pipe.
+    EXIT_CODE=${pipestatus[1]}
+    if [[ "$EXIT_CODE" -eq 0 ]]; then
+      CRASH_COUNT=0
+      log "Autoplay terminato con codice 0 (fine turno). Calcolo prossimo turno..."
+    elif [[ "$EXIT_CODE" -eq 4 ]]; then
+      CRASH_COUNT=0
+      log "Autoplay terminato con codice 4 (session_unstable). Cooldown 30 minuti..."
+      wait_ms 1800000
+      continue
+    else
+      # Backoff; poi `continue` ri-valuta is_in_hours (il backoff può averci
+      # spostato fuori turno → cadiamo nel branch off-hours e aspettiamo il prossimo).
+      apply_crash_backoff "$EXIT_CODE" || exit 1
+      continue
+    fi
   else
     log "Fuori orario lavorativo. Attendo prossimo turno..."
   fi

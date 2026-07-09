@@ -1,9 +1,9 @@
 /**
  * Gestione orari lavorativi per l'automazione.
  * Legge la configurazione da config.json se disponibile, altrimenti usa default:
- * lunedì-venerdì, turni 09:30-13:00 e 16:30-20:00.
+ * lunedì-venerdì, turni 09:00-13:00 e 16:00-20:00.
  *
- * Formato flessibile per gli orari: H:MM, HH:MM, H.MM, HH.MM, HHMM (es. 9:30).
+ * Formato flessibile per gli orari: H, HH, H:MM, HH:MM, H.MM, HH.MM, HHMM (es. 9, 16, 9:30, 1630).
  * I turni vengono normalizzati, ordinati e verificati per sovrapposizioni.
  */
 
@@ -12,16 +12,16 @@ const path = require('path');
 
 const DEFAULT_DAYS = [1, 2, 3, 4, 5];
 const DEFAULT_SHIFTS = [
-  { startHour: 9, startMin: 30, endHour: 13, endMin: 0 },
-  { startHour: 16, startMin: 30, endHour: 20, endMin: 0 },
+  { startHour: 9, startMin: 0, endHour: 13, endMin: 0 },
+  { startHour: 16, startMin: 0, endHour: 20, endMin: 0 },
 ];
 
 const WEEKDAY_NAMES = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
 
 /**
  * Converte una stringa orario in {hour, min}.
- * Accetta "09:30", "9:30", "09.30", "9.30", "0930", "930".
- * Ritorna null se l'input non è valido.
+ * Accetta "9", "16" (ora piena, minuti 0), "09:30", "9:30", "09.30", "9.30",
+ * "0930", "930". Ritorna null se l'input non è valido.
  */
 function parseTime(str) {
   if (typeof str !== 'string' || str.trim() === '') return null;
@@ -35,6 +35,14 @@ function parseTime(str) {
     if (h >= 0 && h <= 23 && min >= 0 && min <= 59) {
       return { hour: h, min };
     }
+  }
+
+  // Formato H o HH (es. "9" -> 09:00, "16" -> 16:00): minuti default 0.
+  const h1 = cleaned.match(/^(\d{1,2})$/);
+  if (h1) {
+    const h = parseInt(h1[1], 10);
+    if (h >= 0 && h <= 23) return { hour: h, min: 0 };
+    return null;
   }
 
   // Formato HHMM o HMM (es. "930" oppure "0930")

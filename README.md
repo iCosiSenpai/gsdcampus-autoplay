@@ -52,10 +52,10 @@ La prima volta il Terminale ti chiede alcune cose: rispondi con calma.
   1. **Continuato** — un solo turno (es. 09:00–18:00).
   2. **Solo mattina** — es. 09:00–13:00.
   3. **Solo pomeriggio** — es. 14:00–18:00.
-  4. **Classico** — due turni (default 09:30–13:00 e 16:30–20:00).
+  4. **Classico** — due turni (default 09:00–13:00 e 16:00–20:00).
   5. **Personalizzato** — fino a 3 turni a scelta.
 
-Gli orari si possono scrivere come vuoi: `9:30`, `09:30`, `9.30`, `0930`, `930`.
+Gli orari si possono scrivere come vuoi: `9`, `16`, `9:30`, `09:30`, `9.30`, `0930`, `1630`.
 
 Non avere paura di confermare: serve tutto per automatizzare il corso.
 
@@ -174,8 +174,8 @@ Gli orari di lavoro sono salvati in `config.json` nella chiave `workSchedule` (`
 I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i turni configurati in `config.json`:
 
 - Modalità rapide disponibili in `setup.sh`: continuato, solo mattina, solo pomeriggio, classico, personalizzato.
-- I formati orari accettati sono flessibili: `9:30`, `09:30`, `9.30`, `0930`, `930`.
-- Default: lunedì–venerdì, 09:30–13:00 e 16:30–20:00.
+- I formati orari accettati sono flessibili: `9`, `16`, `9:30`, `09:30`, `9.30`, `0930`, `1630`.
+- Default: lunedì–venerdì, 09:00–13:00 e 16:00–20:00.
 - Se avvii `start.sh` fuori orario, lo scheduler aspetta l'inizio del prossimo turno e poi avvia l'autoplay.
 - A fine turno, `src/autoplay.js` esce gracefulmente; lo scheduler aspetta il turno successivo e lo riavvia.
 - Nessun cron richiesto.
