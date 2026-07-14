@@ -66,13 +66,15 @@ fi
 
 echo ""
 echo "============================================"
-printf "${BOLD}  GSD Campus Autopilot — Installer${NC}\n"
+printf '%b  GSD Campus Autopilot — Installer%b\n' "$BOLD" "$NC"
+# Versione dell'installazione locale (se esiste già): aiuta a capire da quale
+# versione si sta aggiornando. Alla prima installazione non c'è ancora nulla.
+if [ -d "$HOME/gsdcampus-autoplay/.git" ]; then
+  INST_VER=$(git -C "$HOME/gsdcampus-autoplay" describe --tags --always 2>/dev/null || echo "")
+  INST_DATE=$(git -C "$HOME/gsdcampus-autoplay" log -1 --format=%cd --date=format:'%d/%m/%Y' 2>/dev/null || echo "")
+  [ -n "$INST_VER" ] && printf "  versione installata: %s%s\n" "$INST_VER" "${INST_DATE:+ del $INST_DATE}" || true
+fi
 echo "============================================"
-echo ""
-echo -e "${BOLD}Comando principale:${NC}"
-echo "  curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash"
-echo ""
-echo "Questo comando vale sempre: installa, aggiorna il codice e, solo se necessario, le dipendenze."
 echo ""
 
 # 1. git
@@ -139,7 +141,7 @@ if [ -d "$TARGET/.git" ]; then
       [ -n "$ACCT_DESC" ] && info "Account attuale: $ACCT_DESC"
     fi
     echo ""
-    printf "${BOLD}Perché stai rilanciando l'installer?${NC}\n"
+    printf '%bPerché stai rilanciando l'"'"'installer?%b\n' "$BOLD" "$NC"
     echo "  Usa le frecce ↑/↓ e Invio per scegliere."
     echo ""
     CHOICE=$(node "$TARGET/scripts/lib/prompt-cli.js" select \

@@ -23,7 +23,7 @@ Tutto il resto (requisiti, orari, manutenzione) è più in basso e di solito non
 curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash
 ```
 
-> Se incolli e l'ultima riga non parte, premi `Invio` una seconda volta.
+> Se dopo l'incolla non succede nulla, premi `Invio`: alcuni copia-incolla non includono l'"a capo" finale che avvia il comando.
 
 È l'unico comando che ti serve e vale per **tutte** le occasioni: prima installazione,
 aggiornamenti successivi e avvio quotidiano dell'AI. La prima volta scarica il progetto in
@@ -65,7 +65,7 @@ Non avere paura di confermare: serve tutto per far funzionare l'automazione.
 ## ⭐ 2. Usare l'automazione con l'AI
 
 **Cosa succede appena finita l'installazione:** parte da sola una sessione dell'**AI** — è
-**Claude che gira in locale tramite Ollama** con il modello cloud `gemma4:31b-cloud`. Non devi
+**Claude che gira in locale tramite Ollama** con il modello cloud `gemma4:cloud`. Non devi
 lanciare nessun altro comando: la finestra dell'AI si apre da sé, con le istruzioni già caricate.
 
 Da lì in poi **non devi ricordare comandi tecnici: parli con l'AI in italiano.** È l'AI che avvia,

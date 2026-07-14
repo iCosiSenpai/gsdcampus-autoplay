@@ -12,7 +12,7 @@ Apri il Terminale, incolla questo comando su **una sola riga** e premi Invio:
 curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash
 ```
 
-> Se incolli e l'ultima riga non parte, premi Invio una seconda volta.
+> Se dopo l'incolla non succede nulla, premi Invio: alcuni copia-incolla non includono l'"a capo" finale che avvia il comando.
 
 È l'unico comando che ti serve e vale per **tutte** le occasioni:
 - **prima installazione** su un Mac nuovo: scarica il progetto in `~/gsdcampus-autoplay`, installa tutti i requisiti e apre l'AI;
@@ -43,9 +43,9 @@ In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e ora
 ## Prima installazione
 
 La prima volta il Terminale ti chiede alcune cose: rispondi con calma.
-- la **password del Mac (sudo)** — una sola volta, all'inizio; lo script la mantiene valida per tutta la sessione con un keepalive in background;
+- la **password del Mac (sudo)** — una sola volta, all'inizio; se il setup dura a lungo può richiederla di nuovo (niente keepalive in background: ruberebbe i tasti al menu "Chi sei?");
 - conferme di **installazione/aggiornamento/verifica dipendenze** (anche `y/n`) → rispondi **sempre sì**;
-- il **login Ollama** (modello AI configurabile, default `gemma4:31b-cloud`; consigliato per monitor/autoplay il modello cloud economico `gemma4:cloud`) → inserisci le credenziali;
+- il **login Ollama** (modello AI configurabile in `config.json`, default `gemma4:cloud`) → inserisci le credenziali;
 - la **selezione del tuo account** con la schermata interattiva **"Chi sei?"**: nel terminale appare un menu navigabile con le frecce ↑/↓ e Invio; puoi cercare per nome, cognome o codice fiscale, vedere la lista completa, importare il CSV dei membri, incollare manualmente l'autologin o mantenere l'account attuale;
 - i **giorni lavorativi** (default lun–ven);
 - la **modalità oraria** preferita:

@@ -30,11 +30,27 @@ function printBox(title, lines) {
 // ────────────────────────────────────────────────────────────────
 // Menu interattivo TTY (frecce + invio)
 // ────────────────────────────────────────────────────────────────
+// Drena l'input già bufferizzato su stdin. I tasti premuti "al buio" durante i
+// passi lunghi (brew, ollama pull, git clone) restano in coda e finivano dritti
+// nel primo menu/prompt: Invii fantasma che selezionavano voci mai scelte (il
+// famigerato "premi Invio una seconda volta" al contrario). Va chiamato UNA
+// volta, all'apertura di menu/prompt, prima di registrare il listener keypress.
+function drainPendingStdin() {
+  try { while (process.stdin.read() !== null) { /* scarta */ } } catch (_) { /* ignora */ }
+}
+
 // Menu a frecce basato SOLO su keypress in raw mode (niente readline.Interface).
 // startIdx (0-based) posiziona il cursore iniziale (es. per --default N).
 function ttyMenu(items, title, subtitle, startIdx = 0) {
   return new Promise((resolve) => {
     let selected = (Number.isInteger(startIdx) && startIdx >= 0 && startIdx < items.length) ? startIdx : 0;
+    // Doppia protezione contro l'input fantasma: drain del buffer node +
+    // finestra di grazia sui primi ms (i tasti pendenti nel buffer del kernel
+    // vengono consegnati subito dopo resume(), prima che un umano possa
+    // reagire al menu appena disegnato).
+    const openedAt = Date.now();
+    const GRACE_MS = 150;
+    drainPendingStdin();
 
     function draw() {
       clearScreen();
@@ -61,6 +77,10 @@ function ttyMenu(items, title, subtitle, startIdx = 0) {
 
     function onKeypress(str, key) {
       if (!key) return;
+      // Finestra di grazia: ignora i tasti consegnati nei primissimi ms (input
+      // residuo dei passi precedenti, non una scelta dell'utente). Eccezione:
+      // Ctrl-C passa sempre.
+      if (Date.now() - openedAt < GRACE_MS && !(key.ctrl && key.name === 'c')) return;
       if (key.name === 'q' || (key.ctrl && key.name === 'c')) {
         cleanup();
         resolve(null);
@@ -91,6 +111,8 @@ function readLineTTY(question) {
     process.stdout.write(question);
     let buf = '';
     const startedAt = Date.now();
+    // Scarta l'input residuo dei passi precedenti (v. drainPendingStdin).
+    drainPendingStdin();
     readline.emitKeypressEvents(process.stdin);
     if (process.stdin.isTTY) process.stdin.setRawMode(true);
     process.stdin.resume();

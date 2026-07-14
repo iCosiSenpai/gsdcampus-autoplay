@@ -14,14 +14,10 @@ MEMBERS_CLI="$DIR/scripts/lib/members-cli.js"
 WHOAREYOU_CLI="$DIR/scripts/lib/whoareyou-cli.js"
 IMPORT_MEMBERS="$DIR/scripts/import-members.js"
 
-# Colori per output interattivo
-BOLD='\033[1m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-DIM='\033[2m'
-NC='\033[0m' # No Color
+# Palette + spinner_run/ui_version condivisi. Le funzioni info/ok/warn/err/step
+# di setup.sh (definite sotto, con stile "▶" proprio) VINCONO su quelle della lib:
+# il source va tenuto PRIMA delle definizioni locali.
+source "$DIR/scripts/lib/ui.sh"
 
 AUTO_YES=false
 FORCE_UPDATE=false
@@ -987,9 +983,10 @@ if [ "$FORCE_UPDATE" = true ] || [ ! -d "$DIR/node_modules" ] || package_hash_ch
 fi
 
 if [ "$NEEDS_NPM" = true ]; then
-  info "Installazione/aggiornamento dipendenze..."
-  npm install
-  ok "Dipendenze npm aggiornate."
+  # spinner_run: npm install è muto per decine di secondi e il collega pensava
+  # che il setup fosse bloccato. Output completo in logs/setup-npm.log.
+  mkdir -p "$DIR/logs"
+  spinner_run "Installazione dipendenze npm (può richiedere qualche minuto)" "$DIR/logs/setup-npm.log" npm install
 else
   ok "Dipendenze npm già aggiornate. Salto."
 fi
@@ -997,9 +994,9 @@ fi
 # 4. Playwright browsers + Google Chrome (channel 'chrome' usato da autoplay.js)
 step "4/7 - Browser per Playwright (Chrome)"
 if [ "$FORCE_UPDATE" = true ] || [ "$NEEDS_NPM" = true ] || [ ! -d "$HOME/Library/Caches/ms-playwright" ]; then
-  info "Installazione/aggiornamento componenti Playwright..."
-  npx playwright install chromium || warn "playwright install chromium non riuscito (non bloccante)."
-  ok "Componenti Playwright pronti."
+  mkdir -p "$DIR/logs"
+  spinner_run "Installazione componenti Playwright" "$DIR/logs/setup-playwright.log" npx playwright install chromium \
+    || warn "playwright install chromium non riuscito (non bloccante)."
 else
   ok "Componenti Playwright già presenti. Salto."
 fi
