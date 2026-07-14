@@ -2,7 +2,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const { createLogger } = require('./lib/logger');
+const { createLogger, redactUrl } = require('./lib/logger');
 const { Monitor } = require('./lib/monitor');
 const { solveQuiz } = require('./lib/quiz');
 const { watchVideo } = require('./lib/video');
@@ -60,7 +60,9 @@ const { isLoginPage, isDashboardLoaded } = require('./lib/page-detect');
 async function handlePostLoginInterstitial(page, log) {
   try {
     const bodyText = await page.evaluate(() => document.body ? document.body.innerText : '').catch(() => '');
-    const currentUrl = page.url();
+    // redactUrl: subito dopo l'autologin l'URL può ancora contenere il token —
+    // non deve finire in chiaro in logs/autoplay.log.
+    const currentUrl = redactUrl(page.url());
 
     // Pop-up o pagina con bottone "Continua", "Accedi", "Conferma", "Prosegui".
     // I selettori con testo esplicito hanno la priorità; il submit generico è
@@ -155,7 +157,7 @@ async function solveQuizWrapper(page, courseUrl) {
 async function handleCourseInformativa(page, log) {
   const url = page.url();
   if (!url.includes('/corso/informativa/')) return false;
-  log(`Pagina informativa rilevata (${url}). Cerco checkbox da accettare...`);
+  log(`Pagina informativa rilevata (${redactUrl(url)}). Cerco checkbox da accettare...`);
   try {
     const checkboxes = await page.locator('input[type="checkbox"].form-check-input.accept').all();
     if (checkboxes.length === 0) {
@@ -183,7 +185,7 @@ async function handleCourseInformativa(page, log) {
     }
     await submitBtn.click().catch(e => log(`Errore click submit: ${e.message}`));
     await page.waitForTimeout(4000);
-    log(`Dopo submit: URL = ${page.url()}`);
+    log(`Dopo submit: URL = ${redactUrl(page.url())}`);
     return true;
   } catch (e) {
     log(`Errore gestione informativa: ${e.message}`);
@@ -202,7 +204,7 @@ async function handleCourseInformativa(page, log) {
 async function acceptInformativa(page, log) {
   const url = page.url();
   if (!url.includes('/informativa/accept')) return false;
-  log(`Pagina informativa post-login rilevata (${url}). Clicco conferma...`);
+  log(`Pagina informativa post-login rilevata (${redactUrl(url)}). Clicco conferma...`);
   try {
     let btn = page.locator('form[id^="accept_"] button[type="submit"]').first();
     if (await btn.count().catch(() => 0) === 0) {
@@ -215,7 +217,7 @@ async function acceptInformativa(page, log) {
     }
     await btn.click().catch(e => log(`Errore click conferma informativa: ${e.message}`));
     await page.waitForTimeout(4000);
-    log(`Dopo conferma informativa: URL = ${page.url()}`);
+    log(`Dopo conferma informativa: URL = ${redactUrl(page.url())}`);
     return true;
   } catch (e) {
     log(`Errore gestione conferma informativa: ${e.message}`);
@@ -251,7 +253,7 @@ async function acceptUsageDeclaration(page, log) {
       if (swal) swal.remove();
     }).catch(() => {});
 
-    log(`Dopo dichiarazione: URL = ${page.url()}`);
+    log(`Dopo dichiarazione: URL = ${redactUrl(page.url())}`);
     return true;
   } catch (e) {
     log(`Errore accettazione dichiarazione: ${e.message}`);
@@ -642,7 +644,10 @@ async function runCourse(page, courseUrl, sessionState, state, shiftCheck) {
       continue;
     }
 
-    const isQuiz = await page.evaluate(() => !!document.querySelector('form h4')).catch(() => false);
+    // h1..h5 (non solo h4): stessa lista di quiz.js — un quiz con la domanda in
+    // un heading diverso da h4 non veniva riconosciuto e la lezione era trattata
+    // come contenuto generico.
+    const isQuiz = await page.evaluate(() => !!document.querySelector('form h1, form h2, form h3, form h4, form h5')).catch(() => false);
     if (isQuiz) {
       monitor.update({ phase: 'quiz', lessonUrl: nextHref });
       emptyUrls.clear();
@@ -871,7 +876,7 @@ async function runAutoplay() {
           }
           loggedIn = true;
           tokenProvenValid = true; // il link autologin FUNZIONA in questo run
-          log(`URL finale dopo login: ${page.url()}`);
+          log(`URL finale dopo login: ${redactUrl(page.url())}`);
         } catch (e) {
           log(`Errore durante l'autologin (tentativo ${la}): ${e.message}`);
           await page.waitForTimeout(3000);
@@ -886,11 +891,10 @@ async function runAutoplay() {
         throw err;
       }
 
-      try {
-        await ctx.storageState({ path: STATE_FILE });
-      } catch (e) {
-        log('Impossibile salvare storage state:', e.message);
-      }
+      // NOTA: non salviamo più ctx.storageState() su file. Il contesto browser
+      // è sempre creato pulito (v. ctxOptions sopra) e NESSUNO rileggeva il file:
+      // era solo I/O sprecato + una copia dei cookie di sessione su disco.
+      // Gli unlink di STATE_FILE restano per ripulire i file legacy.
 
       async function discoverCourses() {
         if (Array.isArray(config.courseUrls) && config.courseUrls.length > 0) {
@@ -944,8 +948,6 @@ async function runAutoplay() {
             }
             if (fresh.length > 0) {
               log(`Trovati ${fresh.length} corsi attivi su ${links.length} totali.`);
-              // Salva lo storage state ora che la sessione funziona
-              try { await ctx.storageState({ path: STATE_FILE }); } catch (_) {}
               return fresh;
             }
             if (links.length > 0) {

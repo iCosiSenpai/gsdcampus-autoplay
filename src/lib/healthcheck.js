@@ -13,6 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { redactUrl } = require('./logger');
 const { chromium } = require('playwright');
 const { isLoginPage, isDashboardLoaded, countCourseLinks } = require('./page-detect');
 const { dashboardUrl, userAgent } = require('./platform');
@@ -91,7 +92,10 @@ async function checkAutologin(root, opts = {}) {
         }
         await page.waitForTimeout(2000);
 
-        result.finalUrl = page.url();
+        // redactUrl: se il redirect si è fermato a metà, l'URL può ancora
+        // contenere il token di autologin — non deve uscire in chiaro (la CLI
+        // lo stampa a video e può finire in log/issue).
+        result.finalUrl = redactUrl(page.url());
 
         if (await isDashboardLoaded(page) && !(await isLoginPage(page))) {
           reachedDashboard = true;

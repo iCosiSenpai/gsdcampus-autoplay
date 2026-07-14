@@ -1,5 +1,5 @@
 #!/bin/zsh
-set -e
+set -eu -o pipefail
 
 # Aggiorna la banca risposte locale scaricando quella pubblica dal repository e
 # facendone il merge con le risposte personali dell'utente.
@@ -10,12 +10,14 @@ cd "$DIR"
 
 LOCAL_FILE="$DIR/data/known_answers.json"
 PUBLIC_URL="https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/data/known_answers_public.json"
-# mktemp (non /tmp/...$$): percorso univoco e sicuro, evita collisioni/symlink
-# e viene creato in modo atomico. Trappato per la pulizia in uscita.
-REMOTE_FILE="$(mktemp 2>/dev/null || echo "/tmp/known_answers_public.$$.tmp")"
-trap 'rm -f "$REMOTE_FILE" 2>/dev/null' EXIT
-
 mkdir -p "$DIR/data"
+
+# mktemp (non /tmp/...$$): percorso univoco e sicuro, evita collisioni/symlink
+# e viene creato in modo atomico. Il fallback resta DENTRO il progetto (data/ è
+# 0755 dell'utente, non world-writable come /tmp: niente symlink attack sul
+# pattern PID prevedibile). Trappato per la pulizia in uscita.
+REMOTE_FILE="$(mktemp 2>/dev/null || echo "$DIR/data/.known_answers_public.$$.tmp")"
+trap 'rm -f "$REMOTE_FILE" 2>/dev/null' EXIT
 
 if ! command -v curl >/dev/null 2>&1; then
   echo "[WARN] curl non disponibile, salto aggiornamento banca risposte pubblica."

@@ -76,13 +76,45 @@ async function watchVideo(page, log, monitor, shiftCheck) {
 
     const result = await page.evaluate(() => {
       const v = document.querySelector('video');
-      // Cerca una percentuale di avanzamento nel DOM (player custom).
-      const bodyText = document.body ? document.body.innerText : '';
-      const pctMatch = bodyText.match(/(\d{1,3})\s*%/);
-      const pct = pctMatch ? parseInt(pctMatch[1], 10) : null;
+      // Percentuale di avanzamento mostrata dal player (player custom).
+      // Bug storico: si prendeva la PRIMA percentuale di TUTTA la pagina
+      // (bodyText.match(/%/)), ma video.js espone una % di BUFFER
+      // ("vjs-control-text-loaded-percentage", arriva a 100% appena il file è
+      // scaricato) e la pagina può mostrare % non correlate (sidebar, altre
+      // lezioni) → falso "video completato" e lezione abbandonata a metà.
+      // Ora: solo elementi con classe percent/progress/avanzamento/fruizione,
+      // MAI i controlli video.js, con testo corto (niente paragrafi), preferendo
+      // quelli nel container del <video>. Nessun candidato → null: restano le
+      // fonti di verità currentTime>=duration-1.5 e il check post-video sulla
+      // pagina corso (degradazione sicura, mai completamento anticipato).
+      let domPct = null;
+      const parsePct = (t) => {
+        const txt = String(t || '').trim();
+        if (!txt || txt.length > 20) return null;
+        const m = txt.match(/(\d{1,3})(?:[.,]\d+)?\s*%/);
+        return m ? parseInt(m[1], 10) : null;
+      };
+      const sel = '[class*="percent"], [class*="progress"], [class*="avanzamento"], [class*="fruizione"]';
+      const cands = [...document.querySelectorAll(sel)]
+        .filter(el => !/(^|\s)vjs-/.test(String(el.className || '')))
+        .map(el => ({ el, pct: parsePct(el.innerText) }))
+        .filter(c => c.pct !== null);
+      if (cands.length && v) {
+        // Risali dal <video> di max 4 livelli cercando un container che
+        // contenga un candidato: è la % del player, non di altro.
+        let scope = v.parentElement;
+        for (let i = 0; i < 4 && scope && !cands.some(c => scope.contains(c.el)); i++) {
+          scope = scope.parentElement;
+        }
+        const inScope = scope ? cands.filter(c => scope.contains(c.el)) : [];
+        if (inScope.length) domPct = inScope[0].pct;
+      }
+      // Fuori dal container del video: accetta solo se il candidato è UNICO in
+      // tutta la pagina (nessuna ambiguità possibile).
+      if (domPct === null && cands.length === 1) domPct = cands[0].pct;
       return {
         status: v ? { ended: v.ended, t: v.currentTime, d: v.duration } : null,
-        domPct: pct
+        domPct
       };
     }).catch(() => ({ status: null, domPct: null }));
 

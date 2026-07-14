@@ -1,9 +1,12 @@
 #!/bin/zsh
-set -e
+set -eu -o pipefail
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 PID_FILE=".ollama_pid"
+
+# pid_matches condiviso (protezione PID recycling).
+source "$DIR/scripts/lib/pid-utils.sh"
 
 # Preferisci il CLI headless `ollama` (entrypoint documentato per `serve`, non
 # instanzia l'icona nella barra di stato). Fall back al binario GUI dell'app solo
@@ -19,17 +22,6 @@ fi
 
 log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') | $1" | tee -a "$DIR/logs/ollama.log"
-}
-
-# pid_matches <PID> <pattern>: il PID esiste E la sua command line contiene il
-# pattern. Protegge dal PID recycling: un PID recyclato a un processo non-Ollama
-# non verrebbe scambiato per un'istanza attiva (kill -0 puro direbbe solo "esiste").
-pid_matches() {
-  local p="$1"; local pat="$2"
-  [ -n "$p" ] || return 1
-  kill -0 "$p" 2>/dev/null || return 1
-  ps -o command= -p "$p" 2>/dev/null | grep -qE "$pat" || return 1
-  return 0
 }
 
 is_running() {
@@ -181,7 +173,7 @@ status() {
   fi
 }
 
-case "$1" in
+case "${1:-}" in
   start) start ;;
   stop) stop ;;
   status) status ;;

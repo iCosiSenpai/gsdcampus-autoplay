@@ -1,5 +1,5 @@
 #!/bin/zsh
-set -e
+set -eu -o pipefail
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
@@ -17,7 +17,7 @@ export NO_COLOR=1
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 
 IGNORE_HOURS=false
-if [ "$1" = "--ignore-hours" ]; then
+if [ "${1:-}" = "--ignore-hours" ]; then
   IGNORE_HOURS=true
 fi
 
@@ -34,9 +34,18 @@ STOP_FILE="$DIR/.scheduler_stop"
 
 mkdir -p "$DIR/logs"
 
+# log: su FILE sempre in chiaro (strip degli escape ANSI: prima scheduler.log si
+# riempiva di \x1b[0;34m… che sporcano grep/tail/AI), su stdout colorato solo se
+# è un TTY (di norma stdout è logs/autoplay.out: anche lì niente escape).
 log() {
-  local line="$(date '+%Y-%m-%d %H:%M:%S') | $1"
-  echo "$line" | tee -a "$LOG_FILE"
+  local ts="$(date '+%Y-%m-%d %H:%M:%S')"
+  local plain="$ts | $(printf '%s' "$1" | sed $'s/\x1b\\[[0-9;]*m//g; s/\\\\033\\[[0-9;]*m//g')"
+  printf '%s\n' "$plain" >> "$LOG_FILE"
+  if [ -t 1 ]; then
+    echo -e "$ts | $1"
+  else
+    printf '%s\n' "$plain"
+  fi
 }
 
 info() { log "${BLUE}${BOLD}[INFO]${NC} $1"; }
@@ -53,11 +62,13 @@ trap cleanup EXIT INT TERM
 # Usa process.stdout.write (NON console.log): quest'ultimo colorizzerebbe il
 # numero sotto FORCE_COLOR, inquadrando l'aritmetica shell $((NEXT_MS/60000)).
 ms_until_next_start() {
+  # `|| echo 0`: sotto set -e un node fallito non deve uccidere lo scheduler
+  # (il caller tratta 0/vuoto come "riprova tra 1 minuto").
   node -e "
     const { nextWorkStart, msUntil } = require('./src/lib/schedule');
     const d = nextWorkStart(new Date());
     process.stdout.write(String(d ? msUntil(d) : 0) + '\n');
-  " 2>/dev/null
+  " 2>/dev/null || echo 0
 }
 
 # Restituisce l'ora del prossimo avvio in formato leggibile
@@ -109,20 +120,21 @@ log "Scheduler avviato. IGNORE_HOURS=$IGNORE_HOURS"
 CRASH_COUNT=0
 MAX_CRASHES=5
 
-# Scrive logs/status.json con phase=$1 in modo atomico (tmp+rename), mergendo i
-# campi preesistenti per non cancellare il resto dello stato.
+# Scrive logs/status.json con phase=$1 in modo atomico, mergendo i campi
+# preesistenti. DIR passa via argv (niente interpolazione shell dentro il JS:
+# un path con apici/caratteri speciali rompeva lo snippet) e riusa l'helper
+# atomico condiviso scripts/lib/write-json.js.
 mark_crash_loop() {
   local phase="$1"
   node -e '
-    const fs=require("fs"); const path=require("path");
-    const f=path.join("'"$DIR"'","logs","status.json");
-    let s={}; try{s=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){}
-    s.phase=process.argv[1]; s.lastUpdate=new Date().toISOString();
-    s.crashLoop=true;
-    const tmp=f+".tmp";
-    fs.writeFileSync(tmp,JSON.stringify(s,null,2));
-    fs.renameSync(tmp,f);
-  ' "$phase" 2>/dev/null || true
+    const dir = process.argv[2];
+    const { writeJsonAtomic, readJsonSafe } = require(require("path").join(dir, "scripts", "lib", "write-json.js"));
+    const f = require("path").join(dir, "logs", "status.json");
+    const s = readJsonSafe(f, {}, { warn: false });
+    s.phase = process.argv[1]; s.lastUpdate = new Date().toISOString();
+    s.crashLoop = true;
+    writeJsonAtomic(f, s);
+  ' "$phase" "$DIR" 2>/dev/null || true
 }
 
 # Backoff per crash consecutivi (exit code diverso da 0 e 4). Ladder 60 -> 120 ->
@@ -167,11 +179,12 @@ while true; do
 
   if [[ "$IGNORE_HOURS" = true ]]; then
     log "Avvio autoplay (modalità ignore-hours)..."
-    node "$DIR/src/autoplay.js" --ignore-hours 2>&1 | tee -a "$LOG_FILE"
     # zsh: l'exit code dei comandi in pipe è in $pipestatus (1-indexed), NON in
-    # $PIPESTATUS (bash-ism, qui sarebbe vuoto → il ramo "successo" scatterebbe
-    # sempre, anche dopo un crash). Va letto SUBITO dopo la pipe.
-    EXIT_CODE=${pipestatus[1]}
+    # $PIPESTATUS (bash-ism). Il `|| EXIT_CODE=...` va nella STESSA riga: sotto
+    # set -e + pipefail una pipe fallita (autoplay crashato) ucciderebbe lo
+    # scheduler prima di poter leggere pipestatus.
+    EXIT_CODE=0
+    node "$DIR/src/autoplay.js" --ignore-hours 2>&1 | tee -a "$LOG_FILE" || EXIT_CODE=${pipestatus[1]}
     if [[ "$EXIT_CODE" -eq 0 ]]; then
       # Uscita pulita: fine turno oppure tutti i corsi completati/in attesa di aiuto (need_help).
       # Non riavviare subito a vuoto; attendi 10 minuti così l'AI/utente può intervenire.
@@ -195,9 +208,9 @@ while true; do
 
   if is_in_hours; then
     log "In orario lavorativo. Avvio autoplay..."
-    node "$DIR/src/autoplay.js" 2>&1 | tee -a "$LOG_FILE"
-    # zsh pipestatus (1-indexed): va letto SUBITO dopo la pipe.
-    EXIT_CODE=${pipestatus[1]}
+    # zsh pipestatus (1-indexed): v. commento nel ramo ignore-hours.
+    EXIT_CODE=0
+    node "$DIR/src/autoplay.js" 2>&1 | tee -a "$LOG_FILE" || EXIT_CODE=${pipestatus[1]}
     if [[ "$EXIT_CODE" -eq 0 ]]; then
       CRASH_COUNT=0
       log "Autoplay terminato con codice 0 (fine turno). Calcolo prossimo turno..."

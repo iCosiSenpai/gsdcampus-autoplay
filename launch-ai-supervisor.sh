@@ -1,5 +1,5 @@
 #!/bin/zsh
-set -e
+set -eu -o pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
@@ -7,22 +7,12 @@ cd "$DIR"
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 CHECK_REQ="$DIR/scripts/check-requirements.sh"
 
-# Colori
-BOLD='\033[1m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-info() { echo -e "${BLUE}${BOLD}[INFO]${NC} $1"; }
-ok() { echo -e "${GREEN}${BOLD}[OK]${NC} $1"; }
-warn() { echo -e "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
-err() { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
-step() { echo -e "${BOLD}[PASSO $1]${NC} $2"; }
-
+# Palette + info/ok/warn/err/step condivisi.
+source "$DIR/scripts/lib/ui.sh"
 # Helper countdown "Timer + Invio per saltare" per i messaggi che l'utente deve leggere.
 source "$DIR/scripts/lib/read-timer.sh"
+# pid_matches condiviso (protezione PID recycling).
+source "$DIR/scripts/lib/pid-utils.sh"
 
 # Assicurati che ~/.local/bin sia nel PATH, anche se .zshrc non è ancora stato sourceato
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
@@ -54,6 +44,8 @@ requirements_satisfied() {
 echo ""
 echo "============================================"
 echo -e "${BOLD}  gsdcampus-autoplay — AI Supervisor${NC}"
+VERSION_LINE="$(ui_version "$DIR")"
+[ -n "$VERSION_LINE" ] && echo -e "${DIM}  versione $VERSION_LINE${NC}" || true
 echo "============================================"
 echo ""
 
@@ -61,21 +53,27 @@ echo ""
 info "Controllo e arresto eventuali istanze precedenti..."
 if [ -f "$DIR/.autoplay_pid" ]; then
   OLD_PID=$(cat "$DIR/.autoplay_pid" 2>/dev/null || echo "")
-  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+  # pid_matches (non kill -0 puro): un PID recyclato a un processo estraneo NON
+  # va killato — qui prima si mandava SIGKILL a qualunque processo vivo con quel PID.
+  if pid_matches "$OLD_PID" "scheduler|autoplay"; then
     warn "Trovato scheduler precedente (PID $OLD_PID). Arresto in corso..."
     kill "$OLD_PID" 2>/dev/null || true
     sleep 2
-    kill -9 "$OLD_PID" 2>/dev/null || true
+    # SIGKILL solo se è ANCORA il nostro processo (dopo i 2s potrebbe essere
+    # morto e il PID riassegnato).
+    pid_matches "$OLD_PID" "scheduler|autoplay" && kill -9 "$OLD_PID" 2>/dev/null || true
   fi
   rm -f "$DIR/.autoplay_pid"
 fi
 # Pattern path-indipendente: lo scheduler lancia `node /abs/path/src/autoplay.js`,
 # quindi "node src/autoplay.js" non matchava mai (lasciava orfani vivi). Usiamo il
 # nome file. Esclude autoplay.log (grep su "autoplay\.js").
-pgrep -f "autoplay\.js" 2>/dev/null | while read orphan; do
+# `|| true` sul pgrep: sotto set -e + pipefail un pgrep senza match (exit 1)
+# farebbe fallire la pipeline e ucciderebbe il launcher.
+{ pgrep -f "autoplay\.js" 2>/dev/null || true; } | while read orphan; do
   kill -9 "$orphan" 2>/dev/null || true
 done
-pgrep -f "scheduler.sh" 2>/dev/null | while read orphan; do
+{ pgrep -f "scheduler.sh" 2>/dev/null || true; } | while read orphan; do
   [ "$orphan" != "$$" ] && kill -9 "$orphan" 2>/dev/null || true
 done
 ok "Pulizia istanze precedenti completata."
@@ -172,13 +170,10 @@ fi
 # Verifica login Ollama e modello cloud (rapida, nessun download se già presente)
 if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
   echo ""
-  warn "Il modello $MODEL è un modello CLOUD e richiede il login Ollama."
+  warn "Il modello $MODEL richiede il login su ollama.com: ora si apre il browser."
+  info "Se non si apre da solo, copia nel browser l'URL che compare qui sotto (https://ollama.com/...)."
   echo ""
-  echo -e "${BOLD}Tra pochi secondi si aprirà una finestra del browser per il login su ollama.com.${NC}"
-  echo -e "${BOLD}Se il browser NON si apre da solo, copia nel browser l'URL che compare qui sotto${NC}"
-  echo -e "${BOLD}(la riga con https://ollama.com/...).${NC}"
-  echo ""
-  read_with_timer 5 "${BOLD}Leggi con calma: tra 5s parte il login (Invio per saltare).${NC}"
+  read_with_timer 5 "${BOLD}Tra 5s parte il login (Invio per saltare l'attesa).${NC}"
 
   # login + pull in una funzione: sotto `set -e` usiamo `|| return 1` per non abortire,
   # così possiamo fare un secondo tentativo se il popup del browser non si è aperto.
@@ -192,33 +187,44 @@ if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
   ollama_login_and_pull || true
   if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
     echo ""
-    warn "Non riuscito al primo tentativo (a volte il browser non si apre subito). Riprovo una volta..."
-    echo -e "${BOLD}Se il browser non si apre, copia a mano l'URL (https://ollama.com/...) nel browser.${NC}"
+    warn "Primo tentativo non riuscito (il browser a volte tarda). Riprovo: se serve, copia a mano l'URL https://ollama.com/... nel browser."
     echo ""
     ollama_login_and_pull || true
   fi
   if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
     echo ""
-    err "Modello $MODEL non disponibile."
-    warn "Verifica di aver completato il login su ollama.com nel browser e di avere connessione,"
-    warn "poi rilancia con:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
-    warn "Nel frattempo l'autoplay può girare senza AI con:  ./start.sh"
+    err "Modello $MODEL non disponibile. Completa il login su ollama.com e rilancia: cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
+    info "Nel frattempo l'autoplay può girare senza AI con: ./start.sh"
     exit 1
   fi
 fi
 ok "Modello $MODEL pronto."
 
+# ── Riepilogo finale: tutto ciò che serve sapere prima di iniziare, in un box.
+# Ogni voce degrada a un valore neutro se config.json/CLI non sono disponibili.
+MEMBER_LINE=$(node "$DIR/scripts/lib/members-cli.js" active 2>/dev/null | head -1 | sed 's/^Membro attivo: //' || echo "")
+[ -n "$MEMBER_LINE" ] || MEMBER_LINE="non configurato"
+SCHEDULE_LINE=$(node "$SCHEDULE_CLI" describe 2>/dev/null || echo "non disponibili")
+if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -q '^yes$'; then
+  TURNO_LINE="${GREEN}adesso è orario di lavoro${NC}"
+else
+  NEXT_START_ISO=$(node "$SCHEDULE_CLI" next-start 2>/dev/null || echo "")
+  NEXT_START_HUMAN=$(node -e "const d=new Date(process.argv[1]);if(!isNaN(d))process.stdout.write(d.toLocaleString('it-IT',{weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))" "$NEXT_START_ISO" 2>/dev/null || echo "")
+  TURNO_LINE="${YELLOW}fuori orario${NC}${NEXT_START_HUMAN:+ — prossimo turno: $NEXT_START_HUMAN}"
+fi
+if [ "$OLLAMA_UP" = true ]; then OLLAMA_LINE="${GREEN}attivo${NC} ($MODEL)"; else OLLAMA_LINE="${RED}non attivo${NC}"; fi
+
 echo ""
-echo "============================================"
+echo "────────────────────────────────────────────"
 echo -e "${GREEN}${BOLD}  AI Supervisor pronto${NC}"
-echo "  Modello: $MODEL"
-echo "============================================"
+echo "────────────────────────────────────────────"
+echo -e "  Account:  ${BOLD}${MEMBER_LINE}${NC}"
+echo -e "  Orari:    ${SCHEDULE_LINE}"
+echo -e "  Turno:    ${TURNO_LINE}"
+echo -e "  Ollama:   ${OLLAMA_LINE}"
+echo "────────────────────────────────────────────"
 echo ""
-echo -e "${BOLD}Scrivi in chat:${NC}"
-echo "  • 'controlla il corso'"
-echo "  • 'come sta andando?'"
-echo "  • 'avvia il corso'"
-echo "  • 'ferma tutto'"
+echo -e "${BOLD}Scrivi in chat:${NC}  'avvia il corso' • 'controlla il corso' • 'come sta andando?' • 'ferma tutto'"
 echo ""
 
 # Avvia Claude con skip permessi e modello Ollama.

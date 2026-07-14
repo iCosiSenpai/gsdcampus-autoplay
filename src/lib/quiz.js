@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const account = require('./account');
 const { askQuizQuestion } = require('./ollama-quiz');
-const { writeJsonAtomic, readJsonSafe } = require('./io');
+const { writeJsonAtomic, readJsonSafe, readJsonCached } = require('./io');
 const { NeedHelpExit } = require('./errors');
 
 const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
@@ -444,12 +444,9 @@ async function solveActiveQuestions(page, root, log, monitor) {
 
     log(`Domanda ${i + 1}: ${q.text.slice(0, 60)}...`);
 
-    let knownAnswers = {};
-    try {
-      knownAnswers = JSON.parse(fs.readFileSync(knownAnswersPath, 'utf8'));
-    } catch (e) {
-      log('Attenzione: known_answers.json non leggibile', e.message);
-    }
+    // readJsonCached (mtime): la banca è consultata a OGNI domanda; la cache si
+    // invalida da sola quando mergeIntoKnown/answers-cli la riscrivono (rename).
+    const knownAnswers = readJsonCached(knownAnswersPath, {});
 
     let found = false;
     let selectedOptionText = null;
@@ -584,7 +581,7 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
     const bodyText = document.body ? document.body.innerText : '';
     return {
       bodyText: bodyText.slice(0, 12000),
-      hasActiveQuestion: !!document.querySelector('form h4'),
+      hasActiveQuestion: !!document.querySelector('form h1, form h2, form h3, form h4, form h5'),
       hasQuizButton: !!document.querySelector('a.btn-primary, button.btn-primary')
     };
   }).catch(() => ({ bodyText: '', hasActiveQuestion: false, hasQuizButton: false }));

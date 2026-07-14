@@ -16,12 +16,20 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { readJsonCached } = require('./io');
 
 const OLLAMA_URL = 'http://127.0.0.1:11434/api/generate';
-const TIMEOUT_MS = 30000;
+// 60s (era 30): i modelli cloud a freddo possono superare i 30s al primo token,
+// e ogni timeout butta via un sample della self-consistency.
+const TIMEOUT_MS = 60000;
 const SAMPLES = 3;            // campionamenti per self-consistency
 const SAMPLE_TEMP = 0.4;      // temperatura per i campioni (diversità)
 const SINGLE_TEMP = 0.1;      // temperatura per il fallback a singolo call
+// Unica fonte di verità per il fallback modello: DEVE coincidere con
+// config.json.example e MODEL_FALLBACK in launch-ai-supervisor.sh (prima era
+// 'gemma4:31b-cloud': con config.json assente/corrotto si chiedeva un modello
+// mai scaricato e ogni domanda finiva in need_answer.json).
+const DEFAULT_MODEL = 'gemma4:cloud';
 
 // Cache mtime del modello: se config.json cambia (es. cambio ollamaModel),
 // il prossimo askQuizQuestion rilegge invece di restituire il modello stantio.
@@ -31,7 +39,7 @@ let _modelMtime = 0;
 
 /**
  * Legge il modello Ollama da config.json (campo `ollamaModel`).
- * Fallback: gemma4:31b-cloud per retrocompatibilità.
+ * Fallback: DEFAULT_MODEL (coerente con config.json.example e launcher).
  */
 function readOllamaModel() {
   try {
@@ -42,7 +50,7 @@ function readOllamaModel() {
       return _modelCache;
     }
     const cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
-    const m = cfg.ollamaModel ? String(cfg.ollamaModel).trim() : 'gemma4:31b-cloud';
+    const m = cfg.ollamaModel ? String(cfg.ollamaModel).trim() : DEFAULT_MODEL;
     _modelCache = m;
     _modelPath = p;
     _modelMtime = st.mtimeMs;
@@ -50,7 +58,7 @@ function readOllamaModel() {
   } catch (e) {
     // config.json potrebbe non esistere: usa il default.
   }
-  return 'gemma4:31b-cloud';
+  return DEFAULT_MODEL;
 }
 
 function askOllama(prompt, numPredict, model, temperature) {
@@ -59,6 +67,10 @@ function askOllama(prompt, numPredict, model, temperature) {
       model: model || readOllamaModel(),
       prompt,
       stream: false,
+      // keep_alive: tiene il modello caldo tra i 3 sample della self-consistency
+      // (senza, tra una chiamata e l'altra il modello può essere scaricato e
+      // ricaricato). Per i modelli cloud è un no-op innocuo.
+      keep_alive: '10m',
       options: { temperature: temperature != null ? temperature : 0.1, num_predict: numPredict || 64 }
     });
 
@@ -166,11 +178,12 @@ function parseAnswerLetter(response, options) {
 
 // Carica 2-3 esempi verificati dalla banca TRUSTED per il few-shot. Solo entry
 // con risposta breve e chiara (una lettera o testo opzione). Ritorna [] se la
-// banca è troppo piccola (<3) o illeggibile.
+// banca è troppo piccola (<3) o illeggibile. readJsonCached (mtime): prima si
+// rileggeva il file da disco a ogni domanda.
 function loadFewShotExamples(root) {
   try {
     const knownPath = path.join(root, 'data', 'known_answers.json');
-    const known = JSON.parse(fs.readFileSync(knownPath, 'utf8'));
+    const known = readJsonCached(knownPath, {});
     const entries = Object.entries(known).filter(([q, a]) => q && a && !String(q).startsWith('README'));
     if (entries.length < 3) return [];
     // Prendi fino a 3 esempi (i primi, stabili tra run).
@@ -266,8 +279,11 @@ async function askQuizQuestion(question, options, log, root) {
       const labels = ['A', 'B', 'C', 'D'];
       const index = labels.indexOf(voted.letter);
       if (index >= 0 && index < options.length) {
-        // reason: il primo response utile (per tracciabilità).
-        const reason = (sampleResponses.find(r => r && parseAnswerLetter(r, options) && parseAnswerLetter(r, options).letter === voted.letter) || sampleResponses.find(Boolean) || '').trim();
+        // reason: il primo response il cui parse ha votato la lettera vincente
+        // (per tracciabilità). samples[] è già allineato 1:1 a sampleResponses:
+        // niente doppio parseAnswerLetter ridondante dentro il find.
+        const idx = samples.findIndex(s => s && s.letter === voted.letter);
+        const reason = ((idx >= 0 ? sampleResponses[idx] : sampleResponses.find(Boolean)) || '').trim();
         return {
           letter: voted.letter,
           text: options[index],

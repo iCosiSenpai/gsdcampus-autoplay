@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { writeJsonAtomic } = require('./io');
+const { redactUrl } = require('./logger');
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -76,7 +77,10 @@ class Monitor {
   }
 
   async recordError(page, error, context = '') {
-    const msg = context ? `${context}: ${error?.message || error}` : String(error?.message || error);
+    // redactUrl: i message di Playwright possono contenere l'URL di autologin
+    // completo; lastError finisce in logs/status.json (letto anche dall'AI e
+    // citato negli issue report).
+    const msg = redactUrl(context ? `${context}: ${error?.message || error}` : String(error?.message || error));
     this.log('MONITOR ERROR', msg);
     this.update({ phase: 'error', lastError: msg });
     const stamp = ts();

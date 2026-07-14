@@ -1,5 +1,5 @@
 #!/bin/zsh
-set -e
+set -eu -o pipefail
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
@@ -29,13 +29,29 @@ cleanup_debug() {
   find "$DEBUG_DIR/dumps" -name '*.html' -mtime +7 -type f -delete 2>/dev/null || true
 }
 
+# Pulizia log storici (prima crescevano all'infinito):
+# - autoplay.out.*.old: creati da start.sh a ogni avvio (pota anche lì, ultimi 5);
+# - autoplay.<timestamp>.log: ruotati da src/lib/logger.js a 5 MB;
+# - *.log.old: copie create da rotate() qui sotto, mai cancellate prima.
+# I pattern NON matchano i file correnti (autoplay.log, scheduler.log, ecc.).
+cleanup_logs() {
+  find "$LOG_DIR" -name 'autoplay.out.*.old' -mtime +7 -type f -delete 2>/dev/null || true
+  find "$LOG_DIR" -name 'autoplay.*.log' -mtime +14 -type f -delete 2>/dev/null || true
+  find "$LOG_DIR" -name '*.log.old' -mtime +14 -type f -delete 2>/dev/null || true
+}
+
 mkdir -p "$LOG_DIR" "$DEBUG_DIR/screenshots" "$DEBUG_DIR/dumps" "$BACKUP_DIR"
 
 rotate "$LOG_DIR/autoplay.log"
 rotate "$LOG_DIR/supervisor.log"
 rotate "$LOG_DIR/ollama.log"
 rotate "$LOG_DIR/error.log"
+# scheduler.log riceve tee -a dallo scheduler ad ogni run: prima non era mai
+# ruotato e cresceva senza limite. rotate() usa cp+truncate, sicuro con appender
+# concorrenti (v. commento sopra).
+rotate "$LOG_DIR/scheduler.log"
 
 cleanup_debug
+cleanup_logs
 
 echo "Manutenzione completata."

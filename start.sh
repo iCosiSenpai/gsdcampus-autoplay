@@ -1,5 +1,5 @@
 #!/bin/zsh
-set -e
+set -eu -o pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
@@ -12,19 +12,8 @@ export NO_COLOR=1
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 
-# Colori
-BOLD='\033[1m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-info() { echo -e "${BLUE}${BOLD}[INFO]${NC} $1"; }
-ok() { echo -e "${GREEN}${BOLD}[OK]${NC} $1"; }
-warn() { echo -e "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
-err() { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
-step() { echo -e "${BOLD}[PASSO $1]${NC} $2"; }
+# Palette + info/ok/warn/err/step condivisi.
+source "$DIR/scripts/lib/ui.sh"
 
 PID_FILE=".autoplay_pid"
 OUT_FILE="logs/autoplay.out"
@@ -32,7 +21,7 @@ OUT_FILE="logs/autoplay.out"
 mkdir -p logs
 
 IGNORE_HOURS=false
-if [ "$1" = "--ignore-hours" ]; then
+if [ "${1:-}" = "--ignore-hours" ]; then
   IGNORE_HOURS=true
   warn "Modalità IGNORE-HOURS: avvia anche fuori orario lavorativo."
 fi
@@ -77,16 +66,7 @@ fi
 
 echo ""
 step "3/5" "Controllo istanze attive"
-# pid_matches <PID> <pattern>: verifica che il PID esista E che la sua command
-# line contenga il pattern. Protegge dal PID recycling (un PID recyclato a un
-# processo non nostro verrebbe scambiato per un'istanza attiva).
-pid_matches() {
-  local p="$1"; local pat="$2"
-  [ -n "$p" ] || return 1
-  kill -0 "$p" 2>/dev/null || return 1
-  ps -o command= -p "$p" 2>/dev/null | grep -qE "$pat" || return 1
-  return 0
-}
+source "$DIR/scripts/lib/pid-utils.sh"
 if [ -f "$PID_FILE" ]; then
   OLD_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
   if pid_matches "$OLD_PID" "scheduler|autoplay"; then
@@ -103,7 +83,10 @@ fi
 # Lock atomica anti-doppio-avvio: noclobber crea il PID file solo se non esiste,
 # in modo esclusivo. Previene che due start.sh lanciati in rapida successione
 # passino entrambi il check "nessuna istanza" e avviino due scheduler concorrenti.
-if ! (set -o noclobber; : > "$PID_FILE") 2>/dev/null; then
+# Scriviamo subito il PID di start.sh ($$) invece di un file vuoto: nella finestra
+# prima che lo scheduler parta, un lettore concorrente (stop/status) trova un PID
+# reale che NON matcha "scheduler|autoplay" → stato "fermo", mai `kill -0 ""`.
+if ! (set -o noclobber; echo "$$" > "$PID_FILE") 2>/dev/null; then
   err "Impossibile acquisire il lock su $PID_FILE (avvio concorrente?)."
   info "Se sei sicuro che non ci sia un'istanza attiva: rm -f $PID_FILE e riprova."
   exit 1
@@ -115,6 +98,11 @@ if [ -f "$OUT_FILE" ]; then
   mv "$OUT_FILE" "logs/autoplay.out.$(date +%Y%m%d-%H%M%S).old"
   ok "Vecchio log rinominato."
 fi
+# Pota i .old oltre gli ultimi 5: prima si accumulavano all'infinito (uno per
+# ogni avvio). ls -t = più recenti prima; tail -n +6 = dal 6° in poi.
+ls -t logs/autoplay.out.*.old 2>/dev/null | tail -n +6 | while read -r oldlog; do
+  rm -f "$oldlog"
+done || true
 
 echo ""
 step "5/5" "Avvio scheduler in background"

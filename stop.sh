@@ -1,34 +1,16 @@
 #!/bin/zsh
-set -e
+set -eu -o pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-# Colori
-BOLD='\033[1m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-ok() { echo -e "${GREEN}${BOLD}[OK]${NC} $1"; }
-warn() { echo -e "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
-err() { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
-step() { echo -e "${BOLD}[PASSO $1]${NC} $2"; }
+# Palette + info/ok/warn/err/step condivisi.
+source "$DIR/scripts/lib/ui.sh"
 
 PID_FILE=".autoplay_pid"
 STOP_FILE=".scheduler_stop"
 
-# pid_matches <PID> <pattern>: il PID esiste E la sua command line contiene il
-# pattern. Protegge dal PID recycling: un PID recyclato a un processo non nostro
-# non verrebbe segnalato (kill -0 puro direbbe solo "esiste un processo").
-pid_matches() {
-  local p="$1"; local pat="$2"
-  [ -n "$p" ] || return 1
-  kill -0 "$p" 2>/dev/null || return 1
-  ps -o command= -p "$p" 2>/dev/null | grep -qE "$pat" || return 1
-  return 0
-}
+source "$DIR/scripts/lib/pid-utils.sh"
 
 echo ""
 echo "============================================"

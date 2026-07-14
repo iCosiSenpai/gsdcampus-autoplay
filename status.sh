@@ -1,4 +1,5 @@
 #!/bin/zsh
+set -eu -o pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
@@ -22,29 +23,10 @@ for arg in "$@"; do
   esac
 done
 
-# Colori
-BOLD='\033[1m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Palette + info/ok/warn/err/step condivisi.
+source "$DIR/scripts/lib/ui.sh"
 
-ok() { echo -e "${GREEN}${BOLD}[OK]${NC} $1"; }
-warn() { echo -e "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
-err() { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
-info() { echo -e "${BLUE}${BOLD}[INFO]${NC} $1"; }
-
-# pid_matches <PID> <pattern>: il PID esiste E la sua command line contiene il
-# pattern. Protegge dal PID recycling: un PID recyclato a un processo non nostro
-# non verrebbe scambiato per scheduler attivo (kill -0 puro direbbe solo "esiste").
-pid_matches() {
-  local p="$1"; local pat="$2"
-  [ -n "$p" ] || return 1
-  kill -0 "$p" 2>/dev/null || return 1
-  ps -o command= -p "$p" 2>/dev/null | grep -qE "$pat" || return 1
-  return 0
-}
+source "$DIR/scripts/lib/pid-utils.sh"
 
 echo ""
 echo "============================================"
@@ -69,6 +51,7 @@ if [ -f "$PID_FILE" ]; then
     etime=$(ps -o etime= -p "$PID" 2>/dev/null | tr -d ' ' || echo "")
     if [ -n "$etime" ]; then
       uptime_min=""
+      # `|| echo ""`: sotto set -e un node fallito non deve uccidere lo status.
       uptime_min=$(node -e "
         const t = '$etime';
         const m = t.match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/);
@@ -79,7 +62,7 @@ if [ -f "$PID_FILE" ]; then
         sec += parseInt(m[3],10) * 60;
         sec += parseInt(m[4],10);
         console.log(Math.floor(sec / 60));
-      " 2>/dev/null)
+      " 2>/dev/null || echo "")
       if [ -n "$uptime_min" ]; then
         ok "Scheduler attivo: PID $PID (attivo da ${uptime_min} min)"
       else
@@ -105,11 +88,11 @@ if [ -f "$DIR/config.json" ]; then
   if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -q '^yes$'; then
     ok "Adesso è ORARIO LAVORATIVO."
     NEXT_END=$(node "$SCHEDULE_CLI" next-end 2>/dev/null || echo "")
-    [ -n "$NEXT_END" ] && info "Fine turno prevista: $NEXT_END"
+    [ -n "$NEXT_END" ] && info "Fine turno prevista: $NEXT_END" || true
   else
     warn "Adesso è FUORI ORARIO."
     NEXT_START=$(node "$SCHEDULE_CLI" next-start 2>/dev/null || echo "")
-    [ -n "$NEXT_START" ] && info "Prossimo inizio turno: $NEXT_START"
+    [ -n "$NEXT_START" ] && info "Prossimo inizio turno: $NEXT_START" || true
   fi
 else
   warn "config.json non trovato."
@@ -127,14 +110,14 @@ STATUS_PHASE=""
 STATUS_STALE=false
 STATUS_AGE_MIN=""
 if [ -f logs/status.json ] && node -e "JSON.parse(require('fs').readFileSync('logs/status.json','utf8'))" 2>/dev/null; then
-  STATUS_PHASE=$(node -e "try{console.log(require('./logs/status.json').phase||'')}catch(e){}" 2>/dev/null)
+  STATUS_PHASE=$(node -e "try{console.log(require('./logs/status.json').phase||'')}catch(e){}" 2>/dev/null || echo "")
   STATUS_AGE_MIN=$(node -e "
     try {
       const s = require('./logs/status.json');
       if (!s.lastUpdate) { console.log(''); process.exit(0); }
       console.log(Math.floor((Date.now() - new Date(s.lastUpdate).getTime()) / 60000));
     } catch(e) { console.log(''); }
-  " 2>/dev/null)
+  " 2>/dev/null || echo "")
   if [ -n "$STATUS_AGE_MIN" ] && [ "$STATUS_AGE_MIN" -gt 3 ] 2>/dev/null; then
     STATUS_STALE=true
   fi
@@ -183,7 +166,7 @@ if [ "$RUN_LIVE" = true ] && [ -f "$HEALTHCHECK_CLI" ]; then
           s.note='Autologin verificato VALIDO con healthcheck (stato precedente obsoleto).';
           s.autologinHealth={ok:true,checkedAt:s.lastUpdate};
           writeJsonAtomic(p, s);
-        " 2>/dev/null && info "Stato salvato corretto (autologin risulta valido)."
+        " 2>/dev/null && info "Stato salvato corretto (autologin risulta valido)." || true
       fi
     fi
   else

@@ -18,6 +18,24 @@ function rotateIfNeeded(logFile) {
   }
 }
 
+// redactUrl(u): rimuove le credenziali da un URL prima che finisca nei log.
+// Il link di autologin (/autologin/<CF>/<token>) è una credenziale permanente:
+// loggarlo in chiaro in logs/autoplay.log lo espone a chiunque legga i log
+// (inclusi dump diagnostici e issue report). Redige anche query token/key/auth.
+// Puro e infallibile: su qualsiasi errore ritorna l'input com'era.
+function redactUrl(u) {
+  try {
+    let s = String(u);
+    // /autologin/<CF>/<token>[...] → /autologin/<CF>/[REDATTO]
+    s = s.replace(/(\/autologin\/[^/?#]+\/)[^/?#]+/gi, '$1[REDATTO]');
+    // query ?token=..., &key=..., &auth...=...
+    s = s.replace(/([?&](?:token|key|auth[^=&]*)=)[^&#]*/gi, '$1[REDATTO]');
+    return s;
+  } catch (e) {
+    return u;
+  }
+}
+
 function createLogger(root) {
   const logsDir = path.join(root, 'logs');
   ensureDir(logsDir);
@@ -25,7 +43,11 @@ function createLogger(root) {
   const heartbeatFile = path.join(logsDir, 'heartbeat.txt');
 
   function log(...args) {
-    const line = `${new Date().toLocaleTimeString('it-IT')} | ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`;
+    // redactUrl sull'intera riga: gli errori di Playwright (es. TimeoutError su
+    // page.goto) includono l'URL di autologin COMPLETO nel message — passano dai
+    // catch (`log(e.message)`) e finivano in chiaro nei log anche con i singoli
+    // punti di log già redatti. La redazione centrale copre ogni percorso.
+    const line = redactUrl(`${new Date().toLocaleTimeString('it-IT')} | ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}`) + '\n';
     process.stdout.write(line);
     rotateIfNeeded(logFile);
     // Le scritture su file non devono MAI propagare eccezioni (disco pieno,
@@ -42,4 +64,4 @@ function createLogger(root) {
   return log;
 }
 
-module.exports = { createLogger };
+module.exports = { createLogger, redactUrl };

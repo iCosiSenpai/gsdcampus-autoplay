@@ -17,11 +17,16 @@
 #
 # Premi Ctrl-C per uscire.
 
+set -eu -o pipefail
+
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 PID_FILE="$DIR/.autoplay_pid"
+
+# pid_matches condiviso (protezione PID recycling).
+source "$DIR/scripts/lib/pid-utils.sh"
 
 BOLD='\033[1m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; DIM='\033[2m'; NC='\033[0m'
 
@@ -30,7 +35,7 @@ ONCE=false
 for arg in "$@"; do
   case "$arg" in
     --once) ONCE=true ;;
-    *[0-9]) [[ "$arg" =~ ^[0-9]+$ ]] && INTERVAL="$arg" ;;
+    *[0-9]) if [[ "$arg" =~ ^[0-9]+$ ]]; then INTERVAL="$arg"; fi ;;
   esac
 done
 
@@ -40,8 +45,8 @@ render() {
   echo -e "${BOLD}  Monitor corso GSD Campus${NC}   ${DIM}$(date '+%H:%M:%S')${NC}"
   echo "============================================"
 
-  # ── Processo ──
-  if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+  # ── Processo ── (pid_matches: un PID recyclato non risulta "ATTIVO")
+  if [ -f "$PID_FILE" ] && pid_matches "$(cat "$PID_FILE" 2>/dev/null || echo "")" "scheduler|autoplay"; then
     echo -e "Processo:   ${GREEN}${BOLD}ATTIVO${NC} (PID $(cat "$PID_FILE"))"
   else
     echo -e "Processo:   ${YELLOW}${BOLD}FERMO${NC}"
@@ -57,7 +62,8 @@ render() {
 
   # ── Stato runtime + freschezza ──
   if [ -f logs/status.json ] && node -e "JSON.parse(require('fs').readFileSync('logs/status.json','utf8'))" 2>/dev/null; then
-    node <<'NODE' 2>/dev/null
+    # `|| true`: sotto set -e un fallimento del render non deve uccidere il monitor.
+    node 2>/dev/null <<'NODE' || true
       const s = require('./logs/status.json');
       const ageMin = s.lastUpdate ? Math.floor((Date.now() - new Date(s.lastUpdate).getTime()) / 60000) : null;
       const C = { dim: '\x1b[2m', y: '\x1b[0;33m', g: '\x1b[0;32m', r: '\x1b[0;31m', n: '\x1b[0m', b: '\x1b[1m' };
@@ -87,9 +93,10 @@ NODE
 
   echo "--------------------------------------------"
   echo -e "${DIM}Ultimi log:${NC}"
-  [ -f logs/autoplay.log ] && tail -n 6 logs/autoplay.log
+  # `|| true`: sotto set -e un `[ ] && cmd` con condizione falsa sarebbe fatale.
+  [ -f logs/autoplay.log ] && tail -n 6 logs/autoplay.log || true
   echo ""
-  [ "$ONCE" = false ] && echo -e "${DIM}Aggiorno ogni ${INTERVAL}s — Ctrl-C per uscire.${NC}"
+  [ "$ONCE" = false ] && echo -e "${DIM}Aggiorno ogni ${INTERVAL}s — Ctrl-C per uscire.${NC}" || true
 }
 
 if [ "$ONCE" = true ]; then
