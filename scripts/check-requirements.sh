@@ -94,10 +94,10 @@ fi
 if command -v ollama &>/dev/null; then
   if ! curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
     log_missing "Server Ollama attivo su 127.0.0.1:11434 (esegui: ollama serve oppure ./scripts/ollama-daemon.sh start)"
-  elif ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
+  elif ollama list 2>/dev/null | grep -c "${OLLAMA_MODEL}" >/dev/null; then
     log_ok "Modello Ollama ${OLLAMA_MODEL}"
   else
-    log_missing "Modello Ollama ${OLLAMA_MODEL} (modello cloud; esegui ./launch-ai-supervisor.sh oppure ollama login + ollama pull ${OLLAMA_MODEL})"
+    log_missing "Modello Ollama ${OLLAMA_MODEL} (modello cloud; esegui ./launch-ai-supervisor.sh oppure ollama signin + ollama pull ${OLLAMA_MODEL})"
   fi
 fi
 

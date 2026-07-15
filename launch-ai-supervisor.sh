@@ -167,45 +167,50 @@ else
   fi
 fi
 
-# Verifica login Ollama e modello cloud (rapida, nessun download se già presente)
-if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
-  echo ""
-  warn "Il modello $MODEL richiede il login su ollama.com: ora si apre il browser."
-  info "Se non si apre da solo, copia nel browser l'URL che compare qui sotto (https://ollama.com/...)."
-  echo ""
-  read_with_timer 5 "${BOLD}Tra 5s parte il login (Invio per saltare l'attesa).${NC}"
+# ── Modello cloud: flusso PULL-FIRST ──
+# model_present: grep -c >/dev/null (NON -q). Sotto pipefail, grep -q esce al
+# primo match chiudendo la pipe -> `ollama list` muore di SIGPIPE (141) -> la
+# pipeline fallisce ~80% delle volte ANCHE col modello presente (bug visto in
+# produzione: pull riuscito ma "modello non disponibile"). grep -c legge fino
+# a EOF: stessa semantica, zero SIGPIPE.
+model_present() {
+  ollama list 2>/dev/null | grep -c "$MODEL" >/dev/null
+}
 
-  # login + pull in una funzione: sotto `set -e` usiamo `|| return 1` per non abortire,
-  # così possiamo fare un secondo tentativo se il popup del browser non si è aperto.
-  ollama_login_and_pull() {
-    ollama login || true
-    info "Download modello $MODEL (la prima volta può richiedere qualche minuto)..."
-    ollama pull "$MODEL" || return 1
-    return 0
-  }
-
-  ollama_login_and_pull || true
-  if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
+if model_present; then
+  ok "Modello $MODEL pronto."
+else
+  # Prova subito il pull: se l'utente è già loggato su ollama.com funziona al
+  # primo colpo, senza mai parlare di browser/login. Le istruzioni di login
+  # compaiono SOLO se il pull fallisce davvero (prima venivano mostrate sempre,
+  # con un finto URL "https://ollama.com/..." che confondeva).
+  info "Scarico il modello $MODEL (la prima volta può richiedere qualche minuto)..."
+  if ! ollama pull "$MODEL"; then
     echo ""
-    warn "Primo tentativo non riuscito (il browser a volte tarda). Riprovo: se serve, copia a mano l'URL https://ollama.com/... nel browser."
+    warn "Per usare $MODEL serve il login GRATUITO su ollama.com (basta registrarsi, niente da pagare)."
+    info "Ora si apre il browser; se non si apre da solo, copia nel browser l'URL che Ollama stampa qui sotto."
     echo ""
-    ollama_login_and_pull || true
+    read_with_timer 5 "${BOLD}Tra 5s parte il login (Invio per saltare l'attesa).${NC}"
+    ollama signin || true
+    info "Riprovo il download di $MODEL..."
+    ollama pull "$MODEL" || true
   fi
-  if ! ollama list 2>/dev/null | grep -q "$MODEL"; then
+  if model_present; then
+    ok "Modello $MODEL pronto."
+  else
     echo ""
     err "Modello $MODEL non disponibile. Completa il login su ollama.com e rilancia: cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
     info "Nel frattempo l'autoplay può girare senza AI con: ./start.sh"
     exit 1
   fi
 fi
-ok "Modello $MODEL pronto."
 
 # ── Riepilogo finale: tutto ciò che serve sapere prima di iniziare, in un box.
 # Ogni voce degrada a un valore neutro se config.json/CLI non sono disponibili.
 MEMBER_LINE=$(node "$DIR/scripts/lib/members-cli.js" active 2>/dev/null | head -1 | sed 's/^Membro attivo: //' || echo "")
 [ -n "$MEMBER_LINE" ] || MEMBER_LINE="non configurato"
 SCHEDULE_LINE=$(node "$SCHEDULE_CLI" describe 2>/dev/null || echo "non disponibili")
-if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -q '^yes$'; then
+if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -c '^yes$' >/dev/null; then
   TURNO_LINE="${GREEN}adesso è orario di lavoro${NC}"
 else
   NEXT_START_ISO=$(node "$SCHEDULE_CLI" next-start 2>/dev/null || echo "")

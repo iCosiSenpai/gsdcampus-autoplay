@@ -85,7 +85,8 @@ info "Orario lavorativo"
 if [ -f "$DIR/config.json" ]; then
   SCHED_DESC=$(node "$SCHEDULE_CLI" describe 2>/dev/null || echo "non disponibile")
   info "Configurazione: $SCHED_DESC"
-  if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -q '^yes$'; then
+  # grep -c (non -q): evita SIGPIPE sotto pipefail (v. commento in start.sh).
+  if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -c '^yes$' >/dev/null; then
     ok "Adesso è ORARIO LAVORATIVO."
     NEXT_END=$(node "$SCHEDULE_CLI" next-end 2>/dev/null || echo "")
     [ -n "$NEXT_END" ] && info "Fine turno prevista: $NEXT_END" || true

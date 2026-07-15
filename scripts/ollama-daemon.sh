@@ -74,9 +74,10 @@ start() {
   # con sudo; se resta ancora, avviso (il binario potrebbe essere SIGKILLato).
   if [ -d "/Applications/Ollama.app" ]; then
     xattr -dr com.apple.quarantine "/Applications/Ollama.app" 2>/dev/null || true
-    if xattr -l "/Applications/Ollama.app" 2>/dev/null | grep -q 'com.apple.quarantine'; then
+    # grep -c (non -q): evita SIGPIPE sotto pipefail (v. commento in start.sh).
+    if xattr -l "/Applications/Ollama.app" 2>/dev/null | grep -c 'com.apple.quarantine' >/dev/null; then
       sudo xattr -dr com.apple.quarantine "/Applications/Ollama.app" 2>/dev/null || true
-      if xattr -l "/Applications/Ollama.app" 2>/dev/null | grep -q 'com.apple.quarantine'; then
+      if xattr -l "/Applications/Ollama.app" 2>/dev/null | grep -c 'com.apple.quarantine' >/dev/null; then
         log "Attenzione: com.apple.quarantine ancora presente su Ollama.app; il binario potrebbe essere SIGKILLato."
       fi
     fi

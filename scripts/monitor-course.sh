@@ -53,7 +53,8 @@ render() {
   fi
 
   # ── Orario ──
-  if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -q '^yes$'; then
+  # grep -c (non -q): evita SIGPIPE sotto pipefail (v. commento in start.sh).
+  if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -c '^yes$' >/dev/null; then
     echo -e "Orario:     ${GREEN}in orario${NC}  $(node "$SCHEDULE_CLI" describe 2>/dev/null)"
   else
     NEXT=$(node "$SCHEDULE_CLI" next-start 2>/dev/null || echo "")

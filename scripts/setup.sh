@@ -1065,7 +1065,8 @@ install_ollama_official() {
   # Questo triggera preventivamente i permessi che su un Mac nuovo non sono ancora
   # stati concessi (il terminale "non aveva ancora tutti i permessi").
   if [ -d "/Applications/Ollama.app" ]; then
-    if xattr -l "/Applications/Ollama.app" 2>/dev/null | grep -q 'com.apple.quarantine'; then
+    # grep -c (non -q): niente SIGPIPE in pipeline (v. commento in start.sh).
+    if xattr -l "/Applications/Ollama.app" 2>/dev/null | grep -c 'com.apple.quarantine' >/dev/null; then
       info "Primo avvio Ollama: si aprirà il dialogo di consenso Gatekeeper. Clicca 'Apri'."
       local consented=false
       for attempt in 1 2 3; do
@@ -1132,40 +1133,38 @@ step "6/7 - Modello Ollama ${OLLAMA_MODEL}"
 if [ "$OLLAMA_AVAILABLE" = false ]; then
   warn "Salto il download del modello ${OLLAMA_MODEL}: server Ollama non disponibile."
   warn "L'AI supervisore (launch-ai-supervisor.sh) riproverà ad avviare Ollama e scaricare il modello."
-elif ! ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
-  warn "Il modello ${OLLAMA_MODEL} è un modello CLOUD e richiede il login Ollama."
-  echo ""
-  echo -e "${BOLD}Tra pochi secondi si aprirà una finestra del browser per il login su ollama.com.${NC}"
-  echo -e "${BOLD}Se il browser NON si apre da solo, copia nel browser l'URL che compare qui sotto${NC}"
-  echo -e "${BOLD}(la riga con https://ollama.com/...).${NC}"
-  echo ""
-  read_with_timer 5 "${BOLD}Leggi con calma: tra 5s parte il login (Invio per saltare).${NC}"
-
-  # login + pull in una funzione: sotto `set -e` usiamo `|| return 1` per non abortire,
-  # così possiamo fare un secondo tentativo se il popup del browser non si è aperto.
-  ollama_login_and_pull() {
-    ollama login || true
-    info "Download modello ${OLLAMA_MODEL} in corso (la prima volta può richiedere qualche minuto)..."
-    ollama pull "${OLLAMA_MODEL}" || return 1
-    return 0
-  }
-  ollama_login_and_pull || true
-  if ! ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
-    echo ""
-    warn "Non riuscito al primo tentativo (a volte il browser non si apre subito). Riprovo una volta..."
-    echo -e "${BOLD}Se il browser non si apre, copia a mano l'URL (https://ollama.com/...) nel browser.${NC}"
-    echo ""
-    ollama_login_and_pull || true
-  fi
-  if ! ollama list 2>/dev/null | grep -q "${OLLAMA_MODEL}"; then
-    err "Download del modello ${OLLAMA_MODEL} non riuscito."
-    warn "Verifica di aver completato il login su ollama.com nel browser e di avere connessione,"
-    warn "poi rilancia con:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
-    warn "Nel frattempo l'autoplay può girare senza AI con:  ./start.sh"
-    exit 1
-  fi
 else
-  ok "Modello ${OLLAMA_MODEL} già presente. Salto."
+  # model_present_setup: grep -c >/dev/null (non -q) per evitare SIGPIPE se in
+  # futuro questo script passasse a pipefail (bug già visto nel launcher).
+  model_present_setup() {
+    ollama list 2>/dev/null | grep -c "${OLLAMA_MODEL}" >/dev/null
+  }
+  if model_present_setup; then
+    ok "Modello ${OLLAMA_MODEL} già presente. Salto."
+  else
+    # PULL-FIRST: se l'utente è già loggato su ollama.com il pull riesce subito,
+    # senza mai mostrare istruzioni browser/login. Il login (ollama signin, che
+    # stampa da solo l'URL reale) parte SOLO se il pull fallisce davvero.
+    info "Download modello ${OLLAMA_MODEL} (la prima volta può richiedere qualche minuto)..."
+    if ! ollama pull "${OLLAMA_MODEL}"; then
+      echo ""
+      warn "Per usare ${OLLAMA_MODEL} serve il login GRATUITO su ollama.com (basta registrarsi, niente da pagare)."
+      info "Ora si apre il browser; se non si apre da solo, copia nel browser l'URL che Ollama stampa qui sotto."
+      echo ""
+      read_with_timer 5 "${BOLD}Tra 5s parte il login (Invio per saltare l'attesa).${NC}"
+      ollama signin || true
+      info "Riprovo il download di ${OLLAMA_MODEL}..."
+      ollama pull "${OLLAMA_MODEL}" || true
+    fi
+    if model_present_setup; then
+      ok "Modello ${OLLAMA_MODEL} pronto."
+    else
+      err "Download del modello ${OLLAMA_MODEL} non riuscito."
+      warn "Completa il login su ollama.com e rilancia:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
+      warn "Nel frattempo l'autoplay può girare senza AI con:  ./start.sh"
+      exit 1
+    fi
+  fi
 fi
 
 # 7. Claude Code CLI

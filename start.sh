@@ -109,7 +109,10 @@ step "5/5" "Avvio scheduler in background"
 if [ "$IGNORE_HOURS" = true ]; then
   nohup "$DIR/scripts/scheduler.sh" --ignore-hours > "$OUT_FILE" 2>&1 &
 else
-  if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -q '^yes$'; then
+  # grep -c >/dev/null (NON -q): sotto pipefail, grep -q esce al primo match
+  # chiudendo la pipe -> SIGPIPE (141) al comando a sinistra -> pipeline fallita
+  # anche col match trovato. grep -c legge fino a EOF: stessa semantica, zero SIGPIPE.
+  if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -c '^yes$' >/dev/null; then
     info "Siamo in orario lavorativo: l'autoplay partirà subito."
   else
     NEXT_START=$(node "$SCHEDULE_CLI" next-start 2>/dev/null || echo "")

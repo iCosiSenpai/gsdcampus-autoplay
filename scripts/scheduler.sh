@@ -107,7 +107,8 @@ wait_ms() {
 
 # Controlla se siamo in orario lavorativo
 is_in_hours() {
-  node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -q '^yes$'
+  # grep -c (non -q): evita SIGPIPE sotto pipefail (v. commento in start.sh).
+  node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -c '^yes$' >/dev/null
 }
 
 log "Scheduler avviato. IGNORE_HOURS=$IGNORE_HOURS"
