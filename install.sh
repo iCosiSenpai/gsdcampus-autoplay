@@ -106,6 +106,15 @@ else
 fi
 echo ""
 
+# Preflight di rete (INLINE: pre-clone scripts/doctor.sh non esiste ancora;
+# post-clone il doctor completo rifà questi check e molto altro).
+# Ritorna 0 se internet + GitHub raw sono raggiungibili.
+net_preflight() {
+  curl -m 5 -fsS -o /dev/null https://captive.apple.com 2>/dev/null || return 1
+  curl -m 5 -fsS -o /dev/null "https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh" 2>/dev/null || return 1
+  return 0
+}
+
 # 1. git
 if ! command -v git >/dev/null 2>&1; then
   warn "git non trovato. Avvio l'installazione dei Command Line Tools di macOS..."
@@ -198,6 +207,12 @@ elif [ -d "$TARGET" ]; then
   warn "Esiste già $TARGET ma non è una copia git. Non la sovrascrivo: uso il contenuto attuale."
   MODE="launch"
 else
+  # Prima installazione: senza rete non si può clonare → fail-fast chiaro.
+  if ! net_preflight; then
+    err "Niente connessione a internet (o GitHub non raggiungibile)."
+    info "Controlla il Wi-Fi/cavo di rete e rilancia questo stesso comando."
+    exit 1
+  fi
   info "Scarico il progetto in $TARGET..."
   clone_repo "$TARGET"
   ok "Progetto scaricato."
@@ -216,24 +231,49 @@ chmod +x ./scripts/*.sh 2>/dev/null || true
 # 3. Esegui l'azione scelta
 case "$MODE" in
   update)
-    update_repo
-    # Aggiorna la banca risposte pubblica (se presente sul repo) con quelle locali.
-    if [ -f "$TARGET/scripts/update-known-answers.sh" ]; then
-      "$TARGET/scripts/update-known-answers.sh" 2>/dev/null || true
-    fi
-    # Dopo l'aggiornamento del codice, controlla se anche le dipendenze sono allineate.
-    # Se package.json/package-lock.json sono cambiati, setup.sh le aggiornerà in modo
-    # automatico e solo se necessario.
-    if [ -f "$TARGET/scripts/check-requirements.sh" ] && ! "$TARGET/scripts/check-requirements.sh" >/dev/null 2>&1; then
-      info "Dipendenze da aggiornare dopo il pull. Avvio setup condizionale..."
-      sudo -v
-      "$TARGET/scripts/setup.sh" --yes
+    # Su installazione esistente la rete assente NON blocca: si salta solo
+    # l'aggiornamento e si avvia la versione locale (meglio di un vicolo cieco).
+    if ! net_preflight; then
+      warn "Niente rete: salto l'aggiornamento e avvio la versione già installata."
     else
-      ok "Codice e dipendenze già allineati."
+      update_repo
+      # Aggiorna la banca risposte pubblica (se presente sul repo) con quelle locali.
+      if [ -f "$TARGET/scripts/update-known-answers.sh" ]; then
+        "$TARGET/scripts/update-known-answers.sh" 2>/dev/null || true
+      fi
+      # Dopo l'aggiornamento del codice, controlla se anche le dipendenze sono allineate.
+      # Se package.json/package-lock.json sono cambiati, setup.sh le aggiornerà in modo
+      # automatico e solo se necessario.
+      if [ -f "$TARGET/scripts/check-requirements.sh" ] && ! "$TARGET/scripts/check-requirements.sh" >/dev/null 2>&1; then
+        info "Dipendenze da aggiornare dopo il pull. Avvio setup condizionale..."
+        sudo -v
+        "$TARGET/scripts/setup.sh" --yes
+      else
+        ok "Codice e dipendenze già allineati."
+      fi
+    fi
+    # Checkup a semaforo (post-update): AVVISA, non blocca — il launcher a valle
+    # ha già i rimedi per quasi tutto (setup, Ollama, pull modello).
+    DOCTOR_STATUS=""
+    if [ -x "$TARGET/scripts/doctor.sh" ]; then
+      if "$TARGET/scripts/doctor.sh"; then
+        DOCTOR_STATUS="ok"
+      else
+        DOCTOR_STATUS="problemi"
+        warn "Il checkup ha trovato problemi (rimedi qui sopra). Proseguo comunque tra 8s..."
+        if [ -n "$TTY_REDIR" ]; then
+          read -r -t 8 -p "  Invio per continuare subito, Ctrl-C per fermarti. " < "$TTY_REDIR" || true
+          echo ""
+        fi
+      fi
     fi
     ;;
   reconfig)
-    update_repo
+    if ! net_preflight; then
+      warn "Niente rete: salto l'aggiornamento del codice, riconfiguro con la versione locale."
+    else
+      update_repo
+    fi
     warn "Riconfigurazione: ti verrà richiesto di selezionare l'account dall'elenco membri e di configurare gli orari."
     # NON cancelliamo subito la config: la mettiamo da parte come backup, così se
     # la riconfigurazione viene annullata setup.sh può ripristinarla (niente perdita
@@ -246,6 +286,7 @@ case "$MODE" in
     ;;
   clean)
     info "Reinstallazione pulita."
+    net_preflight || warn "Niente rete: riallineo alla versione origin già scaricata (niente fetch)."
     git fetch --quiet origin "$BRANCH" || true
     # Preservo known_answers.json (banca trusted locale, ora gitignorata): il
     # reset --hard al commit che la destraccia la rimuoverebbe dal disco, perdendo
@@ -280,7 +321,28 @@ case "$MODE" in
 esac
 
 echo ""
-ok "Pronto. Avvio il supervisore AI..."
+# Schermata finale "Tutto pronto" prima di passare al supervisore.
+FINAL_VER=$(git -C "$TARGET" describe --tags --always 2>/dev/null || echo "")
+case "$MODE" in
+  update)  FINAL_ACTION="aggiornato e pronto" ;;
+  reconfig) FINAL_ACTION="riconfigurazione in arrivo" ;;
+  clean)   FINAL_ACTION="reinstallato da zero" ;;
+  install) FINAL_ACTION="prima installazione" ;;
+  *)       FINAL_ACTION="pronto" ;;
+esac
+if [ "${UI_OK}" = '✓' ]; then
+  printf ' %b╭──────────────────────────────────────────╮%b\n' "$ACCENT" "$NC"
+  ui_box_line "Tutto pronto" "$BOLD"
+  [ -n "$FINAL_VER" ] && ui_box_line "versione $FINAL_VER · $FINAL_ACTION" "$DIM" || true
+  if [ "${DOCTOR_STATUS:-}" = "ok" ]; then
+    ui_box_line "checkup sistema: tutto in ordine" "$DIM"
+  elif [ "${DOCTOR_STATUS:-}" = "problemi" ]; then
+    ui_box_line "checkup sistema: vedi avvisi sopra" "$DIM"
+  fi
+  printf ' %b╰──────────────────────────────────────────╯%b\n' "$ACCENT" "$NC"
+  echo ""
+fi
+ok "Avvio il supervisore AI..."
 echo ""
 
 # 4. Avvia il launcher in modo interattivo (legge da terminale anche se siamo in pipe).

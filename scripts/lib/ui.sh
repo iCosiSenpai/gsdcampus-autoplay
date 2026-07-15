@@ -59,13 +59,19 @@ ui_charlen() {
   printf '%s' "$1" | wc -m | tr -d ' '
 }
 
-# ui_header "titolo" ["sottotitolo"]: box arrotondato accent, larghezza 44.
+# ui_header "titolo" ["sottotitolo"] ["icona"]: box arrotondato accent, largh. 44.
 #   ╭──────────────────────────────────────────╮
-#   │  Titolo                                  │
+#   │  ⚡ Titolo                               │
 #   │  sottotitolo (DIM)                       │
 #   ╰──────────────────────────────────────────╯
+# L'icona (es. "⚡") viene preposta al titolo SOLO su locale UTF-8; molte emoji
+# sono a doppia larghezza, quindi può disallineare il bordo destro di 1 colonna:
+# accettato (solo estetico).
 ui_header() {
-  local title="$1" sub="${2:-}" width=44 inner pad len
+  local title="$1" sub="${2:-}" icon="${3:-}" width=44 inner pad len
+  if [ -n "$icon" ] && [ "$UI_OK" = '✓' ]; then
+    title="$icon $title"
+  fi
   inner=$((width - 2))
   echo ""
   echo -e "${ACCENT}${UI_TL}$(ui_repeat "$inner" "$UI_H")${UI_TR}${NC}"
