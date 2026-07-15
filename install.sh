@@ -236,7 +236,28 @@ case "$MODE" in
     if ! net_preflight; then
       warn "Niente rete: salto l'aggiornamento e avvio la versione già installata."
     else
+      OLD_HEAD=$(git -C "$TARGET" rev-parse HEAD 2>/dev/null || echo "")
       update_repo
+      # Box "Novità": righe aggiunte a CHANGELOG.md tra la versione di prima e
+      # quella appena scaricata, in linguaggio semplice. Ogni grep con || true:
+      # sotto pipefail un no-match (exit 1) abortirebbe l'installer.
+      NEW_HEAD=$(git -C "$TARGET" rev-parse HEAD 2>/dev/null || echo "")
+      if [ -n "$OLD_HEAD" ] && [ -n "$NEW_HEAD" ] && [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
+        NOVITA=$(git -C "$TARGET" diff "$OLD_HEAD"..HEAD -- CHANGELOG.md 2>/dev/null \
+          | { grep '^+' || true; } | { grep -v '^+++' || true; } \
+          | sed 's/^+//' | { grep -v '^\s*$' || true; } | { grep -v '^#' || true; } | head -10)
+        if [ -n "${NOVITA:-}" ] && [ "${UI_OK}" = '✓' ]; then
+          echo ""
+          printf ' %b╭──────────────────────────────────────────╮%b\n' "$ACCENT" "$NC"
+          ui_box_line "Novità di questo aggiornamento" "$BOLD"
+          printf ' %b╰──────────────────────────────────────────╯%b\n' "$ACCENT" "$NC"
+          printf '%s\n' "$NOVITA" | while IFS= read -r nl; do
+            printf '  %b·%b %s\n' "$ACCENT" "$NC" "${nl#- }"
+          done
+          printf '  %baggiornato: %.7s → %.7s%b\n' "$DIM" "$OLD_HEAD" "$NEW_HEAD" "$NC"
+          echo ""
+        fi
+      fi
       # Aggiorna la banca risposte pubblica (se presente sul repo) con quelle locali.
       if [ -f "$TARGET/scripts/update-known-answers.sh" ]; then
         "$TARGET/scripts/update-known-answers.sh" 2>/dev/null || true

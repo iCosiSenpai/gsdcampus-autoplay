@@ -16,6 +16,20 @@ export NO_COLOR=1
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 
+# Notifiche macOS (best-effort, mai bloccanti; throttle interno 6h per tipo).
+source "$DIR/scripts/lib/notify.sh"
+
+# Mappa gli exit code che richiedono intervento umano su una notifica macOS.
+# SOLO side-effect: non tocca EXIT_CODE né i rami decisionali (l'exit-code API
+# 0/2/3/4 del contratto scheduler↔autoplay resta intatta).
+notify_on_exit() {
+  case "${1:-}" in
+    2) notify_user "GSD Campus" "Il corso ha bisogno di aiuto: apri il Terminale e rilancia il comando di avvio." need_help || true ;;
+    3) notify_user "GSD Campus" "Il link di accesso al corso è scaduto: serve quello nuovo dal referente." autologin_invalid || true ;;
+  esac
+  return 0
+}
+
 IGNORE_HOURS=false
 if [ "${1:-}" = "--ignore-hours" ]; then
   IGNORE_HOURS=true
@@ -161,6 +175,7 @@ apply_crash_backoff() {
   if [[ "$CRASH_COUNT" -ge "$MAX_CRASHES" ]]; then
     log "Raggiunti $MAX_CRASHES crash consecutivi: crash_loop. Scrivo status.json ed esco (l'AI supervisore deve intervenire)."
     mark_crash_loop "crash_loop"
+    notify_user "GSD Campus" "L'automazione si è fermata per errori ripetuti: apri il Terminale e rilancia il comando di avvio." crash_loop || true
     return 1
   fi
   sleep "$BACKOFF"
@@ -186,6 +201,7 @@ while true; do
     # scheduler prima di poter leggere pipestatus.
     EXIT_CODE=0
     node "$DIR/src/autoplay.js" --ignore-hours 2>&1 | tee -a "$LOG_FILE" || EXIT_CODE=${pipestatus[1]}
+    notify_on_exit "$EXIT_CODE"
     if [[ "$EXIT_CODE" -eq 0 ]]; then
       # Uscita pulita: fine turno oppure tutti i corsi completati/in attesa di aiuto (need_help).
       # Non riavviare subito a vuoto; attendi 10 minuti così l'AI/utente può intervenire.
@@ -212,6 +228,7 @@ while true; do
     # zsh pipestatus (1-indexed): v. commento nel ramo ignore-hours.
     EXIT_CODE=0
     node "$DIR/src/autoplay.js" 2>&1 | tee -a "$LOG_FILE" || EXIT_CODE=${pipestatus[1]}
+    notify_on_exit "$EXIT_CODE"
     if [[ "$EXIT_CODE" -eq 0 ]]; then
       CRASH_COUNT=0
       log "Autoplay terminato con codice 0 (fine turno). Calcolo prossimo turno..."

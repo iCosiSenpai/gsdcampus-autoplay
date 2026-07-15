@@ -134,6 +134,9 @@ cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-a
 ./scripts/prepare-package.sh --yes      # crea sul Desktop copia pulita per un collega
 ./scripts/prepare-package.sh --yes --zip # ...e anche lo zip
 ./scripts/dev-check.sh                  # controlli statici pre-push (sintassi + lint anti-SIGPIPE)
+./scripts/doctor.sh [--full]            # checkup a semaforo (con --full verifica anche il link autologin)
+# CHANGELOG.md: aggiungere una sezione "## data" con bullet semplici a ogni push
+# rilevante — il curl mostra le righe nuove nel box "Novità" dopo l'update.
 
 # Helper orari
 node scripts/lib/schedule-cli.js describe      # descrizione orario configurato
