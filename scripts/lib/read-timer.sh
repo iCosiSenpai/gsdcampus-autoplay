@@ -22,7 +22,7 @@ read_with_timer() {
 
   local i
   for ((i = secs; i > 0; i--)); do
-    printf "\r\033[K  Attendere %2d s — Invio per saltare... " "$i"
+    printf "\r\033[K  \033[2mAttendere %2d s — Invio per saltare...\033[0m " "$i"
     # read -t 1 -k 1: attende 1 tasto per al massimo 1 secondo. Se arriva un tasto
     # entro il secondo, esce subito (skip). `|| true` rende la lista sempre vera
     # così set -e non abortisce sul timeout (read ritorna non-zero a timeout).

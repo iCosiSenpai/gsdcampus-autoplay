@@ -20,10 +20,25 @@ function clearScreen() {
   process.stdout.write('\x1b[2J\x1b[H');
 }
 
+// Stile allineato a scripts/lib/ui.sh: box arrotondato + accent, testo
+// secondario DIM. I codici sono no-op visivi accettabili anche su terminali
+// poveri; il menu gira sempre su /dev/tty (TTY reale), quindi niente guard.
+const UI = {
+  accent: '\x1b[38;5;45m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  reset: '\x1b[0m',
+};
+
 function printBox(title, lines) {
-  console.log('============================================');
-  console.log(title);
-  console.log('============================================');
+  const width = 42;
+  const pad = (s) => {
+    const len = [...String(s)].length;           // caratteri, non byte
+    return String(s) + ' '.repeat(Math.max(0, width - 2 - len));
+  };
+  console.log(`${UI.accent}╭${'─'.repeat(width)}╮${UI.reset}`);
+  console.log(`${UI.accent}│${UI.reset}  ${UI.bold}${pad(title)}${UI.reset}${UI.accent}│${UI.reset}`);
+  console.log(`${UI.accent}╰${'─'.repeat(width)}╯${UI.reset}`);
   lines.forEach(l => console.log(l));
 }
 
@@ -58,12 +73,15 @@ function ttyMenu(items, title, subtitle, startIdx = 0) {
       if (subtitle) console.log(subtitle);
       console.log('');
       items.forEach((it, i) => {
-        const cursor = i === selected ? '▶ ' : '  ';
         const label = typeof it === 'string' ? it : it.label;
-        console.log(`${cursor}${label}`);
+        if (i === selected) {
+          console.log(` ${UI.accent}▸${UI.reset} ${UI.bold}${label}${UI.reset}`);
+        } else {
+          console.log(`   ${UI.dim}${label}${UI.reset}`);
+        }
       });
       console.log('');
-      console.log('↑/↓: muovi  •  Invio: seleziona  •  q: annulla');
+      console.log(`${UI.dim}↑/↓ muovi · Invio seleziona · q annulla${UI.reset}`);
     }
 
     readline.emitKeypressEvents(process.stdin);

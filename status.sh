@@ -28,10 +28,7 @@ source "$DIR/scripts/lib/ui.sh"
 
 source "$DIR/scripts/lib/pid-utils.sh"
 
-echo ""
-echo "============================================"
-echo -e "${BOLD}  Stato GSD Campus Autoplay${NC}"
-echo "============================================"
+ui_header "Stato GSD Campus Autoplay" "versione $(ui_version "$DIR")"
 echo ""
 
 PID_FILE=".autoplay_pid"

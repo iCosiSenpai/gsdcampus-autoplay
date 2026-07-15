@@ -38,22 +38,8 @@ if [ "$UNINSTALL" = true ]; then
   exec "$DIR/scripts/uninstall.sh"
 fi
 
-info() {
-  echo -e "${BLUE}${BOLD}[INFO]${NC} $1"
-}
-ok() {
-  echo -e "${GREEN}${BOLD}[OK]${NC} $1"
-}
-warn() {
-  echo -e "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"
-}
-err() {
-  echo -e "${RED}${BOLD}[ERRORE]${NC} $1"
-}
-step() {
-  echo ""
-  echo -e "${BOLD}▶ $1${NC}"
-}
+# info/ok/warn/err/step arrivano da scripts/lib/ui.sh (glifi ✓ ✗ ⚠, progress
+# ●●○): le vecchie copie locali sono state rimosse.
 
 # Helper countdown "Timer + Invio per saltare" per i messaggi che l'utente deve leggere.
 source "$DIR/scripts/lib/read-timer.sh"
@@ -268,10 +254,7 @@ verify_autologin_live() {
 }
 
 print_header() {
-  echo ""
-  echo "============================================"
-  echo -e "${BOLD}  Benvenuto nel setup di GSD Campus Autopilot${NC}"
-  echo "============================================"
+  ui_header "Setup GSD Campus Autopilot" "versione $(ui_version "$DIR")"
   echo ""
   echo "Ti guido in pochi passi a configurare l'automazione del corso."
   echo "Ti chiederò solo 2 cose semplici:"
@@ -290,9 +273,9 @@ print_header() {
 
 print_footer() {
   echo ""
-  echo "============================================"
-  ok "Setup completato con successo."
-  echo "============================================"
+  ui_hr
+  ok "${GREEN}${BOLD}Setup completato con successo.${NC}"
+  ui_hr
   echo ""
   info "Da ora ti basta SEMPRE questo comando (installa, aggiorna e avvia):"
   echo -e "  ${BOLD}curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash${NC}"

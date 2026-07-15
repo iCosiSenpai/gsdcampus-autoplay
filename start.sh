@@ -26,11 +26,7 @@ if [ "${1:-}" = "--ignore-hours" ]; then
   warn "Modalità IGNORE-HOURS: avvia anche fuori orario lavorativo."
 fi
 
-echo ""
-echo "============================================"
-echo -e "${BOLD}  Avvio GSD Campus Autoplay${NC}"
-echo "============================================"
-echo ""
+ui_header "Avvio GSD Campus Autoplay" "versione $(ui_version "$DIR")"
 
 # Verifica che config.json esista e non sia placeholder
 step "1/5" "Verifica configurazione"
@@ -141,16 +137,16 @@ if command -v caffeinate >/dev/null 2>&1 && [ -n "$PID" ]; then
 fi
 
 echo ""
-echo "────────────────────────────"
+ui_hr
 if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-  ok "Scheduler autoplay avviato in background. PID: $PID"
-  echo -e "${BOLD}Comandi utili:${NC}"
-  echo "  ./status.sh                 → stato e log"
-  echo "  ./stop.sh                   → ferma tutto"
-  echo "  tail -f logs/autoplay.log   → log in tempo reale"
-  echo "  tail -f logs/scheduler.log  → log scheduler"
+  ok "Scheduler autoplay avviato in background ${DIM}(PID $PID)${NC}"
+  echo ""
+  echo -e " ${BOLD}Comandi utili${NC}"
+  ui_kv "Stato" "./status.sh"
+  ui_kv "Ferma" "./stop.sh"
+  ui_kv "Log live" "tail -f logs/autoplay.log"
 else
   err "Avvio fallito. Controlla $OUT_FILE"
   exit 1
 fi
-echo "────────────────────────────"
+ui_hr

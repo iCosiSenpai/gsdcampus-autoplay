@@ -49,11 +49,24 @@ clone_repo() {
   git clone --branch "$BRANCH" --depth 1 "$REPO_URL" "$dest"
 }
 
-BOLD='\033[1m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; RED='\033[0;31m'; NC='\033[0m'
-info() { printf "${BLUE}${BOLD}[INFO]${NC} %s\n" "$1"; }
-ok()   { printf "${GREEN}${BOLD}[OK]${NC} %s\n" "$1"; }
-warn() { printf "${YELLOW}${BOLD}[ATTENZIONE]${NC} %s\n" "$1"; }
-err()  { printf "${RED}${BOLD}[ERRORE]${NC} %s\n" "$1"; }
+# Estetica inline (install.sh gira PRIMA del clone: non può sourcare
+# scripts/lib/ui.sh — queste copie devono restare allineate a quella lib).
+# Colori solo su TTY; accent 256-color con fallback ciano.
+if [ -t 1 ]; then
+  BOLD='\033[1m'; DIM='\033[2m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'
+  RED='\033[0;31m'; NC='\033[0m'
+  if [ "$(tput colors 2>/dev/null || echo 8)" -ge 256 ]; then ACCENT='\033[38;5;45m'; else ACCENT='\033[0;36m'; fi
+else
+  BOLD=''; DIM=''; GREEN=''; YELLOW=''; RED=''; NC=''; ACCENT=''
+fi
+case "${LC_ALL:-${LANG:-}}" in
+  *UTF-8*|*utf-8*|*utf8*) UI_OK='✓'; UI_ERR='✗'; UI_WARN='⚠'; UI_INFO='·' ;;
+  *) UI_OK='+'; UI_ERR='x'; UI_WARN='!'; UI_INFO='-' ;;
+esac
+info() { printf ' %b%s%b %s\n' "$ACCENT" "$UI_INFO" "$NC" "$1"; }
+ok()   { printf ' %b%s%b %s\n' "$GREEN$BOLD" "$UI_OK" "$NC" "$1"; }
+warn() { printf ' %b%s%b %s\n' "$YELLOW$BOLD" "$UI_WARN" "$NC" "$1"; }
+err()  { printf ' %b%s%b %s\n' "$RED$BOLD" "$UI_ERR" "$NC" "$1"; }
 
 # Quando lo script arriva da "curl | bash", lo stdin è la pipe, non il Terminale: i comandi
 # interattivi (read dell'autologin/orari, sudo, ollama login) leggerebbero il testo dello script
@@ -64,17 +77,33 @@ if { : < /dev/tty; } 2>/dev/null; then
   TTY_REDIR="/dev/tty"
 fi
 
+# Banner a box arrotondato (allineato allo stile di scripts/lib/ui.sh; qui
+# inline perché pre-clone). Larghezza fissa 44; padding calcolato in caratteri.
+ui_box_line() {
+  # $1 = testo, $2 = codice stile (es. $BOLD o $DIM)
+  local len pad spaces
+  len=$(printf '%s' "$1" | wc -m | tr -d ' ')
+  pad=$((40 - len)); [ "$pad" -lt 0 ] && pad=0
+  spaces=$(printf '%*s' "$pad" "")
+  printf ' %b│%b  %b%s%b%s%b│%b\n' "$ACCENT" "$NC" "$2" "$1" "$NC" "$spaces" "$ACCENT" "$NC"
+}
 echo ""
-echo "============================================"
-printf '%b  GSD Campus Autopilot — Installer%b\n' "$BOLD" "$NC"
 # Versione dell'installazione locale (se esiste già): aiuta a capire da quale
 # versione si sta aggiornando. Alla prima installazione non c'è ancora nulla.
+INST_VER=""
 if [ -d "$HOME/gsdcampus-autoplay/.git" ]; then
   INST_VER=$(git -C "$HOME/gsdcampus-autoplay" describe --tags --always 2>/dev/null || echo "")
   INST_DATE=$(git -C "$HOME/gsdcampus-autoplay" log -1 --format=%cd --date=format:'%d/%m/%Y' 2>/dev/null || echo "")
+fi
+if [ "${UI_OK}" = '✓' ]; then
+  printf ' %b╭──────────────────────────────────────────╮%b\n' "$ACCENT" "$NC"
+  ui_box_line "GSD Campus Autopilot — Installer" "$BOLD"
+  [ -n "$INST_VER" ] && ui_box_line "versione $INST_VER${INST_DATE:+ · $INST_DATE}" "$DIM" || true
+  printf ' %b╰──────────────────────────────────────────╯%b\n' "$ACCENT" "$NC"
+else
+  printf '%b  GSD Campus Autopilot — Installer%b\n' "$BOLD" "$NC"
   [ -n "$INST_VER" ] && printf "  versione installata: %s%s\n" "$INST_VER" "${INST_DATE:+ del $INST_DATE}" || true
 fi
-echo "============================================"
 echo ""
 
 # 1. git

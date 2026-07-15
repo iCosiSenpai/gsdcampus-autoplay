@@ -41,12 +41,8 @@ requirements_satisfied() {
   "$CHECK_REQ" >/dev/null 2>&1
 }
 
-echo ""
-echo "============================================"
-echo -e "${BOLD}  gsdcampus-autoplay — AI Supervisor${NC}"
 VERSION_LINE="$(ui_version "$DIR")"
-[ -n "$VERSION_LINE" ] && echo -e "${DIM}  versione $VERSION_LINE${NC}" || true
-echo "============================================"
+ui_header "GSD Campus — AI Supervisor" "${VERSION_LINE:+versione $VERSION_LINE}"
 echo ""
 
 # 0. Ferma eventuali istanze precedenti per evitare conflitti tra codice vecchio e nuovo
@@ -217,19 +213,19 @@ else
   NEXT_START_HUMAN=$(node -e "const d=new Date(process.argv[1]);if(!isNaN(d))process.stdout.write(d.toLocaleString('it-IT',{weekday:'short',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))" "$NEXT_START_ISO" 2>/dev/null || echo "")
   TURNO_LINE="${YELLOW}fuori orario${NC}${NEXT_START_HUMAN:+ — prossimo turno: $NEXT_START_HUMAN}"
 fi
-if [ "$OLLAMA_UP" = true ]; then OLLAMA_LINE="${GREEN}attivo${NC} ($MODEL)"; else OLLAMA_LINE="${RED}non attivo${NC}"; fi
+if [ "$OLLAMA_UP" = true ]; then OLLAMA_LINE="${GREEN}${UI_OK} attivo${NC} ${DIM}($MODEL)${NC}"; else OLLAMA_LINE="${RED}${UI_ERR} non attivo${NC}"; fi
 
 echo ""
-echo "────────────────────────────────────────────"
-echo -e "${GREEN}${BOLD}  AI Supervisor pronto${NC}"
-echo "────────────────────────────────────────────"
-echo -e "  Account:  ${BOLD}${MEMBER_LINE}${NC}"
-echo -e "  Orari:    ${SCHEDULE_LINE}"
-echo -e "  Turno:    ${TURNO_LINE}"
-echo -e "  Ollama:   ${OLLAMA_LINE}"
-echo "────────────────────────────────────────────"
+ui_hr
+echo -e " ${GREEN}${BOLD}${UI_OK} AI Supervisor pronto${NC}"
+ui_hr
+ui_kv "Account" "${BOLD}${MEMBER_LINE}${NC}"
+ui_kv "Orari" "${SCHEDULE_LINE}"
+ui_kv "Turno" "${TURNO_LINE}"
+ui_kv "Ollama" "${OLLAMA_LINE}"
+ui_hr
 echo ""
-echo -e "${BOLD}Scrivi in chat:${NC}  'avvia il corso' • 'controlla il corso' • 'come sta andando?' • 'ferma tutto'"
+echo -e " ${BOLD}Scrivi in chat:${NC} ${ACCENT}'avvia il corso'${NC} ${DIM}·${NC} ${ACCENT}'controlla il corso'${NC} ${DIM}·${NC} ${ACCENT}'come sta andando?'${NC} ${DIM}·${NC} ${ACCENT}'ferma tutto'${NC}"
 echo ""
 
 # Avvia Claude con skip permessi e modello Ollama.

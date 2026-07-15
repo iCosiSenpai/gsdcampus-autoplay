@@ -133,6 +133,7 @@ cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-a
 ./scripts/uninstall.sh                  # rimuove dipendenze, modelli, CLI e progetto (conferma)
 ./scripts/prepare-package.sh --yes      # crea sul Desktop copia pulita per un collega
 ./scripts/prepare-package.sh --yes --zip # ...e anche lo zip
+./scripts/dev-check.sh                  # controlli statici pre-push (sintassi + lint anti-SIGPIPE)
 
 # Helper orari
 node scripts/lib/schedule-cli.js describe      # descrizione orario configurato

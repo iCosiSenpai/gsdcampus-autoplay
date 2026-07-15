@@ -25,10 +25,9 @@ cd "$DIR"
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 PID_FILE="$DIR/.autoplay_pid"
 
-# pid_matches condiviso (protezione PID recycling).
+# pid_matches condiviso (protezione PID recycling) + palette/helper UI.
 source "$DIR/scripts/lib/pid-utils.sh"
-
-BOLD='\033[1m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; RED='\033[0;31m'; BLUE='\033[0;34m'; DIM='\033[2m'; NC='\033[0m'
+source "$DIR/scripts/lib/ui.sh"
 
 INTERVAL=30
 ONCE=false
@@ -40,25 +39,24 @@ for arg in "$@"; do
 done
 
 render() {
-  clear 2>/dev/null || true
-  echo "============================================"
-  echo -e "${BOLD}  Monitor corso GSD Campus${NC}   ${DIM}$(date '+%H:%M:%S')${NC}"
-  echo "============================================"
+  # clear solo su TTY (su pipe sporcherebbe l'output con escape).
+  [ -t 1 ] && { clear 2>/dev/null || true; } || true
+  ui_header "Monitor corso GSD Campus" "aggiornato alle $(date '+%H:%M:%S')"
 
   # ── Processo ── (pid_matches: un PID recyclato non risulta "ATTIVO")
   if [ -f "$PID_FILE" ] && pid_matches "$(cat "$PID_FILE" 2>/dev/null || echo "")" "scheduler|autoplay"; then
-    echo -e "Processo:   ${GREEN}${BOLD}ATTIVO${NC} (PID $(cat "$PID_FILE"))"
+    ui_kv "Processo" "${GREEN}${BOLD}${UI_OK} ATTIVO${NC} ${DIM}(PID $(cat "$PID_FILE"))${NC}"
   else
-    echo -e "Processo:   ${YELLOW}${BOLD}FERMO${NC}"
+    ui_kv "Processo" "${YELLOW}${BOLD}FERMO${NC}"
   fi
 
   # ── Orario ──
   # grep -c (non -q): evita SIGPIPE sotto pipefail (v. commento in start.sh).
   if node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -c '^yes$' >/dev/null; then
-    echo -e "Orario:     ${GREEN}in orario${NC}  $(node "$SCHEDULE_CLI" describe 2>/dev/null)"
+    ui_kv "Orario" "${GREEN}in orario${NC}  ${DIM}$(node "$SCHEDULE_CLI" describe 2>/dev/null)${NC}"
   else
     NEXT=$(node "$SCHEDULE_CLI" next-start 2>/dev/null || echo "")
-    echo -e "Orario:     ${YELLOW}fuori orario${NC}  (prossimo turno: ${NEXT:-N/A})"
+    ui_kv "Orario" "${YELLOW}fuori orario${NC}  ${DIM}(prossimo turno: ${NEXT:-N/A})${NC}"
   fi
 
   # ── Stato runtime + freschezza ──
@@ -67,7 +65,11 @@ render() {
     node 2>/dev/null <<'NODE' || true
       const s = require('./logs/status.json');
       const ageMin = s.lastUpdate ? Math.floor((Date.now() - new Date(s.lastUpdate).getTime()) / 60000) : null;
-      const C = { dim: '\x1b[2m', y: '\x1b[0;33m', g: '\x1b[0;32m', r: '\x1b[0;31m', n: '\x1b[0m', b: '\x1b[1m' };
+      // Colori solo su TTY (coerente con ui.sh: niente escape su pipe/log).
+      const tty = !!process.stdout.isTTY;
+      const C = tty
+        ? { dim: '\x1b[2m', y: '\x1b[0;33m', g: '\x1b[0;32m', r: '\x1b[0;31m', n: '\x1b[0m', b: '\x1b[1m' }
+        : { dim: '', y: '', g: '', r: '', n: '', b: '' };
       const stale = ageMin !== null && ageMin > 3;
       const out = [];
       out.push(`Fase:       ${s.phase || '-'}${stale ? `  ${C.y}(stato vecchio: ${ageMin} min fa — non è la situazione attuale)${C.n}` : ''}`);
@@ -92,7 +94,7 @@ NODE
     echo -e "${DIM}Heartbeat:  $(cat logs/heartbeat.txt)${NC}"
   fi
 
-  echo "--------------------------------------------"
+  ui_hr
   echo -e "${DIM}Ultimi log:${NC}"
   # `|| true`: sotto set -e un `[ ] && cmd` con condizione falsa sarebbe fatale.
   [ -f logs/autoplay.log ] && tail -n 6 logs/autoplay.log || true

@@ -12,11 +12,7 @@ STOP_FILE=".scheduler_stop"
 
 source "$DIR/scripts/lib/pid-utils.sh"
 
-echo ""
-echo "============================================"
-echo -e "${BOLD}  Arresto GSD Campus Autoplay${NC}"
-echo "============================================"
-echo ""
+ui_header "Arresto GSD Campus Autoplay"
 
 # 1. Segnala allo scheduler di fermarsi se in attesa
 touch "$DIR/$STOP_FILE"
@@ -116,6 +112,6 @@ fi
 rm -f "$DIR/$STOP_FILE"
 
 echo ""
-echo "============================================"
-echo -e "${GREEN}${BOLD}  Autoplay fermato${NC}"
-echo "============================================"
+ui_hr
+ok "${GREEN}${BOLD}Autoplay fermato${NC}"
+ui_hr
