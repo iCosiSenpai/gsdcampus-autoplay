@@ -135,6 +135,12 @@ fi
 
 # 5. Log, dump, screenshot, backup, pid (roba interna al progetto)
 echo ""
+# LaunchAgent dell'auto-update notturno: va sempre rimosso (altrimenti launchd
+# continuerebbe a lanciare uno script che non esiste più).
+echo "-> Rimozione auto-update notturno (launchd)..."
+launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.gsdcampus.autoplay.autoupdate.plist" 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/com.gsdcampus.autoplay.autoupdate.plist" 2>/dev/null || true
+
 if ask_yes "Rimuovere log, dump, screenshot, backup e file temporanei del progetto?" "y"; then
   echo "-> Pulizia log/dump/backup..."
   rm -rf "$DIR/logs" 2>/dev/null || true
