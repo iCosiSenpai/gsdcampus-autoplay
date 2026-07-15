@@ -13,7 +13,7 @@
 #        - Cambia account e/o orari
 #        - Reinstallazione pulita (riallinea codice + reinstalla dipendenze)
 #        - Solo avvia
-#        - Cambia account Ollama (signout + signin + ri-pull modello)
+#        - Cambia account Ollama (aggiorna il codice + logout/login Ollama)
 #        - Disinstalla
 #        - Annulla
 #   3. Avvia ./launch-ai-supervisor.sh, che installa il resto (Node, Playwright, Ollama, Claude)
@@ -169,6 +169,7 @@ update_repo() {
 
 # 2. Prima installazione oppure gestione di un'installazione esistente
 MODE="install"   # install | update | reconfig | clean | launch | uninstall | cancel
+RELOGIN_OLLAMA=false   # true = dopo l'update, esci da Ollama e rientra con un altro login
 
 if [ -d "$TARGET/.git" ]; then
   if [ -n "$TTY_REDIR" ]; then
@@ -197,7 +198,7 @@ if [ -d "$TARGET/.git" ]; then
       2) MODE="reconfig" ;;
       3) MODE="clean" ;;
       4) MODE="launch" ;;
-      5) MODE="ollama" ;;
+      5) MODE="update"; RELOGIN_OLLAMA=true ;;   # aggiorna il codice E ri-logga Ollama
       6) MODE="uninstall" ;;
       0|7) MODE="cancel" ;;
       *) MODE="update" ;;   # node failure / EOF → safest default
@@ -335,30 +336,6 @@ case "$MODE" in
       ./scripts/setup.sh --yes --force-update < "$TTY_REDIR" || warn "Force-update dipendenze non completato; proseguo."
     fi
     ;;
-  ollama)
-    # Cambio account Ollama: signout + signin interattivi (stdin dal terminale
-    # reale), poi ri-pull del modello se col nuovo account non c'è. Ogni
-    # fallimento degrada: il launcher a valle ha già il flusso pull-first.
-    if ! command -v ollama >/dev/null 2>&1; then
-      err "Ollama non è installato: scegli prima 'Aggiorna e avvia' (installa tutto)."
-      exit 1
-    fi
-    if [ -z "$TTY_REDIR" ]; then
-      err "Serve un terminale interattivo per il login Ollama."
-      exit 1
-    fi
-    info "Esco dall'account Ollama attuale..."
-    ollama signout < "$TTY_REDIR" || true
-    info "Login con il nuovo account (si apre il browser; se non si apre, usa l'URL stampato qui sotto)..."
-    ollama signin < "$TTY_REDIR" || warn "Login non completato: il supervisore riproverà all'avvio."
-    OLLAMA_MODEL=$(node -e "try{const c=require('$TARGET/config.json');process.stdout.write(c.ollamaModel||'gemma4:cloud')}catch(e){process.stdout.write('gemma4:cloud')}" 2>/dev/null || echo "gemma4:cloud")
-    # grep -c >/dev/null (non -q): siamo sotto pipefail (v. scripts/dev-check.sh).
-    if ! ollama list 2>/dev/null | grep -c "$OLLAMA_MODEL" >/dev/null; then
-      info "Scarico il modello $OLLAMA_MODEL con il nuovo account..."
-      ollama pull "$OLLAMA_MODEL" < "$TTY_REDIR" || warn "Download non riuscito: il supervisore riproverà all'avvio."
-    fi
-    ok "Account Ollama aggiornato."
-    ;;
   uninstall)
     if [ -n "$TTY_REDIR" ]; then
       exec ./scripts/uninstall.sh <> "$TTY_REDIR"
@@ -373,15 +350,25 @@ case "$MODE" in
     ;;
 esac
 
+# Cambio account Ollama (voce menu 5): esce dall'account attuale e RIMUOVE il
+# modello locale, così il launcher lo vede assente e fa UN SOLO signin col nuovo
+# account (flusso pull-first di launch-ai-supervisor.sh). NON facciamo signin
+# qui: due signin in cascata (qui + launcher) erano il bug del "doppio login".
+if [ "$RELOGIN_OLLAMA" = true ] && command -v ollama >/dev/null 2>&1; then
+  OLLAMA_MODEL=$(node -e "try{const c=require('$TARGET/config.json');process.stdout.write(c.ollamaModel||'gemma4:cloud')}catch(e){process.stdout.write('gemma4:cloud')}" 2>/dev/null || echo "gemma4:cloud")
+  info "Esco dall'account Ollama attuale (il nuovo login parte tra poco, una volta sola)..."
+  [ -n "$TTY_REDIR" ] && ollama signout < "$TTY_REDIR" >/dev/null 2>&1 || ollama signout >/dev/null 2>&1 || true
+  ollama rm "$OLLAMA_MODEL" >/dev/null 2>&1 || true
+fi
+
 echo ""
 # Schermata finale "Tutto pronto" prima di passare al supervisore.
 FINAL_VER=$(git -C "$TARGET" describe --tags --always 2>/dev/null || echo "")
 case "$MODE" in
-  update)  FINAL_ACTION="aggiornato e pronto" ;;
+  update)  FINAL_ACTION=$([ "$RELOGIN_OLLAMA" = true ] && echo "aggiornato · nuovo login Ollama" || echo "aggiornato e pronto") ;;
   reconfig) FINAL_ACTION="riconfigurazione in arrivo" ;;
   clean)   FINAL_ACTION="reinstallato da zero" ;;
   install) FINAL_ACTION="prima installazione" ;;
-  ollama)  FINAL_ACTION="account Ollama cambiato" ;;
   *)       FINAL_ACTION="pronto" ;;
 esac
 if [ "${UI_OK}" = '✓' ]; then
