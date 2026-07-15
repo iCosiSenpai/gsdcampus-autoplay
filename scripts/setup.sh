@@ -254,7 +254,7 @@ verify_autologin_live() {
 }
 
 print_header() {
-  ui_header "Setup GSD Campus Autopilot" "versione $(ui_version "$DIR")"
+  ui_header "Setup GSD Campus Autopilot" "versione $(ui_version "$DIR")" "⚡"
   echo ""
   echo "Ti guido in pochi passi a configurare l'automazione del corso."
   echo "Ti chiederò solo 2 cose semplici:"
@@ -542,6 +542,7 @@ fi
 
 # Schermata iniziale "Chi sei?" — prima di ogni altra scelta del setup.
 # L'utente seleziona l'account dal database membri o incolla l'autologin.
+step "Chi sei?"
 if ! who_are_you; then
   # Se la riconfigurazione è stata annullata ma esiste un backup (creato da
   # install.sh in modalità "Cambia account/orari"), ripristiniamo la config
@@ -836,10 +837,10 @@ while true; do
     echo ""
     echo -e "${BOLD}Configurazione orari di lavoro${NC}"
     echo ""
-    echo "Account selezionato: $MEMBER_NAME (CF: $ACTIVE_CF)"
-    echo "Autologin: $(mask_url "$AUTOLOGIN")"
-    echo ""
+    ui_kv "Account" "${BOLD}$MEMBER_NAME${NC} ${DIM}(CF: $ACTIVE_CF)${NC}"
+    ui_kv "Autologin" "$(mask_url "$AUTOLOGIN")"
 
+    step "Orari di lavoro"
     configure_days
     configure_shifts
 
@@ -869,12 +870,16 @@ while true; do
     done
 
     echo ""
-    echo -e "${BOLD}Riepilogo configurazione:${NC}"
-    echo "  Membro:    $MEMBER_NAME (CF: $ACTIVE_CF)"
-    echo "  Autologin: $(mask_url "$AUTOLOGIN")"
-    echo "  Giorni:    $(days_human "$DAYS_JSON")"
-    echo "  Turni:     $shifts_summary"
-    echo "  Issue:     segnalazione bug al maintainer ATTIVA (receiver server-side, automatica)"
+    ui_hr
+    echo -e " ${BOLD}Riepilogo configurazione${NC}"
+    ui_hr
+    ui_kv "Membro" "${BOLD}$MEMBER_NAME${NC} ${DIM}(CF: $ACTIVE_CF)${NC}"
+    ui_kv "Autologin" "$(mask_url "$AUTOLOGIN")"
+    ui_kv "Giorni" "$(days_human "$DAYS_JSON")"
+    ui_kv "Turni" "$shifts_summary"
+    ui_kv "Modello" "${OLLAMA_MODEL:-gemma4:cloud}"
+    ui_kv "Issue" "${DIM}segnalazione bug al maintainer attiva${NC}"
+    ui_hr
     echo ""
 
     if [ "$AUTO_YES" = true ]; then

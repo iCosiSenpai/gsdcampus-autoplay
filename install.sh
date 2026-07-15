@@ -13,6 +13,7 @@
 #        - Cambia account e/o orari
 #        - Reinstallazione pulita (riallinea codice + reinstalla dipendenze)
 #        - Solo avvia
+#        - Cambia account Ollama (signout + signin + ri-pull modello)
 #        - Disinstalla
 #        - Annulla
 #   3. Avvia ./launch-ai-supervisor.sh, che installa il resto (Node, Playwright, Ollama, Claude)
@@ -97,7 +98,7 @@ if [ -d "$HOME/gsdcampus-autoplay/.git" ]; then
 fi
 if [ "${UI_OK}" = '✓' ]; then
   printf ' %b╭──────────────────────────────────────────╮%b\n' "$ACCENT" "$NC"
-  ui_box_line "GSD Campus Autopilot — Installer" "$BOLD"
+  ui_box_line "⚡ GSD Campus Autopilot — Installer" "$BOLD"
   [ -n "$INST_VER" ] && ui_box_line "versione $INST_VER${INST_DATE:+ · $INST_DATE}" "$DIM" || true
   printf ' %b╰──────────────────────────────────────────╯%b\n' "$ACCENT" "$NC"
 else
@@ -188,6 +189,7 @@ if [ -d "$TARGET/.git" ]; then
       "Cambia account/orari — riconfigura account e orari, poi avvia" \
       "Reinstallazione pulita — riallinea il codice e reinstalla le dipendenze" \
       "Solo avvia — apre l'AI senza modificare nulla" \
+      "Cambia account Ollama — esci e rientra con un altro login" \
       "Disinstalla — rimuove dipendenze, modello, CLI (con conferma)" \
       "Annulla" < "$TTY_REDIR" 2>/dev/null || echo 1)
     case "$CHOICE" in
@@ -195,8 +197,9 @@ if [ -d "$TARGET/.git" ]; then
       2) MODE="reconfig" ;;
       3) MODE="clean" ;;
       4) MODE="launch" ;;
-      5) MODE="uninstall" ;;
-      0|6) MODE="cancel" ;;
+      5) MODE="ollama" ;;
+      6) MODE="uninstall" ;;
+      0|7) MODE="cancel" ;;
       *) MODE="update" ;;   # node failure / EOF → safest default
     esac
   else
@@ -332,6 +335,30 @@ case "$MODE" in
       ./scripts/setup.sh --yes --force-update < "$TTY_REDIR" || warn "Force-update dipendenze non completato; proseguo."
     fi
     ;;
+  ollama)
+    # Cambio account Ollama: signout + signin interattivi (stdin dal terminale
+    # reale), poi ri-pull del modello se col nuovo account non c'è. Ogni
+    # fallimento degrada: il launcher a valle ha già il flusso pull-first.
+    if ! command -v ollama >/dev/null 2>&1; then
+      err "Ollama non è installato: scegli prima 'Aggiorna e avvia' (installa tutto)."
+      exit 1
+    fi
+    if [ -z "$TTY_REDIR" ]; then
+      err "Serve un terminale interattivo per il login Ollama."
+      exit 1
+    fi
+    info "Esco dall'account Ollama attuale..."
+    ollama signout < "$TTY_REDIR" || true
+    info "Login con il nuovo account (si apre il browser; se non si apre, usa l'URL stampato qui sotto)..."
+    ollama signin < "$TTY_REDIR" || warn "Login non completato: il supervisore riproverà all'avvio."
+    OLLAMA_MODEL=$(node -e "try{const c=require('$TARGET/config.json');process.stdout.write(c.ollamaModel||'gemma4:cloud')}catch(e){process.stdout.write('gemma4:cloud')}" 2>/dev/null || echo "gemma4:cloud")
+    # grep -c >/dev/null (non -q): siamo sotto pipefail (v. scripts/dev-check.sh).
+    if ! ollama list 2>/dev/null | grep -c "$OLLAMA_MODEL" >/dev/null; then
+      info "Scarico il modello $OLLAMA_MODEL con il nuovo account..."
+      ollama pull "$OLLAMA_MODEL" < "$TTY_REDIR" || warn "Download non riuscito: il supervisore riproverà all'avvio."
+    fi
+    ok "Account Ollama aggiornato."
+    ;;
   uninstall)
     if [ -n "$TTY_REDIR" ]; then
       exec ./scripts/uninstall.sh <> "$TTY_REDIR"
@@ -354,6 +381,7 @@ case "$MODE" in
   reconfig) FINAL_ACTION="riconfigurazione in arrivo" ;;
   clean)   FINAL_ACTION="reinstallato da zero" ;;
   install) FINAL_ACTION="prima installazione" ;;
+  ollama)  FINAL_ACTION="account Ollama cambiato" ;;
   *)       FINAL_ACTION="pronto" ;;
 esac
 if [ "${UI_OK}" = '✓' ]; then

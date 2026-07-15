@@ -42,7 +42,7 @@ requirements_satisfied() {
 }
 
 VERSION_LINE="$(ui_version "$DIR")"
-ui_header "GSD Campus — AI Supervisor" "${VERSION_LINE:+versione $VERSION_LINE}"
+ui_header "GSD Campus — AI Supervisor" "${VERSION_LINE:+versione $VERSION_LINE}" "⚡"
 echo ""
 
 # 0. Ferma eventuali istanze precedenti per evitare conflitti tra codice vecchio e nuovo
