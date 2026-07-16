@@ -30,6 +30,7 @@ const { isLoginPage, isDashboardLoaded } = require('../src/lib/page-detect');
 const { dashboardUrl, userAgent } = require('../src/lib/platform');
 const { saveAiQuizRequest } = require('../src/lib/quiz');
 const courseState = require('../src/lib/course-state');
+const { writeAiTodo } = require('../src/lib/ai-todo');
 const db = require('../src/lib/db');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -42,7 +43,7 @@ function log(...a) { console.log(`[harvest] ${a.join(' ')}`); }
 
 function parseArgs(argv) {
   const args = argv.slice(2);
-  const o = { cf: null, dryRun: false, course: null, toAiRequest: false, reconcile: false, reset: false, census: false };
+  const o = { cf: null, dryRun: false, course: null, toAiRequest: false, reconcile: false, reset: false, census: false, all: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--cf') o.cf = args[++i];
     else if (args[i] === '--dry-run') o.dryRun = true;
@@ -51,6 +52,7 @@ function parseArgs(argv) {
     else if (args[i] === '--reconcile') o.reconcile = true;
     else if (args[i] === '--reset') o.reset = true;
     else if (args[i] === '--census') o.census = true;
+    else if (args[i] === '--all') o.all = true;
   }
   return o;
 }
@@ -357,18 +359,27 @@ async function main() {
     }
     log('login ok, dashboard raggiunta.');
 
-    // Modalità censimento: quanti corsi e loro % di completamento, poi esce.
-    if (opt.census) {
+    // Modalità --all: UN SOLO login → census + reconcile + harvest in sequenza
+    // sulla stessa sessione (risparmia ~2 login e una scansione dashboard). È il
+    // comando che l'AI supervisore lancia all'avvio per orientarsi.
+    if (opt.all) {
+      opt.toAiRequest = true;   // le domande raccolte vanno nell'handoff AI
       await census(page, config);
-      await browser.close();
-      return;
-    }
-
-    // Modalità riconciliazione: scan + (eventuale) reset dei falsi-done, poi esce.
-    if (opt.reconcile) {
-      await reconcile(page, config, opt);
-      await browser.close();
-      return;
+      await reconcile(page, config, opt);   // resetta i falsi-done se --reset
+      // …poi prosegue al loop di harvest sotto (non esce qui).
+    } else {
+      // Modalità censimento: quanti corsi e % completamento, poi esce.
+      if (opt.census) {
+        await census(page, config);
+        await browser.close();
+        return;
+      }
+      // Modalità riconciliazione: scan + (eventuale) reset falsi-done, poi esce.
+      if (opt.reconcile) {
+        await reconcile(page, config, opt);
+        await browser.close();
+        return;
+      }
     }
 
     // Corsi da visitare.
@@ -376,6 +387,10 @@ async function main() {
     if (opt.course) {
       courseUrls = [opt.course];
     } else {
+      // census/reconcile (in --all) hanno navigato via dalla dashboard: torniamoci
+      // prima di raccogliere i link corso, altrimenti la lista sarebbe vuota.
+      await page.goto(dashboardUrl(config), { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForTimeout(1500);
       courseUrls = await page.evaluate(() => {
         const s = new Set();
         document.querySelectorAll('a[href*="/corso/show/"]').forEach(a => s.add(a.href));
@@ -427,6 +442,12 @@ async function main() {
       // Solo per l'account ATTIVO (saveAiQuizRequest scrive nella sua cartella).
       const n = saveAiQuizRequest(ROOT, allQuestions.map(q => ({ question: q.question, options: q.options })), 'harvest_questionari_finali', {});
       log(`inoltrate all'AI: ai_quiz_request ora contiene ${n} domande da risolvere.`);
+    }
+
+    // Aggiorna l'inbox unico dell'AI con lo stato appena raccolto (census +
+    // reconcile + handoff). Solo per l'account attivo (--all/attivo).
+    if (opt.all || !opt.cf) {
+      try { const t = writeAiTodo(ROOT); log(`inbox AI aggiornato (logs/ai_todo.json): ${t.openQuizRequests} domande aperte, ${t.falseDones || 0} falsi-done.`); } catch (_) {}
     }
   } finally {
     await browser.close();
