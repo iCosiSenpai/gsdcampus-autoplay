@@ -29,6 +29,7 @@ const { redactUrl } = require('../src/lib/logger');
 const { isLoginPage, isDashboardLoaded } = require('../src/lib/page-detect');
 const { dashboardUrl, userAgent } = require('../src/lib/platform');
 const { saveAiQuizRequest } = require('../src/lib/quiz');
+const courseState = require('../src/lib/course-state');
 const db = require('../src/lib/db');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -41,12 +42,14 @@ function log(...a) { console.log(`[harvest] ${a.join(' ')}`); }
 
 function parseArgs(argv) {
   const args = argv.slice(2);
-  const o = { cf: null, dryRun: false, course: null, toAiRequest: false };
+  const o = { cf: null, dryRun: false, course: null, toAiRequest: false, reconcile: false, reset: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--cf') o.cf = args[++i];
     else if (args[i] === '--dry-run') o.dryRun = true;
     else if (args[i] === '--course') o.course = args[++i];
     else if (args[i] === '--to-ai-request') o.toAiRequest = true;
+    else if (args[i] === '--reconcile') o.reconcile = true;
+    else if (args[i] === '--reset') o.reset = true;
   }
   return o;
 }
@@ -200,6 +203,90 @@ async function harvestQuestionnaire(page, outDir, quizUrl, dryRun) {
   return { started: true, captured };
 }
 
+// Legge lo stato di UN questionario SENZA interagire: pendente (ha "Avvia
+// compilazione") vs superato (testo "superato", niente avvia). Read-only.
+async function questionnaireStatus(page, quizUrl) {
+  await page.goto(quizUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(1200);
+  return await page.evaluate(() => {
+    const t = document.body ? document.body.innerText : '';
+    const hasAvvia = /avvia compilazione/i.test(t);
+    const superato = /superato/i.test(t);
+    return { pending: hasAvvia, superato: superato && !hasAvvia };
+  });
+}
+
+// Riconciliazione: scansiona TUTTI i corsi, trova quelli con questionario
+// finale PENDENTE ma stato locale done/need_help (falsi-done), li elenca e
+// (con --reset) li resetta così discoverCourses li riprocessa. Read-only sulla
+// piattaforma; scrive solo course_state (reset) e logs/pending_questionnaires.json.
+async function reconcile(page, config, opt) {
+  const activeCf = config.codice_fiscale;
+  // Il reset scrive nel course_state dell'ACCOUNT ATTIVO (via account.stateFilePaths).
+  // Se stiamo riconciliando un altro account (--cf diverso dall'attivo), il reset
+  // finirebbe sull'account sbagliato: lo vietiamo.
+  let cfgActive = {};
+  try { cfgActive = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8')); } catch (_) {}
+  const canReset = opt.reset && (!opt.cf || opt.cf === cfgActive.codice_fiscale);
+  if (opt.reset && !canReset) {
+    log('ATTENZIONE: --reset ignorato — si può resettare solo l\'account ATTIVO in config.json, non un --cf diverso.');
+  }
+
+  const state = courseState.readState(ROOT);
+  const courseUrls = await page.evaluate(() => {
+    const s = new Set();
+    document.querySelectorAll('a[href*="/corso/show/"]').forEach(a => s.add(a.href));
+    return [...s];
+  });
+  log(`riconciliazione: ${courseUrls.length} corsi da verificare.`);
+
+  const findings = [];
+  for (const courseUrl of courseUrls) {
+    try {
+      await page.goto(courseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForTimeout(1200);
+      const quizUrls = await page.evaluate(() => {
+        const s = new Set();
+        document.querySelectorAll('a[href*="/questionario/"]').forEach(a => s.add(a.href));
+        return [...s];
+      });
+      const pending = [];
+      for (const quizUrl of quizUrls) {
+        const st = await questionnaireStatus(page, quizUrl);
+        if (st.pending) pending.push(quizUrl);
+      }
+      const localDone = courseState.isCourseDoneOrNeedHelp(state, courseUrl);
+      if (pending.length > 0) {
+        findings.push({ courseUrl: redactUrl(courseUrl), courseUrlRaw: courseUrl, pendingCount: pending.length, localDone });
+        log(`  ${localDone ? '⚠ FALSO-DONE' : '· da fare'}: ${redactUrl(courseUrl)} — ${pending.length} questionario/i pendente/i (stato locale: ${localDone ? 'done/need_help' : 'in_progress/assente'})`);
+      }
+    } catch (e) {
+      log(`  errore su ${redactUrl(courseUrl)}: ${e.message}`);
+    }
+  }
+
+  // Report leggibile dall'AI/monitor.
+  const report = {
+    account: activeCf || 'attivo',
+    checkedAt: new Date().toISOString(),
+    coursesWithPendingQuiz: findings.map(f => ({ course: f.courseUrl, pendingCount: f.pendingCount, localDone: f.localDone })),
+  };
+  try { fs.writeFileSync(path.join(ROOT, 'logs', 'pending_questionnaires.json'), JSON.stringify(report, null, 2)); } catch (_) {}
+
+  const falseDones = findings.filter(f => f.localDone);
+  log(`\nRIEPILOGO: ${findings.length} corso/i con questionario pendente, di cui ${falseDones.length} segnati done/need_help a torto.`);
+  if (falseDones.length && canReset) {
+    for (const f of falseDones) {
+      courseState.resetCourse(ROOT, state, f.courseUrlRaw);
+      log(`  reset: ${f.courseUrl} → tornerà processabile al prossimo avvio.`);
+    }
+    log(`${falseDones.length} corso/i resettato/i. Riavvia con ./start.sh per rifarne i questionari.`);
+  } else if (falseDones.length) {
+    log(`Per resettarli automaticamente: node scripts/harvest-answers.js --reconcile --reset`);
+  }
+  return findings.length;
+}
+
 async function main() {
   const opt = parseArgs(process.argv);
   const config = resolveAccount(opt.cf);
@@ -222,6 +309,13 @@ async function main() {
       process.exit(2);
     }
     log('login ok, dashboard raggiunta.');
+
+    // Modalità riconciliazione: scan + (eventuale) reset dei falsi-done, poi esce.
+    if (opt.reconcile) {
+      await reconcile(page, config, opt);
+      await browser.close();
+      return;
+    }
 
     // Corsi da visitare.
     let courseUrls;
