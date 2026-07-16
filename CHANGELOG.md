@@ -5,6 +5,11 @@ il comando curl mostra automaticamente le righe nuove di questo file.
 (Per il maintainer: aggiungere una sezione `## data` con bullet brevi a ogni
 push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
+## 2026-07-16
+
+- "Cambia account Ollama" ora aggiorna anche il codice e chiede il login una volta sola (prima lo chiedeva due volte).
+- Nuovo strumento che raccoglie in anticipo le domande dei questionari finali (senza compilarli né consumare tentativi) così l'AI può preparare le risposte prima del quiz.
+
 ## 2026-07-15
 
 - Nuovo checkup automatico a semaforo dopo ogni aggiornamento: vedi subito se rete, piattaforma, Ollama e configurazione sono a posto, con il rimedio scritto accanto.

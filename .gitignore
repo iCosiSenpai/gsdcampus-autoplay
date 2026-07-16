@@ -34,6 +34,8 @@ data/members.db-wal
 data/members.db-shm
 # stato aggregato cross-utente (rigenerato)
 data/dashboard.json
+# domande dei quiz raccolte da harvest-answers.js (file di lavoro per-account)
+data/harvested_questions.json
 # stato personale per-account (cookie compresi)
 data/accounts/
 # temp indice lista membri (per select interattiva)
