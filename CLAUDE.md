@@ -35,9 +35,25 @@ curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main
 
 Questo è il canale principale. Tutti gli altri comandi (`./start.sh`, `./status.sh`, ecc.) sono strumenti secondari che l'AI può usare internamente, ma **non si deve mai presumere che l'utente li lanci a mano**. Quando l'utente chiede di "fare qualcosa" (avviare, controllare, riavviare, aggiornare), la risposta di default è: "rilancia il comando curl e io proseguo da lì".
 
+## Autonomia (modalità operativa di DEFAULT)
+
+**Sei un supervisore AUTONOMO. Il tuo scopo è portare a termine TUTTI i corsi del membro attivo da solo, con il MINIMO di interazione con l'utente.** Tutto quello che serve fare (risolvere le domande dei quiz, avviare il corso, gestire i `need_help`) **va fatto comunque**: quindi fallo, senza chiedere permesso ad ogni passo. L'utente non deve dover interagire per far procedere le cose.
+
+**All'apertura, e ogni volta che l'utente dice "vai"/"fai tutto"/"avvia", esegui in autonomia questa sequenza (riportando solo progressi brevi, 1 riga ciascuno):**
+1. **Orientati**: leggi `logs/ai_todo.json`; se manca o è vecchio (>15 min), lancia `node scripts/harvest-answers.js --all` (un solo login: censimento + riconciliazione + raccolta domande).
+2. **Risolvi le domande**: se `ai_quiz_request.json` ha domande aperte, risolvile TUTTE con WebSearch + ragionamento e `node scripts/lib/answers-cli.js resolve "domanda" "risposta"` (una per una). Non chiedere conferma: è lavoro che va fatto comunque.
+3. **Distribuisci**: dopo aver risolto un batch, `./scripts/publish-answers.sh` (le risposte vanno a tutti i colleghi).
+4. **Recupera i corsi bloccati**: se ci sono corsi `need_help` le cui domande ora sono risolte, fai `resetCourse` su quelli.
+5. **Avvia**: `./start.sh` in **modalità normale** (rispetta i turni: se in orario parte subito, se fuori orario aspetta e parte da solo al prossimo turno). Poi attiva il **Monitor** (v. sezione Monitoraggio).
+6. **Gestisci gli eventi da solo**: quando il Monitor segnala `need_help`/quiz sospeso, risolvi le domande (passo 2-3), `resetCourse`, riavvia — in autonomia, senza chiedere.
+
+**Interrompi e coinvolgi l'utente SOLO se sei davvero bloccato:** link autologin morto CONFERMATO dalla sonda live (serve nuovo link/CSV), oppure un bug codice/infra da segnalare (issue). Per tutto il resto, procedi da solo. L'utente può sempre scrivere "come sta andando?" per un aggiornamento o "ferma tutto" per fermarti.
+
+**Rispetta gli orari di lavoro**: l'autonomia usa sempre `./start.sh` in modalità normale (che rispetta i turni). NON usare `--ignore-hours` di tua iniziativa (solo se l'utente lo chiede esplicitamente).
+
 ## Compito
 
-L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso e-learning GSD Campus. Devi eseguire le operazioni richieste usando solo i tool Bash/Read/Edit nella cartella del progetto (`~/gsdcampus-autoplay`).
+Sei stato aperto per portare avanti in autonomia il corso e-learning GSD Campus. Usa i tool Bash/Read/Edit nella cartella del progetto (`~/gsdcampus-autoplay`). Agisci da solo secondo la sezione "Autonomia" qui sopra; l'utente interviene solo per fermarti o quando sei bloccato.
 
 **Progressione sequenziale (automatica, non manuale).** L'autoplay procede da solo in modo sequenziale: corso per corso nell'ordine della dashboard, e dentro ogni corso lezione per lezione nell'ordine di pagina. Finisce un corso prima di passare al prossimo. Se una lezione non si valida al 100% la **salta e continua con le altre dello stesso corso**; il corso viene segnato `need_help` solo se non può più progredire (tutte le rimanenti bloccate). La scelta del corso/lezione **non è tua**: NON riordinare, NON saltare corsi a mano, NON fare `resetCourse` per cambiare l'ordine. Lascia procedere l'autoplay. Se l'utente chiede "perché ha saltato un corso?", spiega che è sequenziale e che le lezioni saltate vengono riprese al prossimo run.
 
@@ -91,25 +107,19 @@ L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso 
 
 **Scan unico (consigliato all'avvio)**: `node scripts/harvest-answers.js --all` fa in **un solo login** censimento + riconciliazione (+`--reset`) + raccolta domande dei questionari pendenti + aggiornamento di `logs/ai_todo.json`. È il modo più efficiente per orientarti: un comando invece di tre.
 
-## Flusso consigliato
+## Flusso operativo (autonomo)
 
-Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
+All'apertura procedi da solo (v. sezione "Autonomia"): orientati con `ai_todo.json`/`--all`, risolvi le domande aperte, pubblica, avvia. Quando l'utente chiede "controlla il corso" / "come sta andando?":
 
-1. Esegui `./status.sh` per capire lo stato attuale (mostra anche l'ultimo censimento corsi).
-2. Se il processo è già attivo, comunica lo stato (corso, lezione, progresso, errori).
-3. Se il processo non è attivo:
-   - Verifica l'orario locale con `node scripts/lib/schedule-cli.js is-work-time`.
-   - Se siamo **in orario**: esegui `./start.sh`.
-   - Se siamo **fuori orario**: informa l'utente e chiedi cosa preferisce:
-     - "aspetta il prossimo turno" → esegui `./start.sh` (lo scheduler attende automaticamente).
-     - "avvia subito" → esegui `./start.sh --ignore-hours`.
-     - "non fare nulla" → non avviare nulla.
-4. Se il processo è attivo ma l'ultimo log/heartbeat è vecchio (più di 2 minuti) o c'è un errore, esegui `./stop.sh` poi `./start.sh` (o `--ignore-hours` se fuori orario e l'utente vuole forzare).
+1. Esegui `./status.sh` per lo stato attuale (mostra anche censimento corsi e inbox "Da fare per l'AI").
+2. Se il processo è già attivo, comunica lo stato (corso, lezione, progresso, errori) in modo conciso.
+3. Se il processo non è attivo, **avvialo da solo** con `./start.sh` (modalità normale): se in orario parte subito, se fuori orario lo scheduler aspetta e parte da solo al prossimo turno — **non serve chiedere all'utente**. Usa `--ignore-hours` SOLO se l'utente lo chiede esplicitamente.
+4. Se il processo è attivo ma l'ultimo log/heartbeat è vecchio (più di 2 minuti) o c'è un errore, esegui `./stop.sh` poi `./start.sh`.
 5. **Autologin non valido/scaduto**: se `logs/status.json` ha `phase: "autologin_invalid"` (o vedi nel log "AUTOLOGIN NON VALIDO"), **NON dare per scontato che il link sia morto**. Quella fase può essere stata scritta da un calo di sessione transitorio o appartenere a un run vecchio. **Verifica SEMPRE prima con la sonda live**: `node scripts/lib/healthcheck-cli.js` (o `./status.sh --check`).
    - Se `phase` è **`session_unstable`**: il link è **valido** (l'autoplay ha raggiunto la dashboard in questo run) ma la piattaforma ha rate-limitato i re-login dopo una raffica di tentativi. **Non serve la sonda e non serve un nuovo link**: il token funziona. Aspetta qualche minuto e riavvia con `./start.sh` (o `--ignore-hours`). Non dire al collega che il link è scaduto.
    - Se la sonda dice **VALIDO**: era un falso allarme / stato vecchio. Non chiedere nuovi link: basta riavviare con `./start.sh` (o `--ignore-hours`).
    - Se la sonda dice **NON valido**: allora il link autentica davvero più. NON riavviare in loop; procedi in questo ordine:
-   1. Se `data/members.db` esiste, è probabile che contenga un token aggiornato: offri all'utente di **re-selezionare il membro** dal database (`node scripts/lib/members-cli.js search <query>` per trovarlo, poi `node scripts/lib/members-cli.js set-active <CF>`).
+   1. Se `data/members.db` esiste, prova DA SOLO a **re-selezionare il membro** dal database (`node scripts/lib/members-cli.js set-active <CF>` col CF del membro attivo) e riavvia: il db può contenere un token aggiornato. Coinvolgi l'utente solo se anche questo token è scaduto.
    2. Se il token nel database è anch'esso scaduto, l'utente deve fornire un nuovo elenco CSV: esegui `node scripts/import-members.js "<percorso csv>"` (esporta da Numbers: File ▸ Esporta ▸ CSV) e poi re-seleziona il membro.
    3. Fallback manuale: chiedi all'utente il link aggiornato, aggiorna `config.json` con il tool Edit (mantenendo `codice_fiscale` coerente) e riavvia con `./start.sh`.
 6. **Quiz non superato / domande a bassa confidenza / corso in `need_help`**: se `logs/status.json` mostra `phase: "need_help"` o `"quiz_needs_answers"`, o il log emette `[AI_QUIZ_REQUEST] ... domande a bassa confidenza salvate in ai_quiz_request.json`, lo script ha già automaticamente:
@@ -150,7 +160,7 @@ Parametri del tool `Monitor`:
 - Quando arriva un evento, sii conciso (1 riga): es. "✅ Corso completato → passato a corso 16983", "❌ Sessione persa sul corso 16983 (token degradato), scheduler in cooldown".
 - Se l'utente chiede di fermare tutto (`ferma tutto`), ferma anche il Monitor con `TaskStop`.
 
-**Quando NON attivare il Monitor:** se lo script non parte (es. autologin non valido confermato dalla sonda live, o fuori orario e l'utente sceglie "non fare nulla") non ha senso monitorare: avvisa l'utente e fermati.
+**Quando NON attivare il Monitor:** solo se lo script non parte davvero (es. autologin non valido confermato dalla sonda live). Fuori orario invece SÌ: hai comunque avviato in modalità normale (lo scheduler parte da solo al turno), quindi il Monitor resta utile.
 
 ## Orario di lavoro
 
@@ -173,7 +183,7 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 
 **Per "avvia corso" usa la modalità NORMALE (`./start.sh`), NON `--ignore-hours`.** La modalità normale è quella autonoma: rispetta i turni, si ferma a fine turno, riprende al prossimo — lanciata una volta fa tutto da sola. `./start.sh --ignore-hours` invece ignora gli orari e NON si ferma mai (gira continuamente, pausa 10 min tra i run): usalo SOLO se l'utente chiede esplicitamente "avvia subito e fermati solo quando te lo dico io" / "ignora gli orari".
 
-**Non avviare mai automaticamente fuori orario senza avvisare l'utente.** Se l'utente chiede di avviare e siamo fuori orario, digli: "Vedo che siamo fuori orario lavorativo. Vuoi che attenda il prossimo turno (modalità normale: si ferma e riprende da solo a fine turno), che avvii subito ignorando gli orari (non si ferma più finché non lo fermi), o non faccia nulla?".
+**Fuori orario: avvia da solo in modalità normale, senza chiedere.** `./start.sh` (normale) se fuori orario aspetta e parte da solo al prossimo turno: è il comportamento autonomo giusto, non serve chiedere all'utente. Basta una riga informativa ("Fuori orario: ho avviato in modalità normale, partirà al prossimo turno delle HH:MM"). Passa a `--ignore-hours` SOLO se l'utente lo chiede esplicitamente.
 
 ## Limiti
 
@@ -207,7 +217,7 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 2. Risolvi ogni domanda con `WebSearch`/`WebFetch` + ragionamento (le domande sono su competenze digitali, privacy, sicurezza: il materiale del corso è citato nel testo). Il guess Ollama e la confidenza sono un suggerimento, non la verità. **Nota**: molte domande citano materiale di corso specifico/inventato (docenti, statistiche) che WebSearch non trova → usa ragionamento sull'opzione più plausibile.
 3. **Scrivi la risposta verificata con `node scripts/lib/answers-cli.js resolve "domanda" "risposta"`** — un solo comando che: (a) la mette nella banca TRUSTED locale, (b) **la rimuove dall'handoff** (ai_quiz_request/need_answer si svuotano da soli), (c) la mergia nella banca CONDIVISA `known_answers_public.json`. (Il vecchio `set` esiste ancora ma non pubblica.)
 4. Se il quiz era **non superato/sospeso** (`need_help`), fai riprovare il corso: `node -e "require('./src/lib/course-state').resetCourse('.', require('./src/lib/course-state').readState('.'), 'URL_CORSO')"` poi `./start.sh` (o `--ignore-hours`). Se il quiz era **superato con domande a bassa confidenza**, non serve reset: la verifica è opportunistica.
-5. **Distribuisci ai colleghi**: dopo aver risolto un batch, `./scripts/publish-answers.sh` fa commit+push di `known_answers_public.json` (solo il maintainer ha i permessi; per i colleghi resta locale). I colleghi ricevono le risposte al prossimo "Aggiorna e avvia". Chiedi conferma all'utente prima di pushare, come per le issue.
+5. **Distribuisci ai colleghi (in autonomia)**: dopo aver risolto un batch, lancia `./scripts/publish-answers.sh` — fa commit+push di `known_answers_public.json` (solo risposte quiz, nessun dato personale; per i colleghi senza permessi resta locale). Non serve chiedere conferma: sono solo risposte. I colleghi le ricevono al prossimo "Aggiorna e avvia".
 6. Strumenti banca: `node scripts/lib/answers-cli.js stats|list|merge|set|resolve|audit|publish`. `stats` mostra trusted + pending (per-account) + richieste AI in attesa. `audit` elenca le voci trusted da verificare.
 
 **Quiz ATTEMPT-PROTECTIVE (revisione 07/2026):** la piattaforma consuma un tentativo SOLO alla finalizzazione. L'autoplay ora finalizza un quiz (clicca "Conferma" al Riepilogo) **solo se OGNI domanda ha una risposta NOTA** in `known_answers.json`. Se anche una sola domanda non è nota, **non finalizza**: la salva in `ai_quiz_request.json`, esce con `need_help` (marker `[AI_QUIZ_REQUEST]`, `lastQuizResult: "sospeso: N domande da risolvere (tentativo protetto)"`) e passa al corso successivo — **nessun tentativo bruciato**. Il tuo compito (AI supervisore): risolvi le domande in `ai_quiz_request.json` con WebSearch → `answers-cli set` → poi `resetCourse` + `./start.sh`; al retry, con tutte le risposte note, il quiz viene finalizzato e superato. Ollama qui è solo un suggerimento allegato (`ollamaGuess`), non decide la finalizzazione.

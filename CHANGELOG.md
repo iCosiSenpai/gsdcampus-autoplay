@@ -13,6 +13,7 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 - Il quiz finale viene inviato solo quando tutte le risposte sono certe: se ne manca qualcuna, il sistema si ferma e la prepara con l'AI invece di sprecare un tentativo.
 - All'avvio l'AI controlla quanti corsi ci sono e la loro percentuale di completamento (`./status.sh` lo mostra in cache); nuove risposte verificate aggiunte al glossario condiviso.
 - L'AI ora si orienta da un unico "elenco cose da fare" e viene avvisata anche quando il link di accesso scade; un solo comando fa il giro completo di controllo dei corsi; le risposte verificate si distribuiscono ai colleghi con un comando.
+- Il supervisore ora lavora in autonomia: all'apertura controlla i corsi, prepara le risposte dei quiz e avvia il corso da solo (rispettando gli orari), senza farti rispondere a domande a ogni passo. Interviene solo se è davvero bloccato.
 
 ## 2026-07-15
 
