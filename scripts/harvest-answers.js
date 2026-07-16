@@ -42,7 +42,7 @@ function log(...a) { console.log(`[harvest] ${a.join(' ')}`); }
 
 function parseArgs(argv) {
   const args = argv.slice(2);
-  const o = { cf: null, dryRun: false, course: null, toAiRequest: false, reconcile: false, reset: false };
+  const o = { cf: null, dryRun: false, course: null, toAiRequest: false, reconcile: false, reset: false, census: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--cf') o.cf = args[++i];
     else if (args[i] === '--dry-run') o.dryRun = true;
@@ -50,6 +50,7 @@ function parseArgs(argv) {
     else if (args[i] === '--to-ai-request') o.toAiRequest = true;
     else if (args[i] === '--reconcile') o.reconcile = true;
     else if (args[i] === '--reset') o.reset = true;
+    else if (args[i] === '--census') o.census = true;
   }
   return o;
 }
@@ -216,6 +217,52 @@ async function questionnaireStatus(page, quizUrl) {
   });
 }
 
+// Censimento corsi: legge la dashboard e riporta QUANTI corsi ci sono e la loro
+// situazione (percentuale di completamento + stato locale). Veloce (una sola
+// pagina, niente navigazione per-corso). Scrive logs/course_census.json.
+async function census(page, config) {
+  const state = courseState.readState(ROOT);
+  const courses = await page.evaluate(() => {
+    const out = [];
+    document.querySelectorAll('.card').forEach(card => {
+      const link = card.querySelector('a[href*="/corso/show/"]');
+      if (!link) return;
+      const titleEl = card.querySelector('.card-title');
+      const title = (titleEl ? titleEl.innerText : '').trim();
+      const bar = card.querySelector('.progress-bar');
+      let pct = null;
+      if (bar) {
+        const m = (bar.getAttribute('aria-label') || bar.getAttribute('style') || '').match(/([\d]+[.,][\d]+|\d+)\s*%/);
+        if (m) pct = parseFloat(m[1].replace(',', '.'));
+      }
+      out.push({ url: link.href, title, pct });
+    });
+    return out;
+  });
+
+  const rows = courses.map(c => {
+    const cs = courseState.getCourse(state, c.url);
+    const local = (cs && (cs.status === 'done' || cs.status === 'need_help')) ? cs.status : 'da fare';
+    return { url: redactUrl(c.url), title: c.title, pct: c.pct, local, finalQuizPassed: cs ? cs.finalQuizPassed : undefined };
+  });
+
+  const at100 = rows.filter(r => r.pct === 100).length;
+  const at0 = rows.filter(r => r.pct === 0).length;
+  const partial = rows.length - at100 - at0;
+  const report = { account: config.codice_fiscale || 'attivo', checkedAt: new Date().toISOString(), total: rows.length, at100, partial, at0, courses: rows };
+  try { fs.writeFileSync(path.join(ROOT, 'logs', 'course_census.json'), JSON.stringify(report, null, 2)); } catch (_) {}
+
+  log(`\n═══ CENSIMENTO CORSI (${rows.length} totali) ═══`);
+  for (const r of rows) {
+    const pctStr = r.pct != null ? `${r.pct.toFixed(2).padStart(6)}%` : '   ?  ';
+    const id = (String(r.url).match(/show\/(\d+)/) || [, '?'])[1];
+    log(`  #${id.padEnd(6)} ${pctStr}  [${r.local.padEnd(8)}]  ${(r.title || '').slice(0, 46)}`);
+  }
+  log(`Riepilogo: ${at100} al 100% · ${partial} parziali · ${at0} a 0% (stato locale: solo done/need_help sono "chiusi").`);
+  log(`Nota: un corso al 100% può avere ancora il QUESTIONARIO finale da fare → verifica con --reconcile.`);
+  return report;
+}
+
 // Riconciliazione: scansiona TUTTI i corsi, trova quelli con questionario
 // finale PENDENTE ma stato locale done/need_help (falsi-done), li elenca e
 // (con --reset) li resetta così discoverCourses li riprocessa. Read-only sulla
@@ -309,6 +356,13 @@ async function main() {
       process.exit(2);
     }
     log('login ok, dashboard raggiunta.');
+
+    // Modalità censimento: quanti corsi e loro % di completamento, poi esce.
+    if (opt.census) {
+      await census(page, config);
+      await browser.close();
+      return;
+    }
 
     // Modalità riconciliazione: scan + (eventuale) reset dei falsi-done, poi esce.
     if (opt.reconcile) {

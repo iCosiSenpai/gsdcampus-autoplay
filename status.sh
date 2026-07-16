@@ -173,6 +173,28 @@ if [ "$RUN_LIVE" = true ] && [ -f "$HEALTHCHECK_CLI" ]; then
   fi
 fi
 
+# ── Censimento corsi (dalla cache, se disponibile) ──
+# Mostra QUANTI corsi e la loro % di completamento senza aprire il browser:
+# legge l'ultimo censimento scritto da harvest-answers.js --census. Per il dato
+# LIVE (o al primo avvio) lancia: node scripts/harvest-answers.js --census
+if [ -f logs/course_census.json ]; then
+  echo ""
+  info "Corsi (ultimo censimento)"
+  node -e "
+    try {
+      const c = require('./logs/course_census.json');
+      const age = Math.floor((Date.now() - new Date(c.checkedAt).getTime())/60000);
+      console.log('  Totale: ' + c.total + ' corsi — ' + c.at100 + ' al 100%, ' + c.partial + ' parziali, ' + c.at0 + ' a 0%  (censito ' + age + ' min fa)');
+      (c.courses||[]).forEach(r => {
+        const id = (String(r.url).match(/show.(\d+)/)||[,'?'])[1];
+        const pct = r.pct!=null ? (r.pct.toFixed(2)+'%').padStart(8) : '     ?  ';
+        console.log('   #' + String(id).padEnd(6) + pct + '  [' + String(r.local||'?').padEnd(8) + ']');
+      });
+    } catch(e) { console.log('  (censimento non leggibile)'); }
+  " 2>/dev/null || warn "Censimento non leggibile."
+  info "Per il dato aggiornato: node scripts/harvest-answers.js --census"
+fi
+
 # ── Heartbeat ──
 echo ""
 info "Heartbeat"

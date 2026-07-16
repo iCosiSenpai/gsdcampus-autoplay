@@ -83,11 +83,17 @@ L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso 
 
 **Switchare membro**: `node scripts/lib/members-cli.js set-active <CF>` poi `./start.sh` (oppure `./start.sh --ignore-hours`). Lo stato dell'account precedente resta nella sua cartella e non viene toccato.
 
+## Censimento corsi all'avvio (SEMPRE)
+
+**All'apertura della sessione (e quando l'utente chiede "quanti corsi ci sono?" / "come sono messo?"), controlla QUANTI corsi ci sono e la loro situazione**: `node scripts/harvest-answers.js --census` (legge la dashboard live, ~30-60s, scrive `logs/course_census.json`). Riporta all'utente: totale corsi, quanti al 100%, quanti parziali (con %), quanti a 0%. `./status.sh` mostra l'ultimo censimento dalla cache (istantaneo, senza browser) — usalo per un colpo d'occhio rapido; lancia `--census` per il dato aggiornato.
+
+**IMPORTANTE — 100% video ≠ corso concluso**: un corso al 100% può avere ancora il QUESTIONARIO finale da fare. Per scoprire i falsi-done (video finiti ma quiz pendente) lancia `node scripts/harvest-answers.js --reconcile` (e `--reset` per rimetterli in coda). Fallo quando i corsi risultano "tutti done" ma sospetti manchino questionari, o su richiesta dell'utente.
+
 ## Flusso consigliato
 
 Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
 
-1. Esegui `./status.sh` per capire lo stato attuale.
+1. Esegui `./status.sh` per capire lo stato attuale (mostra anche l'ultimo censimento corsi).
 2. Se il processo è già attivo, comunica lo stato (corso, lezione, progresso, errori).
 3. Se il processo non è attivo:
    - Verifica l'orario locale con `node scripts/lib/schedule-cli.js is-work-time`.

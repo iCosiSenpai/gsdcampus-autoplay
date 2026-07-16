@@ -11,6 +11,7 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 - Nuovo strumento che raccoglie in anticipo le domande dei questionari finali (senza compilarli né consumare tentativi) così l'AI può preparare le risposte prima del quiz.
 - I corsi con video al 100% ma questionario finale ancora da fare vengono ora riconosciuti e rimessi in coda automaticamente (prima potevano risultare "completati" per errore).
 - Il quiz finale viene inviato solo quando tutte le risposte sono certe: se ne manca qualcuna, il sistema si ferma e la prepara con l'AI invece di sprecare un tentativo.
+- All'avvio l'AI controlla quanti corsi ci sono e la loro percentuale di completamento (`./status.sh` lo mostra in cache); nuove risposte verificate aggiunte al glossario condiviso.
 
 ## 2026-07-15
 
