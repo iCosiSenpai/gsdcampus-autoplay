@@ -19,12 +19,6 @@ const MAX_QUIZ_QUESTIONS = 200;
 // (WebSearch + ragionamento) prima che il collega successivo ci sbatta contro.
 const AI_REQUEST_CONFIDENCE_THRESHOLD = 0.8;
 
-// Mappa lettera (A,B,C,D,E) → indice opzione.
-function letterToIndex(letter) {
-  const i = ['A', 'B', 'C', 'D', 'E'].indexOf(String(letter || '').toUpperCase());
-  return i; // -1 se non valido
-}
-
 // Locator delle opzioni risposta, scoped al form della domanda corrente.
 // Se il form id non è presente (layout anomalo), ricade sul selettore globale.
 // Scope: evita di cliccare l'opzione di un'altra domanda se la pagina ne
@@ -205,35 +199,24 @@ function detectOutcomeFromText(text) {
 async function extractQuestionsFromPage(page) {
   try {
     return await page.evaluate(() => {
-      const out = [];
-      const seenQuestions = new Set();
-      // Le opzioni sono in card .opzione-risposta; risaliamo al container comune
-      // e prendiamo il primo heading come testo della domanda.
-      // Fallback selettori: la piattaforma può usare classi leggermente diverse.
-      const optionCards = document.querySelectorAll('.opzione-risposta, .opzione, [class*="opzione-risposta"], .risposta, [class*="risposta"]');
-      optionCards.forEach(card => {
-        const container = card.closest('form, .card, fieldset, .question-block, [class*="question"]') || card.parentElement;
-        if (!container) return;
-        // Cerca il testo della domanda nel container o nel form/card genitore.
-        let qEl = container.querySelector('h1, h2, h3, h4, h5, .question-text, legend');
-        if (!qEl) {
-          const parent = container.closest('form, .card');
-          if (parent) qEl = parent.querySelector('h1, h2, h3, h4, h5, .question-text');
-        }
-        if (!qEl) return;
-        const qText = qEl.innerText.trim();
-        if (seenQuestions.has(qText)) return;
-        seenQuestions.add(qText);
-        const options = Array.from(container.querySelectorAll('.opzione-risposta')).map(c => {
-          const lbl = c.querySelector('label');
-          const p = c.querySelector('p');
-          return (lbl ? lbl.innerText.trim() : (p ? p.innerText.trim() : c.innerText.trim()));
-        }).filter(Boolean);
-        if (options.length > 0) {
-          out.push({ question: qText, options });
-        }
-      });
-      return out;
+      // Una domanda per schermata (form#aggiungi_risposta): heading numerato +
+      // card .opzione-risposta. BUG STORICO: le opzioni sono ANCHE .card, quindi
+      // card.closest('.card') restituiva l'opzione stessa e la domanda (sorella,
+      // non figlia) non veniva trovata → []. Ora prendiamo heading e opzioni
+      // separatamente dallo scope del form (come fa scripts/harvest-answers.js).
+      const scope = document.querySelector('form#aggiungi_risposta') || document.querySelector('form') || document;
+      const options = Array.from(scope.querySelectorAll('.opzione-risposta')).map(c => {
+        const lbl = c.querySelector('label');
+        const p = c.querySelector('p');
+        return (lbl ? lbl.innerText.trim() : (p ? p.innerText.trim() : c.innerText.trim()));
+      }).filter(Boolean);
+      if (options.length === 0) return [];
+      const heads = Array.from(scope.querySelectorAll('h1, h2, h3, h4, h5, .question-text, legend'))
+        .map(h => h.innerText.trim()).filter(Boolean);
+      let qText = (heads.find(h => /^\s*\d+\s*[.)]/.test(h)) || heads[heads.length - 1] || '')
+        .replace(/^\s*\d+\s*[.)]\s*/, '').trim();  // rimuovi numero randomizzato
+      if (!qText || qText.length < 4) return [];
+      return [{ question: qText, options }];
     });
   } catch (e) {
     return [];
@@ -380,40 +363,97 @@ async function clickRetryButton(page, log) {
   return true;
 }
 
-// Clicca il bottone per andare avanti nel wizard del quiz.
+// Testi dei bottoni che FINALIZZANO il quiz (consumano un tentativo): NON vanno
+// mai cliccati da clickNextButton. La finalizzazione ("Conferma" al Riepilogo)
+// avviene solo nel ramo controllato di solveActiveQuestions, quando è sicuro.
+const FINALIZE_RE = /conferma|finalizz|invia|termina|concludi|salva e invia/i;
+
+// Avanza alla domanda successiva SENZA rischiare di finalizzare. Preferisce il
+// testo "Avanti"/"Prosegui" esplicito; il vecchio ordine provava
+// `button[type=submit]` per primo, che su una pagina di Riepilogo poteva essere
+// il bottone di finalizzazione (tentativo bruciato). Ritorna true se ha avanzato.
 async function clickNextButton(page, log) {
-  const selectors = [
-    { sel: 'button[type="submit"]', label: 'submit' },
+  const preferred = [
     { sel: 'button:has-text("Avanti")', label: 'Avanti' },
-    { sel: 'button:has-text("Conferma")', label: 'Conferma' },
-    { sel: 'button:has-text("Prosegui")', label: 'Prosegui' },
     { sel: 'a.btn-primary:has-text("Avanti")', label: 'Avanti link' },
+    { sel: 'button:has-text("Prosegui")', label: 'Prosegui' },
   ];
-  for (const { sel, label } of selectors) {
+  for (const { sel, label } of preferred) {
     const btn = page.locator(sel).first();
     if (await btn.isVisible().catch(() => false)) {
       await btn.click().catch(() => {});
       log(`Cliccato bottone ${label}`);
       await page.waitForTimeout(1000);
-      return;
+      return true;
     }
   }
+  // Fallback: un submit generico, ma SOLO se il suo testo non è di finalizzazione.
+  const submit = page.locator('button[type="submit"]').first();
+  if (await submit.isVisible().catch(() => false)) {
+    const txt = (await submit.innerText().catch(() => '')) || '';
+    if (!FINALIZE_RE.test(txt)) {
+      await submit.click().catch(() => {});
+      log(`Cliccato bottone submit ('${txt.trim().slice(0, 20)}')`);
+      await page.waitForTimeout(1000);
+      return true;
+    }
+    log(`Submit '${txt.trim().slice(0, 20)}' sembra finalizzare: NON lo clicco qui.`);
+  }
+  return false;
 }
 
+// Seleziona l'opzione `index` e VERIFICA che sia davvero selezionata (un
+// input:checked nella card). Se il click sulla card non ha propagato all'input,
+// riprova cliccando label/input interni. Ritorna true se risulta selezionata.
+async function selectOption(page, optsLoc, index) {
+  const card = optsLoc.nth(index);
+  await card.click().catch(() => {});
+  await page.waitForTimeout(300);
+  const checked = () => card.locator('input:checked').count().then(c => c > 0).catch(() => false);
+  if (await checked()) return true;
+  // Fallback 1: clicca la label interna.
+  await card.locator('label').first().click().catch(() => {});
+  await page.waitForTimeout(200);
+  if (await checked()) return true;
+  // Fallback 2: clicca direttamente l'input radio/checkbox.
+  await card.locator('input[type="radio"], input[type="checkbox"]').first().check().catch(() => {});
+  await page.waitForTimeout(200);
+  return await checked();
+}
+
+// Strategia ATTEMPT-PROTECTIVE: la piattaforma consuma un tentativo SOLO alla
+// finalizzazione (Conferma al Riepilogo). Quindi finalizziamo SOLO se OGNI
+// domanda ha una risposta NOTA nel glossario (known_answers). Qualunque domanda
+// non nota rende il quiz "incerto": non la rispondiamo, la passiamo all'AI, e al
+// Riepilogo usciamo SENZA finalizzare (nessun tentativo bruciato). L'AI risolve
+// le domande in ai_quiz_request → known_answers, poi il corso viene ritentato e
+// finalizzato con tutte le risposte note. Ollama qui serve solo come SUGGERIMENTO
+// per l'AI (ollamaGuess), non per finalizzare.
 async function solveActiveQuestions(page, root, log, monitor) {
-  const sessionAnswers = {};       // risposte date da Ollama in questo quiz
-  const capturedAnswers = {};      // TUTTE le domande con la risposta che abbiamo scelto
-  const aiRequests = [];           // domande a bassa confidenza/sconosciute → handoff AI
+  const sessionAnswers = {};       // risposte scelte in questo quiz (da note)
+  const capturedAnswers = {};      // tutte le domande con la risposta scelta
+  const aiRequests = [];           // domande incerte → handoff AI
   const knownAnswersPath = path.join(root, 'data', 'known_answers.json');
   ensureKnownBankSeeded(root);
+  let uncertainCount = 0;          // domande non note (bloccano la finalizzazione)
+  const seenQuestions = new Set(); // per non ri-contare la stessa domanda
 
   for (let i = 0; i < MAX_QUIZ_QUESTIONS; i++) {
-    await page.waitForTimeout(2000);
-    await page.waitForSelector('form h1, form h2, form h3, form h4, form h5, .opzione-risposta, button:has-text("Conferma"), button[type="submit"]', { timeout: 10000 }).catch(() => {});
+    await page.waitForTimeout(1500);
+    await page.waitForSelector('form h1, form h2, form h3, form h4, form h5, .opzione-risposta, button:has-text("Conferma"), button:has-text("Avanti")', { timeout: 10000 }).catch(() => {});
 
     const isRiepilogo = await page.evaluate(() => document.body.innerText.includes('Riepilogo')).catch(() => false);
     if (isRiepilogo) {
-      log('Riepilogo raggiunto. Clicco Conferma...');
+      if (uncertainCount > 0) {
+        // GATE: non finalizzare con domande incerte → nessun tentativo consumato.
+        log(`Riepilogo raggiunto ma ${uncertainCount} domanda/e NON nota/e: NON finalizzo (non consumo tentativi). Le passo all'AI e riprovo dopo.`);
+        if (aiRequests.length > 0) {
+          const n = saveAiQuizRequest(root, aiRequests, `quiz sospeso: ${uncertainCount} domande da risolvere (tentativo protetto)`, null);
+          log(`[AI_QUIZ_REQUEST] ${n} domande salvate in ai_quiz_request.json per l'AI.`);
+        }
+        return { sessionAnswers, capturedAnswers, aiRequests, status: 'needs_answers_bailed', uncertainCount };
+      }
+      log('Riepilogo raggiunto e TUTTE le risposte note: finalizzo (Conferma).');
       const confirmBtn = page.locator('button:has-text("Conferma")').first();
       if (await confirmBtn.isVisible().catch(() => false)) {
         await confirmBtn.click();
@@ -428,7 +468,9 @@ async function solveActiveQuestions(page, root, log, monitor) {
       if (!form) return null;
       const heading = form.querySelector('h1, h2, h3, h4, h5, .question-text');
       if (!heading) return null;
-      const text = heading.innerText.trim();
+      // La piattaforma RANDOMIZZA l'ordine: rimuovi il numero iniziale ("1. "),
+      // altrimenti la stessa domanda con numero diverso non matcha nel glossario.
+      const text = heading.innerText.trim().replace(/^\s*\d+\s*[.)]\s*/, '');
       const opts = Array.from(form.querySelectorAll('.opzione-risposta')).map((c, idx) => {
         const lbl = c.querySelector('label');
         const p = c.querySelector('p');
@@ -447,102 +489,36 @@ async function solveActiveQuestions(page, root, log, monitor) {
     // readJsonCached (mtime): la banca è consultata a OGNI domanda; la cache si
     // invalida da sola quando mergeIntoKnown/answers-cli la riscrivono (rename).
     const knownAnswers = readJsonCached(knownAnswersPath, {});
-
-    let found = false;
-    let selectedOptionText = null;
-
     const knownMatch = findKnownAnswer(q.text, q.opts, knownAnswers);
+
     if (knownMatch) {
-      selectedOptionText = knownMatch.optionText;
-      log(`Risposta nota (confidenza ${(knownMatch.score * 100).toFixed(0)}%): ${selectedOptionText.slice(0, 50)}...`);
+      // Risposta NOTA: selezioniamo e verifichiamo la selezione, poi Avanti.
+      log(`Risposta nota (confidenza ${(knownMatch.score * 100).toFixed(0)}%): ${knownMatch.optionText.slice(0, 50)}...`);
       const optsLoc = await optionsLocator(page);
-      await optsLoc.nth(knownMatch.optionIndex).click();
-      await page.waitForTimeout(500);
+      const ok = await selectOption(page, optsLoc, knownMatch.optionIndex);
+      if (!ok) log('ATTENZIONE: la selezione dell\'opzione non risulta confermata (input non :checked).');
+      capturedAnswers[q.text] = knownMatch.optionText;
+      sessionAnswers[q.text] = knownMatch.optionText;
       await clickNextButton(page, log);
-      found = true;
+      continue;
     }
 
-    if (!found) {
-      log(`!!! DOMANDA SCONOSCIUTA: ${q.text}`);
-      log('Provo a chiedere a Ollama (modello cloud) la risposta...');
-
-      const ollamaAnswer = await askQuizQuestion(q.text, q.opts.map(o => o.text), log, root);
-
-      if (ollamaAnswer) {
-        selectedOptionText = ollamaAnswer.text;
-        const conf = ollamaAnswer.confidence != null ? `${(ollamaAnswer.confidence * 100).toFixed(0)}%` : '?';
-        log(`Ollama suggerisce: ${ollamaAnswer.letter}) ${selectedOptionText.slice(0, 50)}... (confidenza ${conf}, strategia ${ollamaAnswer.strategy || '?'})`);
-
-        // Risolve l'indice dell'opzione in modo robusto: confronto normalizzato
-        // (non piu esatto, che fallisce su maiuscole/spazi/markdown) e fallback
-        // alla lettera restituita da Ollama. Se nessun match, NON clicca a caso
-        // (.nth(-1) lancerebbe): salva la domanda per intervento e continua.
-        let optIdx = q.opts.findIndex(o => normalize(o.text) === normalize(ollamaAnswer.text));
-        if (optIdx < 0 && ollamaAnswer.letter) {
-          const li = letterToIndex(ollamaAnswer.letter);
-          if (li >= 0 && li < q.opts.length) optIdx = li;
-        }
-        if (optIdx < 0) {
-          log(`Risposta di Ollama non riconducibile ad alcuna opzione ("${selectedOptionText}"). Salvo per intervento e passo oltre.`);
-          // Non-mappabile = a maggior ragione a bassa confidenza: segnala all'AI.
-          aiRequests.push({
-            question: q.text,
-            options: q.opts.map(o => o.text),
-            ollamaGuess: { letter: ollamaAnswer.letter, text: ollamaAnswer.text, confidence: ollamaAnswer.confidence, strategy: ollamaAnswer.strategy }
-          });
-          saveNeedAnswer(root, [{ question: q.text, options: q.opts.map(o => o.text), ollama: { text: ollamaAnswer.text, letter: ollamaAnswer.letter } }], 'risposta Ollama non riconducibile alle opzioni');
-          if (selectedOptionText) capturedAnswers[q.text] = selectedOptionText;
-          continue;
-        }
-        const optsLoc = await optionsLocator(page);
-        await optsLoc.nth(optIdx).click();
-        await page.waitForTimeout(500);
-        await clickNextButton(page, log);
-        found = true;
-        sessionAnswers[q.text] = selectedOptionText;
-
-        // Best-guess a bassa confidenza: usato per far procedere il quiz, MA
-        // segnalato all'AI supervisore per verifica (popola la banca trusted).
-        if (ollamaAnswer.confidence == null || ollamaAnswer.confidence < AI_REQUEST_CONFIDENCE_THRESHOLD) {
-          aiRequests.push({
-            question: q.text,
-            options: q.opts.map(o => o.text),
-            ollamaGuess: { letter: ollamaAnswer.letter, text: ollamaAnswer.text, confidence: ollamaAnswer.confidence, strategy: ollamaAnswer.strategy }
-          });
-        }
-
-        try {
-          const pendingPath = account.stateFilePaths(root).pending;
-          const pending = fs.existsSync(pendingPath) ? readJsonSafe(pendingPath, {}) : {};
-          pending[q.text] = selectedOptionText;
-          writeJsonAtomic(pendingPath, pending);
-        } catch (e) { /* ignora */ }
-      }
+    // Domanda NON nota → incerta. NON rispondiamo (proteggiamo il tentativo).
+    // Chiediamo comunque a Ollama un SUGGERIMENTO da allegare per l'AI.
+    if (!seenQuestions.has(q.text)) {
+      seenQuestions.add(q.text);
+      uncertainCount++;
     }
-
-    // Salva la risposta scelta per questa domanda (utile per arricchire la banca anche quando
-    // la risposta era già nota con una formulazione diversa).
-    if (selectedOptionText) {
-      capturedAnswers[q.text] = selectedOptionText;
-    }
-
-    if (!found) {
-      log("Sospendo l'automazione per intervento dell'agente.");
-      aiRequests.push({ question: q.text, options: q.opts.map(o => o.text), ollamaGuess: null });
-      // Persisti l'handoff AI ora: il throw sottostante viene catturato come
-      // 'unknown (eccezione)' da solveQuiz e non arriverebbe a scrivere
-      // ai_quiz_request dai aiRequests accumulati. Così l'AI ha comunque la
-      // domanda + i guess precedenti a bassa confidenza.
-      if (aiRequests.length > 0) {
-        const n = saveAiQuizRequest(root, aiRequests, 'Ollama senza risposta valida (domanda senza risposta nota)', null);
-        log(`[AI_QUIZ_REQUEST] ${n} domande a bassa confidenza salvate in ai_quiz_request.json per verifica AI.`);
-      }
-      saveNeedAnswer(root, [{ question: q.text, options: q.opts.map(o => o.text) }], 'domanda senza risposta nota');
-      // Non process.exit da una lib: orfanerebbe il browser e saltlerebbe il
-      // finally di runAutoplay. Lancia NeedHelpExit, catturata in runAutoplay
-      // che chiude browser + scrive phase:'need_help' prima di exit(2).
-      throw new NeedHelpExit('quiz sospeso: domanda senza risposta nota');
-    }
+    log(`!!! DOMANDA NON NOTA: ${q.text.slice(0, 60)}... — non rispondo, la passo all'AI.`);
+    let ollamaGuess = null;
+    try {
+      const a = await askQuizQuestion(q.text, q.opts.map(o => o.text), log, root);
+      if (a) ollamaGuess = { letter: a.letter, text: a.text, confidence: a.confidence, strategy: a.strategy };
+    } catch (_) { /* Ollama è solo un hint: se non risponde, pazienza */ }
+    aiRequests.push({ question: q.text, options: q.opts.map(o => o.text), ollamaGuess });
+    saveNeedAnswer(root, [{ question: q.text, options: q.opts.map(o => o.text) }], 'domanda non nota (tentativo protetto)');
+    // Avanti SENZA rispondere (consentito dalla piattaforma; non finalizza).
+    await clickNextButton(page, log);
   }
 
   log(`ATTENZIONE: raggiunto il tetto di ${MAX_QUIZ_QUESTIONS} domande nel quiz. Esito valutato sulla pagina.`);
@@ -647,6 +623,14 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
   // 2) Verifica se c'è il bottone "Avvia compilazione" (dashboard quiz).
   const startBtn = page.locator('a.btn-primary, button.btn-primary').filter({ hasText: /avvia compilazione/i }).first();
   if (await startBtn.isVisible().catch(() => false)) {
+    // Logga i tentativi residui (informativo): con la strategia attempt-protective
+    // non finalizziamo mai con risposte incerte, quindi non li bruciamo — ma è
+    // utile averlo nei log.
+    const tent = await page.evaluate(() => {
+      const m = (document.body ? document.body.innerText : '').match(/tentativ\w*[^\d]{0,30}(\d+)/i);
+      return m ? m[1] : null;
+    }).catch(() => null);
+    if (tent != null) log(`Tentativi indicati sulla pagina: ${tent}.`);
     log("Trovato bottone 'Avvia compilazione'. Clicco per iniziare...");
     await startBtn.click();
     await page.waitForTimeout(4000);
@@ -663,6 +647,22 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
     await dumpQuizDiagnostics(page, root, 'exception_solve', null);
     monitor?.update({ lastQuizResult: 'ignoto (eccezione)' });
     return { outcome: 'unknown', passed: false, score: null, resultText: 'ignoto (eccezione)', reason: e.message };
+  }
+
+  // Attempt-protective: il quiz aveva domande NON note e NON è stato finalizzato
+  // (nessun tentativo consumato). Il corso va in need_help finché l'AI non riempie
+  // il glossario; poi resetCourse + retry lo finalizza con tutte le risposte note.
+  if (solveResult.status === 'needs_answers_bailed') {
+    const resultText = `sospeso: ${solveResult.uncertainCount} domande da risolvere (tentativo protetto)`;
+    log(`Quiz NON finalizzato per proteggere i tentativi. ${resultText}.`);
+    monitor?.update({ lastQuizResult: resultText });
+    return {
+      outcome: 'need_help',
+      passed: false,
+      score: null,
+      resultText,
+      reason: 'domande non note: non finalizzato per non consumare tentativi (le risolverà l\'AI)'
+    };
   }
 
   // 4) Dopo aver risposto, verifica l'esito finale.
