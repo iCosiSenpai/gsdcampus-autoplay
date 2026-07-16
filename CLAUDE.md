@@ -89,6 +89,8 @@ L'utente ti ha aperto per controllare / avviare / fermare / monitorare il corso 
 
 **IMPORTANTE — 100% video ≠ corso concluso**: un corso al 100% può avere ancora il QUESTIONARIO finale da fare. Per scoprire i falsi-done (video finiti ma quiz pendente) lancia `node scripts/harvest-answers.js --reconcile` (e `--reset` per rimetterli in coda). Fallo quando i corsi risultano "tutti done" ma sospetti manchino questionari, o su richiesta dell'utente.
 
+**Scan unico (consigliato all'avvio)**: `node scripts/harvest-answers.js --all` fa in **un solo login** censimento + riconciliazione (+`--reset`) + raccolta domande dei questionari pendenti + aggiornamento di `logs/ai_todo.json`. È il modo più efficiente per orientarti: un comando invece di tre.
+
 ## Flusso consigliato
 
 Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
@@ -198,12 +200,15 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 - Se Ollama non risponde, lo script salva la domanda in `need_answer.json` + `ai_quiz_request.json` e si ferma (`NeedHelpExit` → `phase:'need_help'`).
 - Quando un quiz finale non è superato, salva le domande in `need_answer.json` + `ai_quiz_request.json` (con i guess) e segna il corso `need_help` in `course_state.json`.
 
+**Inbox unico `logs/ai_todo.json`**: aggrega "cosa serve all'AI adesso" (fase, freschezza status in minuti, n. domande quiz aperte, corsi con questionario pendente, azioni consigliate). **Leggilo all'avvio** per orientarti; `./status.sh` ne mostra una sintesi ("Da fare per l'AI"). È scritto a fine run e da `harvest-answers.js --all`.
+
 **Intervento AI supervisore (flusso `quiz_needs_answers` / `need_help`):**
 1. Leggi `data/accounts/<CF>/ai_quiz_request.json` (CF = `config.codice_fiscale`, o derivato dall'URL di autologin). Ogni voce ha `question`, `options`, `ollamaGuess` (lettera + testo + confidence + strategy). Se assente, leggi anche `need_answer.json`.
-2. Risolvi ogni domanda con `WebSearch`/`WebFetch` + ragionamento (le domande sono su competenze digitali, privacy, sicurezza: il materiale del corso è citato nel testo). Il guess Ollama e la confidenza sono un suggerimento, non la verità.
-3. Scrivi la risposta verificata nella banca TRUSTED: `node scripts/lib/answers-cli.js set "domanda" "risposta"` (overwrite: corregge anche risposte sbagliate pre-esistenti).
-4. Se il quiz era **non superato** (`need_help`), fai riprovare il corso: `node -e "require('./src/lib/course-state').resetCourse('.', require('./src/lib/course-state').readState('.'), 'URL_CORSO')"` poi `./start.sh` (o `--ignore-hours`). Se il quiz era **superato con domande a bassa confidenza**, non serve reset: la verifica è opportunistica (far crescere la banca trusted per i colleghi).
-5. Strumenti banca: `node scripts/lib/answers-cli.js stats|list|merge|set|audit`. `stats` mostra trusted + pending (per-account) + richieste AI in attesa. `audit` elenca le voci trusted da verificare (le storiche promosse da guess Ollama pre-redesign vanno controllate con WebSearch).
+2. Risolvi ogni domanda con `WebSearch`/`WebFetch` + ragionamento (le domande sono su competenze digitali, privacy, sicurezza: il materiale del corso è citato nel testo). Il guess Ollama e la confidenza sono un suggerimento, non la verità. **Nota**: molte domande citano materiale di corso specifico/inventato (docenti, statistiche) che WebSearch non trova → usa ragionamento sull'opzione più plausibile.
+3. **Scrivi la risposta verificata con `node scripts/lib/answers-cli.js resolve "domanda" "risposta"`** — un solo comando che: (a) la mette nella banca TRUSTED locale, (b) **la rimuove dall'handoff** (ai_quiz_request/need_answer si svuotano da soli), (c) la mergia nella banca CONDIVISA `known_answers_public.json`. (Il vecchio `set` esiste ancora ma non pubblica.)
+4. Se il quiz era **non superato/sospeso** (`need_help`), fai riprovare il corso: `node -e "require('./src/lib/course-state').resetCourse('.', require('./src/lib/course-state').readState('.'), 'URL_CORSO')"` poi `./start.sh` (o `--ignore-hours`). Se il quiz era **superato con domande a bassa confidenza**, non serve reset: la verifica è opportunistica.
+5. **Distribuisci ai colleghi**: dopo aver risolto un batch, `./scripts/publish-answers.sh` fa commit+push di `known_answers_public.json` (solo il maintainer ha i permessi; per i colleghi resta locale). I colleghi ricevono le risposte al prossimo "Aggiorna e avvia". Chiedi conferma all'utente prima di pushare, come per le issue.
+6. Strumenti banca: `node scripts/lib/answers-cli.js stats|list|merge|set|resolve|audit|publish`. `stats` mostra trusted + pending (per-account) + richieste AI in attesa. `audit` elenca le voci trusted da verificare.
 
 **Quiz ATTEMPT-PROTECTIVE (revisione 07/2026):** la piattaforma consuma un tentativo SOLO alla finalizzazione. L'autoplay ora finalizza un quiz (clicca "Conferma" al Riepilogo) **solo se OGNI domanda ha una risposta NOTA** in `known_answers.json`. Se anche una sola domanda non è nota, **non finalizza**: la salva in `ai_quiz_request.json`, esce con `need_help` (marker `[AI_QUIZ_REQUEST]`, `lastQuizResult: "sospeso: N domande da risolvere (tentativo protetto)"`) e passa al corso successivo — **nessun tentativo bruciato**. Il tuo compito (AI supervisore): risolvi le domande in `ai_quiz_request.json` con WebSearch → `answers-cli set` → poi `resetCourse` + `./start.sh`; al retry, con tutte le risposte note, il quiz viene finalizzato e superato. Ollama qui è solo un suggerimento allegato (`ollamaGuess`), non decide la finalizzazione.
 
