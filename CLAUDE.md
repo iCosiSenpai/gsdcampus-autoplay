@@ -130,12 +130,12 @@ Quando l'utente chiede "controlla il corso" o "avvia il corso" o simili:
 **Cosa monitorare** (solo eventi rilevanti, per NON bruciare token a caso):
 - passaggio al prossimo corso / lezione (`Inizio corso`, `Controllo corso`, `Apertura:`, `Video finito`)
 - esito quiz (`Rilevato questionario`, `Quiz finale`, `superato`, `non superato`)
-- errori / problemi (`SESSIONE PERSA`, `AutologinError`, `session_unstable`, `need_help`, `frozen detected`, `Video element scomparso`, `Error`)
+- errori / problemi (`SESSIONE PERSA`, `AUTOLOGIN NON VALIDO`, `session_unstable`, `need_help`, `frozen detected`, `Video element scomparso`, `Error`)
 
 **Come** — usa il tool `Monitor` con questo comando (filtro `grep` event-driven: emette una notifica SOLO quando compare una riga rilevante, mai per le righe di progresso video `Video: x / y` che arrivano ogni 30s):
 
 ```
-tail -n 0 -F logs/autoplay.log | grep -E --line-buffered "Inizio corso|Controllo corso|Apertura:|Video finito|non risulta completata|Rilevato questionario|Quiz finale|superato|non superato|AI_QUIZ_REQUEST|quiz_needs_answers|SESSIONE PERSA|AutologinError|session_unstable|need_help|frozen detected|Video element scomparso|Error"
+tail -n 0 -F logs/autoplay.log | grep -E --line-buffered "Inizio corso|Controllo corso|Apertura:|Video finito|non risulta completata|Rilevato questionario|Quiz finale|superato|non superato|AI_QUIZ_REQUEST|quiz_needs_answers|SESSIONE PERSA|AUTOLOGIN NON VALIDO|session_unstable|need_help|frozen detected|Video element scomparso|Error"
 ```
 
 Parametri del tool `Monitor`:

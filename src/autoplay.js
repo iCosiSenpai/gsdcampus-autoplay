@@ -10,6 +10,14 @@ const { describeSchedule } = require('./lib/schedule');
 const { makeShiftChecker } = require('./lib/shift-watch');
 const courseState = require('./lib/course-state');
 const { writeDashboard } = require('./lib/dashboard');
+const { writeAiTodo } = require('./lib/ai-todo');
+
+// Finalizza lo stato su disco a fine run: dashboard aggregata + inbox unico
+// dell'AI (logs/ai_todo.json). Non lancia mai.
+function finalizeState() {
+  try { writeDashboard(ROOT); } catch (_) {}
+  try { writeAiTodo(ROOT); } catch (_) {}
+}
 const { writeJsonAtomic } = require('./lib/io');
 const { OffHoursExit, AutologinError, SessionError, AllCoursesNeedHelpExit, DashboardEmptyError, NeedHelpExit } = require('./lib/errors');
 const { dashboardUrl, userAgent } = require('./lib/platform');
@@ -1046,7 +1054,7 @@ async function runAutoplay() {
         // Riscopri corsi: potrebbero esserne stati aggiunti di nuovi, o lo stato potrebbe cambiare.
         courseUrls = await discoverCourses();
         monitor.update({ courseStateSummary: courseState.summarize(state) });
-        try { writeDashboard(ROOT); } catch (_) {}
+        finalizeState();
         if (courseUrls.length === 0) {
           throw new AllCoursesNeedHelpExit('Tutti i corsi risultano completati o bloccati.');
         }
@@ -1060,7 +1068,7 @@ async function runAutoplay() {
         monitor.update({ running: false, phase: 'off_hours' });
         if (ctx) { try { await ctx.close(); } catch (_) {} ctx = null; }
         if (browser) { try { await browser.close(); } catch (_) {} browser = null; }
-        try { writeDashboard(ROOT); } catch (_) {}
+        finalizeState();
         process.exit(0);
       }
       if (e instanceof NeedHelpExit) {
@@ -1071,7 +1079,7 @@ async function runAutoplay() {
         monitor.update({ running: false, phase: 'need_help', lastError: e.message, courseStateSummary: courseState.summarize(state) });
         if (ctx) { try { await ctx.close(); } catch (_) {} ctx = null; }
         if (browser) { try { await browser.close(); } catch (_) {} browser = null; }
-        try { writeDashboard(ROOT); } catch (_) {}
+        finalizeState();
         process.exit(2);
       }
       if (e instanceof AutologinError || e.code === 'AUTOLOGIN_INVALID') {
@@ -1089,7 +1097,7 @@ async function runAutoplay() {
             lastError: 'Token autologin valido ma la piattaforma limita i re-login. Riprova tra qualche minuto.'
           });
           if (browser) { try { await browser.close(); } catch (_) {} }
-          try { writeDashboard(ROOT); } catch (_) {}
+          finalizeState();
           process.exit(4); // exit 4 = session_unstable: lo scheduler fa cooldown lungo
         }
         log('AUTOLOGIN NON VALIDO:', e.message);
@@ -1101,7 +1109,7 @@ async function runAutoplay() {
         log('TUTTI I CORSI COMPLETATI O IN ATTESA DI AIUTO:', e.message);
         monitor.update({ running: false, phase: 'need_help', lastError: e.message, courseStateSummary: courseState.summarize(state) });
         if (browser) { try { await browser.close(); } catch (_) {} }
-        try { writeDashboard(ROOT); } catch (_) {}
+        finalizeState();
         process.exit(0);
       }
       if (e instanceof DashboardEmptyError || e.code === 'DASHBOARD_EMPTY') {
@@ -1118,7 +1126,7 @@ async function runAutoplay() {
         monitor.update({ running: false, phase: 'post_login_blocked', lastError: e.message, courseStateSummary: courseState.summarize(state) });
         if (ctx) { try { await ctx.close(); } catch (_) {} ctx = null; }
         if (browser) { try { await browser.close(); } catch (_) {} browser = null; }
-        try { writeDashboard(ROOT); } catch (_) {}
+        finalizeState();
         process.exit(4);
       }
       if (e instanceof SessionError || e.code === 'SESSION_LOST') {
@@ -1134,7 +1142,7 @@ async function runAutoplay() {
           log('Token valido ma sessione instabile: esco senza re-login per non consumare il token.');
           monitor.update({ running: false, phase: 'session_unstable', lastError: 'Sessione instabile con token valido. Attendo il cooldown dello scheduler prima di riprovare.' });
           if (browser) { try { await browser.close(); } catch (_) {} }
-          try { writeDashboard(ROOT); } catch (_) {}
+          finalizeState();
           process.exit(4);
         }
         monitor.update({ phase: 'session_lost', lastError: e.message });

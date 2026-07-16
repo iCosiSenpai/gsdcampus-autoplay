@@ -312,6 +312,33 @@ function saveAiQuizRequest(root, items, reason, ctx) {
   return 0;
 }
 
+// Rimuove dall'handoff (ai_quiz_request.json + need_answer.json) le domande già
+// RISOLTE (aggiunte alla banca trusted). Dopo che l'AI risponde, l'inbox si
+// svuota da solo: niente dati stale, niente "reset dimenticato" (l'AI non
+// ri-lavora domande già fatte). Matching robusto via normKey (ignora numero
+// randomizzato/formattazione). Ritorna quante voci ha rimosso.
+function clearResolvedFromHandoff(root, resolvedQuestions) {
+  if (!resolvedQuestions || resolvedQuestions.length === 0) return 0;
+  const resolvedKeys = new Set(resolvedQuestions.map(q => normKey(q)));
+  const paths = account.stateFilePaths(root);
+  const files = [path.join(paths.accountDir, 'ai_quiz_request.json'), paths.needAnswer];
+  let removed = 0;
+  for (const f of files) {
+    try {
+      if (!fs.existsSync(f)) continue;
+      const data = readJsonSafe(f, null);
+      if (!data || !Array.isArray(data.questions)) continue;
+      const before = data.questions.length;
+      const kept = data.questions.filter(q => !resolvedKeys.has(normKey(q.question || '')));
+      if (kept.length !== before) {
+        removed += before - kept.length;
+        writeJsonAtomic(f, { ...data, questions: kept, savedAt: new Date().toISOString() });
+      }
+    } catch (e) { /* ignora */ }
+  }
+  return removed;
+}
+
 // Salva HTML + screenshot + bodyText della pagina del quiz in debug/quiz/.
 // A prova di bomba: qualsiasi esito non chiaro o cattura fallita lascia artefatti
 // per diagnosi, così l'autopilot non fallisce MAI in silenzio. Non lancia mai.
@@ -747,4 +774,4 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
   return { outcome: 'unknown', passed: false, score: null, resultText: 'ignoto' };
 }
 
-module.exports = { solveQuiz, extractScore, detectOutcomeFromText, extractQuestionsFromPage, saveNeedAnswer, saveAiQuizRequest, dumpQuizDiagnostics, NeedHelpExit, MAX_QUIZ_QUESTIONS };
+module.exports = { solveQuiz, extractScore, detectOutcomeFromText, extractQuestionsFromPage, saveNeedAnswer, saveAiQuizRequest, clearResolvedFromHandoff, dumpQuizDiagnostics, NeedHelpExit, MAX_QUIZ_QUESTIONS };

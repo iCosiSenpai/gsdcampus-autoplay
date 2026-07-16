@@ -45,10 +45,25 @@ const fs = require('fs');
 const path = require('path');
 const { writeJsonAtomic, readJsonSafe } = require(path.join(__dirname, '..', '..', 'src', 'lib', 'io'));
 const account = require(path.join(__dirname, '..', '..', 'src', 'lib', 'account'));
+const { clearResolvedFromHandoff } = require(path.join(__dirname, '..', '..', 'src', 'lib', 'quiz'));
 
 const ROOT = path.join(__dirname, '..', '..');
 const DATA = path.join(ROOT, 'data');
 const KNOWN = path.join(DATA, 'known_answers.json');
+const PUBLIC = path.join(DATA, 'known_answers_public.json');
+
+// Mergia le chiavi nuove del trusted locale nella banca pubblica condivisa
+// (senza sovrascrivere le voci pubbliche esistenti, curate). Ritorna la lista
+// delle domande aggiunte. Riusata da `publish` e `resolve`.
+function mergeIntoPublic(known) {
+  const pub = readJsonSafe(PUBLIC, {});
+  const added = [];
+  for (const [q, a] of Object.entries(known)) {
+    if (!pub[q]) { pub[q] = a; added.push(q); }
+  }
+  if (added.length > 0) writeJsonAtomic(PUBLIC, pub);
+  return added;
+}
 
 // Path per-account dell'account attivo (CF da config.json), con fallback ai
 // legacy flat in data/ se il CF non è determinabile.
@@ -118,7 +133,30 @@ if (cmd === 'stats') {
   const known = readJson(KNOWN, {});
   known[q] = a; // overwrite: l'AI supervisore corregge anche risposte sbagliate
   writeJsonAtomic(KNOWN, known);
+  // Auto-pulizia handoff: la domanda ora è risolta, toglila da ai_quiz_request /
+  // need_answer così l'inbox dell'AI non resta pieno di domande già fatte.
+  const cleaned = clearResolvedFromHandoff(ROOT, [q]);
   console.log(`Salvata (trusted): "${q.slice(0, 70)}" → "${a.slice(0, 50)}"`);
+  if (cleaned > 0) console.log(`  (rimossa da ${cleaned} voce/i dell'handoff AI)`);
+} else if (cmd === 'resolve') {
+  // resolve = set + pulizia handoff + publish nella banca condivisa, in un colpo.
+  // È il comando che l'AI supervisore usa dopo aver VERIFICATO una risposta: la
+  // rende trusted locale, svuota l'inbox e la mette subito nella banca pubblica
+  // (file). Il push ai colleghi lo fa poi ./scripts/publish-answers.sh.
+  const q = process.argv[3];
+  const a = process.argv[4];
+  if (!q || !a) {
+    console.error('Uso: node scripts/lib/answers-cli.js resolve "testo domanda" "testo risposta"');
+    process.exit(1);
+  }
+  const known = readJson(KNOWN, {});
+  known[q] = a;
+  writeJsonAtomic(KNOWN, known);
+  const cleaned = clearResolvedFromHandoff(ROOT, [q]);
+  const added = mergeIntoPublic({ [q]: a });
+  console.log(`Risolta: "${q.slice(0, 70)}" → "${a.slice(0, 50)}"`);
+  console.log(`  trusted: aggiornata · handoff: -${cleaned} · banca condivisa: ${added.length > 0 ? '+1 (nuova)' : 'già presente'}`);
+  if (added.length > 0) console.log('  Per distribuirla ai colleghi: ./scripts/publish-answers.sh');
 } else if (cmd === 'audit') {
   const known = readJson(KNOWN, {});
   const entries = Object.entries(known).filter(([q]) => !String(q).startsWith('README'));
@@ -134,23 +172,15 @@ if (cmd === 'stats') {
   // NON sovrascrive voci pubbliche esistenti (la banca pubblica è curata): aggiunge
   // solo le chiavi nuove. È l'unico canale local→pubblico.
   const known = readJson(KNOWN, {});
-  const PUBLIC = path.join(DATA, 'known_answers_public.json');
-  const pub = readJson(PUBLIC, {});
-  let added = 0;
-  const addedList = [];
-  for (const [q, a] of Object.entries(known)) {
-    if (!pub[q]) { pub[q] = a; added++; addedList.push(q); }
-  }
-  if (added > 0) {
-    writeJsonAtomic(PUBLIC, pub);
-    console.log(`Aggiunte ${added} risposte alla banca condivisa (known_answers_public.json):`);
+  const addedList = mergeIntoPublic(known);
+  if (addedList.length > 0) {
+    console.log(`Aggiunte ${addedList.length} risposte alla banca condivisa (known_answers_public.json):`);
     addedList.forEach(q => console.log(`  + ${q.slice(0, 80)}`));
-    console.log('\nOra rendile effettive per i colleghi:');
-    console.log('  git add data/known_answers_public.json && git commit -m "banca: +N risposte" && git push');
+    console.log('\nOra rendile effettive per i colleghi:  ./scripts/publish-answers.sh');
   } else {
     console.log('Nessuna nuova risposta da pubblicare (tutte già nella banca pubblica).');
   }
 } else {
-  console.error(`Comando sconosciuto: ${cmd}\nComandi: stats | list | merge | set | audit | publish`);
+  console.error(`Comando sconosciuto: ${cmd}\nComandi: stats | list | merge | set | resolve | audit | publish`);
   process.exit(1);
 }

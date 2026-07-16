@@ -195,6 +195,24 @@ if [ -f logs/course_census.json ]; then
   info "Per il dato aggiornato: node scripts/harvest-answers.js --census"
 fi
 
+# ── Inbox AI (da fare) ──
+# Un solo punto di verità su "cosa serve all'AI adesso" (logs/ai_todo.json,
+# scritto a fine run e da harvest-answers.js --all).
+if [ -f logs/ai_todo.json ]; then
+  echo ""
+  info "Da fare per l'AI"
+  node -e "
+    try {
+      const t = require('./logs/ai_todo.json');
+      if (t.statusAgeMin != null) console.log('  Stato aggiornato ' + t.statusAgeMin + ' min fa' + (t.statusStale ? ' (VECCHIO)' : ''));
+      if (t.openQuizRequests) console.log('  • ' + t.openQuizRequests + ' domanda/e quiz da risolvere (ai_quiz_request.json)');
+      if (t.falseDones) console.log('  • ' + t.falseDones + ' corso/i con questionario pendente (già rimessi in coda)');
+      (t.actions||[]).forEach(a => console.log('  → ' + a));
+      if (!t.openQuizRequests && !t.falseDones) console.log('  Nessuna azione urgente in sospeso.');
+    } catch(e) { console.log('  (inbox non leggibile)'); }
+  " 2>/dev/null || warn "Inbox AI non leggibile."
+fi
+
 # ── Heartbeat ──
 echo ""
 info "Heartbeat"
