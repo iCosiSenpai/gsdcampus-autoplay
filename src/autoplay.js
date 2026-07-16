@@ -532,10 +532,22 @@ async function runCourse(page, courseUrl, sessionState, state, shiftCheck) {
 
       log('Verifico quiz finale...');
       try {
-        const quizLink = await page.evaluate(() => {
+        // Rilevazione robusta: oltre al link diretto /questionario/, guardiamo
+        // anche il bottone "Avvia compilazione" e la sezione "Questionari finali".
+        // Serve a non marcare done un corso che HA un questionario pendente ma il
+        // cui link non è un <a href="/questionario/"> (falso-done storico).
+        const quizInfo = await page.evaluate(() => {
           const a = document.querySelector('a[href*="/questionario/"]');
-          return a ? a.href : null;
+          const btns = [...document.querySelectorAll('a, button')];
+          const avvia = btns.find(b => /avvia compilazione/i.test(b.innerText || ''));
+          const avviaHref = avvia && avvia.tagName === 'A' ? avvia.href : null;
+          const body = document.body ? document.body.innerText : '';
+          return {
+            quizHref: a ? a.href : (avviaHref || null),
+            hasQuestionnaireSignal: !!a || !!avvia || /questionari finali/i.test(body),
+          };
         });
+        const quizLink = quizInfo.quizHref;
         if (quizLink) {
           // Clicca il link del quiz dalla pagina corso (il goto diretto può perdere la sessione).
           const quizLocator = page.locator(`a[href="${quizLink}"]`).first();
@@ -552,7 +564,7 @@ async function runCourse(page, courseUrl, sessionState, state, shiftCheck) {
 
           if (quizResult.passed) {
             log(`Quiz finale di ${courseUrl} superato.`);
-            courseState.markCourseDone(ROOT, state, courseUrl);
+            courseState.markCourseDone(ROOT, state, courseUrl, true);
             saveSession({ courseUrl, phase: 'quiz_done' });
             monitor.update({ phase: 'done', courseStateSummary: courseState.summarize(state) });
             return;
@@ -577,13 +589,23 @@ async function runCourse(page, courseUrl, sessionState, state, shiftCheck) {
 
           continue;
         }
+        // C'è un segnale di questionario (sezione "Questionari finali" o bottone
+        // "Avvia compilazione") ma non siamo riusciti a risolverne il link:
+        // NON marchiamo done a torto (falso-done storico). Segnaliamo need_help
+        // così la riconciliazione/AI lo recupera invece di perderlo.
+        if (quizInfo.hasQuestionnaireSignal) {
+          log(`Corso ${courseUrl}: rilevato un questionario finale ma non raggiungibile automaticamente. Segnalo need_help (non marco done).`);
+          courseState.markCourseNeedHelp(ROOT, state, courseUrl, 'questionario finale presente ma link non risolvibile automaticamente');
+          monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
+          return;
+        }
       } catch (e) {
         log(`Errore quiz: ${e.message}`);
         await monitor.recordError(page, e, 'finalQuiz');
       }
 
-      log(`Corso ${courseUrl} TERMINATO.`);
-      courseState.markCourseDone(ROOT, state, courseUrl);
+      log(`Corso ${courseUrl} TERMINATO (nessun questionario finale).`);
+      courseState.markCourseDone(ROOT, state, courseUrl, false);
       saveSession({ courseUrl, phase: 'done' });
       monitor.update({ phase: 'done', courseStateSummary: courseState.summarize(state) });
       return;

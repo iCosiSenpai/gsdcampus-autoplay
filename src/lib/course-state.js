@@ -83,8 +83,15 @@ function mergeWriteState(root, state, opts = {}) {
   return state;
 }
 
-function markCourseDone(root, state, url) {
-  return updateCourse(root, state, url, { status: 'done', quizAttempts: 0, needHelpReason: null });
+// finalQuizPassed (opzionale): true se il corso è done perché il questionario
+// finale è stato SUPERATO; false per i done "senza quiz" (solo PDF, o terminato
+// senza questionario). Informativo: aiuta a riconoscere i done sospetti (un
+// done con finalQuizPassed:false + questionario pendente sulla piattaforma è un
+// falso-done — v. harvest-answers.js --reconcile).
+function markCourseDone(root, state, url, finalQuizPassed = null) {
+  const updates = { status: 'done', quizAttempts: 0, needHelpReason: null };
+  if (finalQuizPassed !== null) updates.finalQuizPassed = finalQuizPassed;
+  return updateCourse(root, state, url, updates);
 }
 
 function markCourseNeedHelp(root, state, url, reason) {
