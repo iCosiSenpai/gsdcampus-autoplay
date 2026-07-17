@@ -125,6 +125,65 @@ is_in_hours() {
   node "$SCHEDULE_CLI" is-work-time 2>/dev/null | grep -c '^yes$' >/dev/null
 }
 
+# ── Check aggiornamento versione (throttled: max 1 volta/ora) ───────────────
+# Fa un git fetch leggero e, se origin/main è più avanti di HEAD, scrive un
+# marker file in logs/.update_available con versione corrente e nuova.
+# L'AI supervisore lo legge e consiglia all'utente di chiudere, riaprire il
+# comando curl e aggiornare. Non tocca il codice: è solo un avviso.
+UPDATE_MARKER="$DIR/logs/.update_available"
+UPDATE_CHECK_INTERVAL=3600  # secondi tra un check e l'altro
+
+check_for_updates() {
+  # Throttle: se il marker (o un check fallito) è stato scritto meno di 1h fa, skip.
+  if [ -f "$UPDATE_MARKER" ]; then
+    local marker_age
+    marker_age=$(( $(date +%s) - $(stat -f%m "$UPDATE_MARKER" 2>/dev/null || echo 0) ))
+    if [ "$marker_age" -lt "$UPDATE_CHECK_INTERVAL" ]; then
+      return 0
+    fi
+  fi
+
+  # Rete? (best-effort, non bloccare lo scheduler se non c'è)
+  if ! curl -m 5 -fsS -o /dev/null https://raw.githubusercontent.com 2>/dev/null; then
+    return 0
+  fi
+
+  git fetch --quiet origin main 2>/dev/null || return 0
+
+  local LOCAL_HEAD REMOTE_HEAD
+  LOCAL_HEAD=$(git -C "$DIR" rev-parse HEAD 2>/dev/null || echo "")
+  REMOTE_HEAD=$(git -C "$DIR" rev-parse origin/main 2>/dev/null || echo "")
+
+  if [ -z "$LOCAL_HEAD" ] || [ -z "$REMOTE_HEAD" ]; then
+    return 0
+  fi
+
+  if [ "$LOCAL_HEAD" = "$REMOTE_HEAD" ]; then
+    # Aggiornati: rimuovi il marker se c'era (l'utente ha aggiornato)
+    rm -f "$UPDATE_MARKER" 2>/dev/null || true
+    return 0
+  fi
+
+  # C'è un aggiornamento: scrivi il marker con dettagli
+  local LOCAL_SHORT="${LOCAL_HEAD:0:7}"
+  local REMOTE_SHORT="${REMOTE_HEAD:0:7}"
+  local REMOTE_DATE
+  REMOTE_DATE=$(git -C "$DIR" log -1 --format=%cd --date=format:'%d/%m/%Y %H:%M' origin/main 2>/dev/null || echo "")
+  local REMOTE_MSG
+  REMOTE_MSG=$(git -C "$DIR" log -1 --format=%s origin/main 2>/dev/null || echo "")
+
+  cat > "$UPDATE_MARKER" <<EOF
+{
+  "localVersion": "$LOCAL_SHORT",
+  "remoteVersion": "$REMOTE_SHORT",
+  "remoteDate": "$REMOTE_DATE",
+  "remoteMessage": "$REMOTE_MSG",
+  "checkedAt": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+}
+EOF
+  log "⚠️  Aggiornamento disponibile: $LOCAL_SHORT → $REMOTE_SHORT ($REMOTE_DATE). L'utente dovrebbe chiudere e rilanciare il comando curl per aggiornare."
+}
+
 log "Scheduler avviato. IGNORE_HOURS=$IGNORE_HOURS"
 
 # Contatore crash consecutivi (exit code diverso da 0 e 4). Backoff crescente per
@@ -192,6 +251,9 @@ while true; do
     rm -f "$STOP_FILE"
     exit 0
   fi
+
+  # Check aggiornamento (throttled: max 1 volta/ora, best-effort, mai bloccante).
+  check_for_updates || true
 
   if [[ "$IGNORE_HOURS" = true ]]; then
     log "Avvio autoplay (modalità ignore-hours)..."

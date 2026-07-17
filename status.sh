@@ -31,6 +31,20 @@ source "$DIR/scripts/lib/pid-utils.sh"
 ui_header "Stato GSD Campus Autoplay" "versione $(ui_version "$DIR")"
 echo ""
 
+# ── Aggiornamento disponibile ──
+UPDATE_MARKER="$DIR/logs/.update_available"
+if [ -f "$UPDATE_MARKER" ]; then
+  UPD_LOCAL=$(node -e "try{process.stdout.write(require('$UPDATE_MARKER').localVersion||'')}catch(e){}" 2>/dev/null || echo "")
+  UPD_REMOTE=$(node -e "try{process.stdout.write(require('$UPDATE_MARKER').remoteVersion||'')}catch(e){}" 2>/dev/null || echo "")
+  UPD_DATE=$(node -e "try{process.stdout.write(require('$UPDATE_MARKER').remoteDate||'')}catch(e){}" 2>/dev/null || echo "")
+  if [ -n "$UPD_REMOTE" ]; then
+    warn "⬆️  AGGIORNAMENTO DISPONIBILE: ${UPD_LOCAL:-?} → $UPD_REMOTE${UPD_DATE:+ ($UPD_DATE)}"
+    info "Per aggiornare: chiudi tutto (Ctrl+C), poi rilancia il comando curl:"
+    info "  curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash"
+    echo ""
+  fi
+fi
+
 PID_FILE=".autoplay_pid"
 
 # ── Stato scheduler ──

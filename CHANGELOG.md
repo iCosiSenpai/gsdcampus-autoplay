@@ -5,6 +5,11 @@ il comando curl mostra automaticamente le righe nuove di questo file.
 (Per il maintainer: aggiungere una sezione `## data` con bullet brevi a ogni
 push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
+## 2026-07-17
+
+- Aggiunto un avviso automatico: il sistema ora ti informa se c'è una nuova versione disponibile e ti consiglia di aggiornare.
+- Risolto un ritardo della piattaforma che a volte causava un secondo tentativo inutile a fine video: ora aspetta qualche secondo in più che il 100% venga salvato.
+
 ## 2026-07-16
 
 - "Cambia account Ollama" ora aggiorna anche il codice e chiede il login una volta sola (prima lo chiedeva due volte).

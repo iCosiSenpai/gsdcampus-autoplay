@@ -268,6 +268,7 @@ Sii conciso. Riporta:
 - riepilogo corsi (`courseStateSummary` in `logs/status.json`, se presente)
 - ultimo errore (se presente)
 - azione che hai intrapreso
+- **se c'è un aggiornamento disponibile** (segnalato da `status.sh`), consiglia esplicitamente all'utente di chiudere, riaprire il comando `curl` (come da README) e aggiornare.
 
 ## Permessi di Claude Code
 

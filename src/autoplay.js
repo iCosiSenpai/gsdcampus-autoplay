@@ -274,7 +274,10 @@ async function acceptUsageDeclaration(page, log) {
 async function getLessonProgressOnCoursePage(page, courseUrl, lessonHref) {
   try {
     await page.goto(courseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForTimeout(3000);
+    // 8s: la piattaforma può impiegare diversi secondi a persistere il 100% dopo
+    // la fine del video (visto: 97% subito dopo fine video, 100% ~10s dopo). Con
+    // 3s capitava spesso il "Tentativo 1" inutile; 8s dà un margine confortevole.
+    await page.waitForTimeout(8000);
     // Su sessione fragile il goto rimbalza su /login: NON tornare null silenzioso
     // (sennà runCourse crede "lezione non completata" e dopo 3 tentativi marca
     // need_help un corso legittimamente completato). Segnala il drop di sessione:
