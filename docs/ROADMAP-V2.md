@@ -251,10 +251,11 @@ Solo se 4.1 mostra falsi miss:
 **Done**
 - [x] `member-queue.js` + advance su AllCoursesNeedHelpExit; `config.memberQueue`.
 
-## STEP 6.2 — Dashboard aggregata utile
+## STEP 6.2 — Dashboard aggregata utile ✅ DONE (2026-07-19)
 
-- `dashboard-cli` già esiste: aggiungere “eta ultimo run”, “ultima phase”, “n need_help”.
-- Export CSV per referente.
+**Done**
+- [x] `lastPhase`, `statusAgeMin`, `needHelp`, running sul membro attivo
+- [x] `dashboard-cli list` arricchito + `csv [path]`
 
 ## STEP 6.3 — Metrics aggregate opzionali (privacy) ✅ DONE (2026-07-19)
 
@@ -265,28 +266,32 @@ Solo se 4.1 mostra falsi miss:
 
 # FASE 7 — Affidabilità sessione (P1)
 
-## STEP 7.1 — Meno stress sessione
+## STEP 7.1 — Meno stress sessione ✅ DONE (2026-07-19)
 
-- Evitare goto dashboard ridondanti (già parziale).
-- Pool cookie: riusa storage_state se ancora valido (probe short).
-- Cooldown configurabile post `session_unstable`.
+**Done**
+- [x] `session-policy.js` + cooldown configurabile (`sessionUnstableCooldownMin`)
+- [x] `isOnDashboardUrl` evita goto ridondanti in course-runner
+- [ ] Pool cookie storage_state (deliberatamente non: contesto pulito resta default)
 
-## STEP 7.2 — Telemetria session
+## STEP 7.2 — Telemetria session ✅ DONE (2026-07-19)
 
-Metrics già logga phase: aggiungere contatori `login_drop`, `missing_permission` se non ridondanti.
+**Done**
+- [x] metrics `loginDrop` / `missingPermission` + errorClass su phase session
 
 ## STEP 7.3 — Chrome headless fingerprint
 
 Se session_unstable aumenta con Chromium bundled:  
 provare `channel: chrome` quando disponibile; stealth init script già in explore.
+(Browser launcher 1.1 già fa chrome→chromium.)
 
 ---
 
 # FASE 8 — Install / ops / sicurezza (P2)
 
-## STEP 8.1 — Requirements: Chrome vs Chromium
+## STEP 8.1 — Requirements: Chrome vs Chromium ✅ DONE (2026-07-19)
 
-Allineare messaggi setup: “Chrome consigliato, Chromium ok”.
+**Done**
+- [x] Messaggi setup + `browser-check.sh` + check-requirements
 
 ## STEP 8.2 — Release pin ✅ DONE (docs 2026-07-19)
 
@@ -297,36 +302,39 @@ Allineare messaggi setup: “Chrome consigliato, Chromium ok”.
 
 - [x] Audit in `docs/SECURITY-MEMBERS.md` (token, gitignore, 0600, consenso)
 
-## STEP 8.4 — Rotazione KEY / PAT
+## STEP 8.4 — Rotazione KEY / PAT ✅ DONE (2026-07-19)
 
-Runbook: rotazione `DEFAULT_KEY`, `ISSUE_TOKEN`; revoca PAT leakati in chat.
+- [x] `docs/RUNBOOK-KEYS.md`
 
-## STEP 8.5 — WAF rate limit Worker
+## STEP 8.5 — WAF rate limit Worker ✅ DONE (2026-07-19)
 
-Cloudflare: 10/min `/answers`, 5/min `/report`.
+**Done**
+- [x] Rate limit in-memory Worker: 10/min answers, 5/min report, 20/min metrics
+- [x] Note WAF dashboard in RUNBOOK
 
 ---
 
 # FASE 9 — AI supervisore & DX (P2)
 
-## STEP 9.1 — Contratto AI machine-readable
+## STEP 9.1 — Contratto AI machine-readable ✅ DONE (2026-07-19)
 
-`docs/ai-contract.json`: comandi, path, exit codes.  
-Test: path citati in CLAUDE.md esistono.
+**Done**
+- [x] `docs/ai-contract.json` + `test/ai-contract.test.js`
 
-## STEP 9.2 — CLAUDE.md vs Grok
+## STEP 9.2 — CLAUDE.md vs Grok ✅ DONE (2026-07-19)
 
-Sezione “minima autonomia” + link roadmap; evitare 300 righe duplicate.
+**Done**
+- [x] Sezione “Minima autonomia” + link roadmap/contract/security
 
 ## STEP 9.3 — JSDoc @ts-check su pure modules
 
-`quiz-match`, `metrics`, `schedule`, `selectors`.
+`quiz-match`, `metrics`, `schedule`, `selectors`. (follow-up opzionale)
 
-## STEP 9.4 — Ollama latency
+## STEP 9.4 — Ollama latency ✅ DONE (2026-07-19)
 
-- 1 sample se primo voto alto  
-- cache domanda→lettera in sessione  
-- parallel sample se supportato  
+**Done**
+- [x] Early-exit se sample1 confidenza ≥ 0.9
+- [x] Cache sessione domanda→risposta  
 
 ---
 

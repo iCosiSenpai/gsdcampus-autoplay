@@ -79,13 +79,28 @@ class Monitor {
     // Metriche privacy-safe: solo su cambio phase (non a ogni tick 5s).
     if (updates && updates.phase != null && updates.phase !== prevPhase) {
       try {
-        appendMetric(this.root, {
-          phase: this.status.phase,
+        const phase = this.status.phase;
+        const partial = {
+          phase,
           courseUrl: this.status.courseUrl,
           lessonUrl: this.status.lessonUrl,
           lastQuizResult: this.status.lastQuizResult,
           uptimeSec: this.status.uptimeSec,
-        });
+        };
+        // Classi di errore sessione (7.2): contatori grezzi, no URL/CF.
+        if (phase === 'session_unstable' || phase === 'session_lost') {
+          partial.errorClass = phase;
+          partial.loginDrop = 1;
+          partial.event = 'session';
+        } else if (phase === 'need_help' && /missing_permission/i.test(String(this.status.lastError || ''))) {
+          partial.errorClass = 'missing_permission';
+          partial.missingPermission = 1;
+          partial.event = 'session';
+        } else if (phase === 'autologin_invalid') {
+          partial.errorClass = 'autologin_invalid';
+          partial.event = 'session';
+        }
+        appendMetric(this.root, partial);
       } catch (_) { /* mai bloccante */ }
     }
   }

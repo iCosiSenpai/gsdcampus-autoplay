@@ -12,6 +12,8 @@ const path = require('path');
 const MAX_METRICS_BYTES = 5 * 1024 * 1024; // 5 MB → ruota in .1
 const ALLOWED_KEYS = new Set([
   'ts', 'event', 'phase', 'courseId', 'lessonId', 'quiz', 'errorClass', 'uptimeSec',
+  // Contatori sessione (valori interi piccoli, mai URL/CF)
+  'loginDrop', 'missingPermission',
 ]);
 
 function metricsPath(root) {
@@ -53,6 +55,12 @@ function buildMetricEvent(partial) {
     if (partial.errorClass != null) out.errorClass = String(partial.errorClass).slice(0, 64);
     if (partial.uptimeSec != null && Number.isFinite(Number(partial.uptimeSec))) {
       out.uptimeSec = Math.max(0, Math.floor(Number(partial.uptimeSec)));
+    }
+    if (partial.loginDrop != null && Number.isFinite(Number(partial.loginDrop))) {
+      out.loginDrop = Math.max(0, Math.floor(Number(partial.loginDrop)));
+    }
+    if (partial.missingPermission != null && Number.isFinite(Number(partial.missingPermission))) {
+      out.missingPermission = Math.max(0, Math.floor(Number(partial.missingPermission)));
     }
     if (partial.event) out.event = String(partial.event).slice(0, 32);
     // Convenience: pass full URLs → only IDs

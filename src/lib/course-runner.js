@@ -26,6 +26,8 @@ const {
   INTERSTITIAL_CLICK_MS,
 } = require('./platform');
 const { SELECTORS } = require('./selectors');
+const { appendMetric } = require('./metrics');
+const { isOnDashboardUrl } = require('./session-policy');
 
 const MAX_MISSING_PERMISSION = 3;
 const MAX_COURSE_ITER = 120;
@@ -141,7 +143,7 @@ function createCourseRunner(deps) {
         // Se siamo già sulla dashboard (es. subito dopo discoverCourses), NON
         // ricaricarla: ogni goto in più stressa la sessione quando è fragile e
         // la piattaforma può rimbalzarci su /login. Ricarichiamo solo se serve.
-        if (!page.url().includes('/corso/listAllByUser')) {
+        if (!isOnDashboardUrl(page.url())) {
           log('Ritorno dashboard per accesso al corso...');
           await page.goto(dashboardUrl(config), { waitUntil: 'domcontentloaded', timeout: 60000 });
         }
@@ -211,10 +213,24 @@ function createCourseRunner(deps) {
       if (page.url().includes('error?code=missing_permission')) {
         missingPermissionCount++;
         log(`Siamo in pagina MISSING_PERMISSION (tentativo ${missingPermissionCount}/${MAX_MISSING_PERMISSION}).`);
+        try {
+          appendMetric(ROOT, {
+            event: 'session',
+            phase: 'checking',
+            errorClass: 'missing_permission',
+            missingPermission: 1,
+            courseUrl,
+          });
+        } catch (_) {}
         if (missingPermissionCount >= MAX_MISSING_PERMISSION) {
           log(`Corso ${courseUrl} non accessibile: troppi MISSING_PERMISSION. Salto al prossimo corso.`);
           courseState.markCourseNeedHelp(ROOT, state, courseUrl, 'missing_permission');
-          monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
+          monitor.update({
+            phase: 'need_help',
+            courseUrl,
+            lastError: 'missing_permission',
+            courseStateSummary: courseState.summarize(state),
+          });
           return;
         }
         try {

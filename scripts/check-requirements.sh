@@ -8,6 +8,7 @@ cd "$DIR"
 
 # shellcheck source=scripts/setup/package-hash.sh
 . "$DIR/scripts/setup/package-hash.sh"
+. "$DIR/scripts/setup/browser-check.sh"
 
 missing=0
 
@@ -60,25 +61,10 @@ else
   log_missing "Dipendenze npm obsolete (esegui: npm install o ./scripts/setup.sh)"
 fi
 
-# 4. Browser: preferito Google Chrome di sistema; fallback Chromium Playwright
-# (src/lib/browser.js). Chrome assente NON è più bloccante se Chromium bundled
-# è installato (npx playwright install chromium / setup).
-CHROME_APP=""
-[ -f "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] && CHROME_APP="/Applications/Google Chrome.app"
-[ -z "$CHROME_APP" ] && [ -f "/Applications/Google Chrome.app/Contents/MacOS/Chrome" ] && CHROME_APP="/Applications/Google Chrome.app"
-[ -z "$CHROME_APP" ] && [ -d "$HOME/Applications/Google Chrome.app" ] && CHROME_APP="$HOME/Applications/Google Chrome.app"
-PLAYWRIGHT_CHROMIUM_OK=false
-if node -e "const {chromium}=require('playwright'); const p=chromium.executablePath(); require('fs').accessSync(p); console.log('ok')" >/dev/null 2>&1; then
-  PLAYWRIGHT_CHROMIUM_OK=true
+# 4. Browser: Chrome consigliato, Chromium ok (scripts/setup/browser-check.sh)
+if ! report_browser_status; then
+  : # log_missing già chiamato da report_browser_status
 fi
-if [ -n "$CHROME_APP" ]; then
-  log_ok "Google Chrome ($CHROME_APP)"
-elif [ "$PLAYWRIGHT_CHROMIUM_OK" = true ]; then
-  log_ok "Browser: Chromium Playwright (Chrome di sistema assente — fallback automatico)"
-else
-  log_missing "Browser (installa Google Chrome OPPURE: npx playwright install chromium / ./scripts/setup.sh)"
-fi
-
 # 5. Ollama
 if command -v ollama &>/dev/null; then
   log_ok "Ollama ($(ollama --version | head -1))"

@@ -25,6 +25,19 @@ Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `con
 
 ---
 
+
+## Minima autonomia (tier D)
+
+1. Leggi `logs/ai_todo.json` (o `./status.sh`) → orientati.
+2. Risolvi quiz aperti (`ai_quiz_request`) con WebSearch + `answers-cli resolve`.
+3. Avvia con `./start.sh` (rispetta turni); Monitor sui log.
+4. Interrompi l’utente solo se autologin morto (sonda live) o bug infra (issue).
+
+Roadmap dettagliata: `docs/ROADMAP-V2.md`. Contratto machine-readable: `docs/ai-contract.json`.  
+Sicurezza membri/token: `docs/SECURITY-MEMBERS.md`. Rotazione KEY/PAT: `docs/RUNBOOK-KEYS.md`.
+
+---
+
 ## Flusso utente principale
 
 L'utente **lancia sempre il comando curl one-liner** per aggiornare/avviare il sistema:

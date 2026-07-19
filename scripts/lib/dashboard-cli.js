@@ -6,11 +6,14 @@
  *   node scripts/lib/dashboard-cli.js summary   (default)
  *       Una riga: Totale N: X done, Y in_progress, Z need_help, W not_started
  *   node scripts/lib/dashboard-cli.js list
- *       Una riga per membro: CF — Nome — stato — done/total
+ *       Una riga per membro: CF — Nome — stato — done/total — phase — età
  *   node scripts/lib/dashboard-cli.js json
  *       Stampa data/dashboard.json (lo rigenera prima).
+ *   node scripts/lib/dashboard-cli.js csv [path]
+ *       Export CSV per referente (default stdout; se path, scrive file).
  */
 
+const fs = require('fs');
 const path = require('path');
 const ROOT = path.join(__dirname, '..', '..');
 const dash = require(path.join(ROOT, 'src', 'lib', 'dashboard'));
@@ -29,13 +32,29 @@ if (cmd === 'json') {
   for (const m of d.perMember) {
     const name = m.name || '(non in DB)';
     const s = m.summary;
-    console.log(`${m.codice_fiscale} — ${name} — ${m.status} — ${s.done}/${s.total} corsi`);
+    const phase = m.lastPhase ? ` phase=${m.lastPhase}` : '';
+    const age = m.statusAgeMin != null
+      ? ` statusAge=${m.statusAgeMin}m`
+      : (m.stateAgeMin != null ? ` stateAge=${m.stateAgeMin}m` : '');
+    const run = m.running ? ' RUNNING' : '';
+    const nh = (s.needHelp || 0) > 0 ? ` need_help=${s.needHelp}` : '';
+    console.log(`${m.codice_fiscale} — ${name} — ${m.status} — ${s.done}/${s.total} corsi${nh}${phase}${age}${run}`);
   }
   console.log(`\nTotale: ${d.total} — done: ${d.done}, in_progress: ${d.in_progress}, need_help: ${d.need_help}, not_started: ${d.not_started}`);
+} else if (cmd === 'csv') {
+  const d = dash.buildDashboard(ROOT);
+  const csv = dash.dashboardToCsv(d);
+  const outPath = process.argv[3];
+  if (outPath) {
+    fs.writeFileSync(outPath, csv, 'utf8');
+    console.log(`CSV scritto: ${outPath} (${d.perMember.length} membri)`);
+  } else {
+    process.stdout.write(csv);
+  }
 } else if (cmd === 'summary') {
   const d = dash.buildDashboard(ROOT);
   console.log(`Totale ${d.total}: ${d.done} done, ${d.in_progress} in_progress, ${d.need_help} need_help, ${d.not_started} not_started`);
 } else {
-  console.error(`Comando sconosciuto: ${cmd}\nComandi: summary | list | json`);
+  console.error(`Comando sconosciuto: ${cmd}\nComandi: summary | list | json | csv [path]`);
   process.exit(1);
 }

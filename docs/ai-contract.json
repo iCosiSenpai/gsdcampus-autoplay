@@ -1,0 +1,85 @@
+{
+  "$schema_note": "Contratto machine-readable per il supervisore AI. Path relativi alla root repo.",
+  "project": "gsdcampus-autoplay",
+  "version": "1.1.0",
+  "entrypoints": {
+    "autoplay": "src/autoplay.js",
+    "start": "start.sh",
+    "stop": "stop.sh",
+    "status": "status.sh",
+    "setup": "scripts/setup.sh",
+    "install": "install.sh"
+  },
+  "paths": {
+    "config": "config.json",
+    "known_answers_trusted": "data/known_answers.json",
+    "known_answers_public": "data/known_answers_public.json",
+    "members_db": "data/members.db",
+    "accounts_dir": "data/accounts",
+    "status": "logs/status.json",
+    "autoplay_log": "logs/autoplay.log",
+    "ai_todo": "logs/ai_todo.json",
+    "metrics": "logs/metrics.jsonl",
+    "dashboard": "data/dashboard.json",
+    "roadmap": "docs/ROADMAP-V2.md",
+    "security": "docs/SECURITY-MEMBERS.md",
+    "runbook_keys": "docs/RUNBOOK-KEYS.md"
+  },
+  "account_files": {
+    "course_state": "data/accounts/<CF>/course_state.json",
+    "ai_quiz_request": "data/accounts/<CF>/ai_quiz_request.json",
+    "need_answer": "data/accounts/<CF>/need_answer.json",
+    "storage_state": "data/accounts/<CF>/storage_state.json"
+  },
+  "commands": {
+    "status": "./status.sh",
+    "status_live_autologin": "./status.sh --check",
+    "start_respect_hours": "./start.sh",
+    "start_ignore_hours": "./start.sh --ignore-hours",
+    "stop": "./stop.sh",
+    "harvest_all": "node scripts/harvest-answers.js --all",
+    "harvest_census": "node scripts/harvest-answers.js --census",
+    "harvest_reconcile_reset": "node scripts/harvest-answers.js --reconcile --reset",
+    "answers_resolve": "node scripts/lib/answers-cli.js resolve \"domanda\" \"risposta\"",
+    "answers_stats": "node scripts/lib/answers-cli.js stats",
+    "publish_answers": "./scripts/publish-answers.sh",
+    "members_active": "node scripts/lib/members-cli.js active",
+    "members_set_active": "node scripts/lib/members-cli.js set-active <CF>",
+    "dashboard_list": "node scripts/lib/dashboard-cli.js list",
+    "dashboard_csv": "node scripts/lib/dashboard-cli.js csv",
+    "metrics_summary": "node scripts/lib/metrics-cli.js summary",
+    "metrics_share": "node scripts/lib/metrics-cli.js share",
+    "healthcheck": "node scripts/lib/healthcheck-cli.js",
+    "issue_draft": "node scripts/lib/issue-report.js draft \"<phase>\" [\"reason\"]",
+    "issue_send": "node scripts/lib/issue-report.js send",
+    "dev_check": "zsh ./scripts/dev-check.sh",
+    "test": "npm test"
+  },
+  "exit_codes": {
+    "0": "clean exit (fine turno, all done/need_help)",
+    "1": "fatal / tentativi esauriti",
+    "2": "need_help (quiz sospeso / AI request)",
+    "3": "autologin_invalid",
+    "4": "session_unstable o post_login_blocked (cooldown, non crash)"
+  },
+  "config_keys": {
+    "autologinUrl": "required",
+    "codice_fiscale": "preferred",
+    "workSchedule": "days + shifts",
+    "ollamaModel": "string",
+    "memberQueue": "string[] CF optional",
+    "shareMetrics": "boolean opt-in",
+    "sessionUnstableCooldownMin": "number minutes default 30",
+    "browserChannel": "chrome | chromium | auto"
+  },
+  "limits": {
+    "do_not_edit": ["src/**", "scripts/**", "*.sh"],
+    "may_edit": ["config.json"],
+    "never_delete": [
+      "data/known_answers.json",
+      "data/known_answers_public.json",
+      "data/members.db",
+      "data/accounts/**"
+    ]
+  }
+}

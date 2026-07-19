@@ -7,6 +7,8 @@ cd "$DIR"
 # Hash package.json per npm install condizionale (modulo condiviso).
 # shellcheck source=scripts/setup/package-hash.sh
 . "$DIR/scripts/setup/package-hash.sh"
+# shellcheck source=scripts/setup/browser-check.sh
+. "$DIR/scripts/setup/browser-check.sh"
 
 # Claude Code CLI installa il binario in ~/.local/bin; assicuriamo che sia
 # subito disponibile nel PATH di questo script, anche negli shell non interattivi
@@ -960,36 +962,35 @@ else
   ok "Dipendenze npm già aggiornate. Salto."
 fi
 
-# 4. Playwright browsers + Google Chrome (channel 'chrome' usato da autoplay.js)
-step "4/7 - Browser per Playwright (Chrome)"
+# 4. Browser: Chromium Playwright (sempre) + Google Chrome (consigliato).
+# src/lib/browser.js: prova channel chrome, poi fallback Chromium bundled.
+# Chrome assente NON blocca se Chromium è installato.
+step "4/7 - Browser (Chrome consigliato, Chromium ok)"
+info "Chrome di sistema è consigliato; se manca, Playwright Chromium basta per autoplay/healthcheck."
 if [ "$FORCE_UPDATE" = true ] || [ "$NEEDS_NPM" = true ] || [ ! -d "$HOME/Library/Caches/ms-playwright" ]; then
   mkdir -p "$DIR/logs"
-  spinner_run "Installazione componenti Playwright" "$DIR/logs/setup-playwright.log" npx playwright install chromium \
-    || warn "playwright install chromium non riuscito (non bloccante)."
+  spinner_run "Installazione Chromium Playwright (fallback browser)" "$DIR/logs/setup-playwright.log" npx playwright install chromium \
+    || warn "playwright install chromium non riuscito (non bloccante se Chrome di sistema è presente)."
 else
   ok "Componenti Playwright già presenti. Salto."
 fi
 
-# Google Chrome: canale 'chrome' in autoplay.js/healthcheck.js/explore.js risolve a
-# Chrome.app. Su un Mac vergine Chrome non c'è → l'autoplay si bloccherebbe a runtime.
-# Lo installiamo via Homebrew cask. Idempotente (salta se Chrome.app presente).
-# NON bloccante: se brew non c'è o l'install fallisce, warn e l'utente può metterlo
-# a mano da google.com/chrome (check-requirements.sh lo segnalerà pre-flight).
+# Google Chrome: preferito (fingerprint più “normale”). Opzionale se c’è Chromium.
 CHROME_APP=""
 [ -d "/Applications/Google Chrome.app" ] && CHROME_APP="/Applications/Google Chrome.app"
 [ -z "$CHROME_APP" ] && [ -d "$HOME/Applications/Google Chrome.app" ] && CHROME_APP="$HOME/Applications/Google Chrome.app"
 if [ -n "$CHROME_APP" ]; then
-  ok "Google Chrome già presente ($CHROME_APP)."
+  ok "Google Chrome presente ($CHROME_APP) — backend preferito."
 else
   if command -v brew &>/dev/null; then
-    info "Installazione Google Chrome via Homebrew cask..."
+    info "Google Chrome assente: installazione consigliata via Homebrew cask (opzionale)..."
     if brew install --cask google-chrome; then
       ok "Google Chrome installato."
     else
-      warn "Installazione Google Chrome non riuscita via brew. Installalo manualmente da google.com/chrome, oppure rilancia ./scripts/setup.sh."
+      warn "Chrome non installato via brew. Chromium Playwright resta ok: l'autoplay usa il fallback automatico. Oppure installa da google.com/chrome."
     fi
   else
-    warn "Homebrew non disponibile: impossibile installare Google Chrome automaticamente. Installalo da google.com/chrome."
+    warn "Chrome assente e Homebrew non disponibile. Chromium Playwright (se installato) è sufficiente."
   fi
 fi
 

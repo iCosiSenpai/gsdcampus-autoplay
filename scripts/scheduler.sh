@@ -16,6 +16,20 @@ export NO_COLOR=1
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 
+# Cooldown post session_unstable (exit 4): leggibile da config.json
+# (sessionUnstableCooldownMin minuti, default 30). Pure helper Node.
+session_unstable_cooldown_ms() {
+  node -e "
+    try {
+      const c = require('./config.json');
+      const { sessionUnstableCooldownMs } = require('./src/lib/session-policy');
+      process.stdout.write(String(sessionUnstableCooldownMs(c)));
+    } catch (e) {
+      process.stdout.write(String(30 * 60 * 1000));
+    }
+  " 2>/dev/null || echo 1800000
+}
+
 # Notifiche macOS (best-effort, mai bloccanti; throttle interno 6h per tipo).
 source "$DIR/scripts/lib/notify.sh"
 
@@ -271,14 +285,13 @@ while true; do
       log "Autoplay terminato con codice 0. Riavvio tra 10 minuti (evito loop a vuoto, need_help o fine turno)..."
       wait_ms 600000
     elif [[ "$EXIT_CODE" -eq 4 ]]; then
-      # session_unstable: il token autologin è valido (abbiamo raggiunto la dashboard)
-      # ma la sessione è instabile — tipicamente il token è degradato dal sovrauso
-      # (troppi hit nello stesso giorno). Re-hitare subito l'autologin peggiorerebbe
-      # il degrado (raffica -> rate-limit della piattaforma). Lasciamo un cooldown
-      # lungo così il token recupera e il prossimo run ha una sessione stabile.
+      # session_unstable: token valido ma sessione instabile. Cooldown configurabile
+      # (config.sessionUnstableCooldownMin, default 30) — non martellare l'autologin.
       CRASH_COUNT=0
-      log "Autoplay terminato con codice 4 (session_unstable): token valido ma sessione instabile. Cooldown 30 minuti per far recuperare il token..."
-      wait_ms 1800000
+      COOLDOWN_MS=$(session_unstable_cooldown_ms)
+      COOLDOWN_MIN=$((COOLDOWN_MS / 60000))
+      log "Autoplay terminato con codice 4 (session_unstable): token valido ma sessione instabile. Cooldown ${COOLDOWN_MIN} minuti..."
+      wait_ms "$COOLDOWN_MS"
     else
       apply_crash_backoff "$EXIT_CODE" || exit 1
     fi
@@ -296,8 +309,10 @@ while true; do
       log "Autoplay terminato con codice 0 (fine turno). Calcolo prossimo turno..."
     elif [[ "$EXIT_CODE" -eq 4 ]]; then
       CRASH_COUNT=0
-      log "Autoplay terminato con codice 4 (session_unstable). Cooldown 30 minuti..."
-      wait_ms 1800000
+      COOLDOWN_MS=$(session_unstable_cooldown_ms)
+      COOLDOWN_MIN=$((COOLDOWN_MS / 60000))
+      log "Autoplay terminato con codice 4 (session_unstable). Cooldown ${COOLDOWN_MIN} minuti..."
+      wait_ms "$COOLDOWN_MS"
       continue
     else
       # Backoff; poi `continue` ri-valuta is_in_hours (il backoff può averci

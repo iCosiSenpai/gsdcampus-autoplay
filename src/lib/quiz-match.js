@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * quiz-match.js — pure functions per il matching della banca TRUSTED.
  *

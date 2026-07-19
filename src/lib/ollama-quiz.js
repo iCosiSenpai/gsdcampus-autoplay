@@ -25,6 +25,11 @@ const TIMEOUT_MS = 60000;
 const SAMPLES = 3;            // campionamenti per self-consistency
 const SAMPLE_TEMP = 0.4;      // temperatura per i campioni (diversità)
 const SINGLE_TEMP = 0.1;      // temperatura per il fallback a singolo call
+// Early-exit: se il primo sample ha confidenza parse alta, salta sample 2–3 (9.4).
+const EARLY_EXIT_CONFIDENCE = 0.9;
+// Cache sessione domanda→risposta (stesso processo autoplay; non persiste).
+const _sessionCache = new Map();
+const MAX_SESSION_CACHE = 200;
 // Unica fonte di verità per il fallback modello: DEVE coincidere con
 // config.json.example e MODEL_FALLBACK in launch-ai-supervisor.sh (prima era
 // 'gemma4:31b-cloud': con config.json assente/corrotto si chiedeva un modello
@@ -252,21 +257,49 @@ function voteSamples(parses) {
   return { letter: bestLetter, confidence, strategy, votes: bestCount };
 }
 
+function cacheKey(question, options) {
+  const q = normalizeText(question).toLowerCase();
+  const opts = (options || []).map((o) => normalizeText(o).toLowerCase()).join('|');
+  return `${q}::${opts}`;
+}
+
+function rememberSession(key, value) {
+  if (_sessionCache.size >= MAX_SESSION_CACHE) {
+    const first = _sessionCache.keys().next().value;
+    _sessionCache.delete(first);
+  }
+  _sessionCache.set(key, value);
+}
+
 async function askQuizQuestion(question, options, log, root) {
   const model = readOllamaModel();
   try {
+    const key = cacheKey(question, options);
+    if (_sessionCache.has(key)) {
+      const hit = _sessionCache.get(key);
+      log(`Ollama cache sessione: ${hit.letter} (confidenza ${(hit.confidence * 100).toFixed(0)}%)`);
+      return { ...hit, strategy: hit.strategy || 'session_cache' };
+    }
+
     const examples = root ? loadFewShotExamples(root) : [];
     const prompt = buildPrompt(question, options, examples);
     log(`Chiedo aiuto a Ollama (${model}) — self-consistency x${SAMPLES}${examples.length ? ` + ${examples.length} few-shot` : ''}...`);
 
     // Self-consistency: N campionamenti a temperature 0.4 (diversità tra sample).
+    // Early-exit (9.4): se il primo parse ha confidenza ≥ 0.9 (es. letter esplicita),
+    // non spendiamo altri 2 round-trip Ollama.
     const samples = [];
     const sampleResponses = [];
     for (let i = 0; i < SAMPLES; i++) {
       try {
         const resp = await askOllama(prompt, 64, model, SAMPLE_TEMP);
         sampleResponses.push(resp);
-        samples.push(parseAnswerLetter(resp, options));
+        const parsed = parseAnswerLetter(resp, options);
+        samples.push(parsed);
+        if (i === 0 && parsed && parsed.confidence >= EARLY_EXIT_CONFIDENCE) {
+          log(`Early-exit sample 1: ${parsed.letter} confidenza ${(parsed.confidence * 100).toFixed(0)}% — salto sample 2–3`);
+          break;
+        }
       } catch (e) {
         log(`Sample ${i + 1}/${SAMPLES} fallito: ${e.message}`);
         samples.push(null);
@@ -274,6 +307,15 @@ async function askQuizQuestion(question, options, log, root) {
     }
 
     let voted = voteSamples(samples);
+    // Se early-exit con un solo sample valido, confidence = parse conf (non votes/3=0.33).
+    if (voted && samples.filter(Boolean).length === 1 && samples[0]) {
+      voted = {
+        ...voted,
+        confidence: Math.max(voted.confidence, samples[0].confidence || 0),
+        strategy: samples[0].strategy || voted.strategy,
+        votes: 1,
+      };
+    }
     if (voted) {
       log(`Voto: ${voted.letter} (${voted.votes}/${SAMPLES}, confidenza ${(voted.confidence * 100).toFixed(0)}%, strategia ${voted.strategy})`);
       const labels = ['A', 'B', 'C', 'D'];
@@ -284,13 +326,15 @@ async function askQuizQuestion(question, options, log, root) {
         // niente doppio parseAnswerLetter ridondante dentro il find.
         const idx = samples.findIndex(s => s && s.letter === voted.letter);
         const reason = ((idx >= 0 ? sampleResponses[idx] : sampleResponses.find(Boolean)) || '').trim();
-        return {
+        const result = {
           letter: voted.letter,
           text: options[index],
           reason,
           confidence: voted.confidence,
           strategy: voted.strategy
         };
+        rememberSession(key, result);
+        return result;
       }
     }
 
@@ -327,4 +371,14 @@ async function askQuizQuestion(question, options, log, root) {
   }
 }
 
-module.exports = { askQuizQuestion, parseAnswerLetter };
+function clearSessionCache() {
+  _sessionCache.clear();
+}
+
+module.exports = {
+  askQuizQuestion,
+  parseAnswerLetter,
+  clearSessionCache,
+  EARLY_EXIT_CONFIDENCE,
+  SAMPLES,
+};

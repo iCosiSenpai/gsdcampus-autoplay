@@ -295,6 +295,23 @@ async function handleMetrics(data, env) {
   });
 }
 
+// --- Rate limit (in-memory per isolate; best-effort) -------------------------
+// Target: ~10/min /answers, ~5/min /report, ~20/min /metrics.
+// Su CF multi-isolate non è globale: affiancare WAF rules in dashboard (8.5).
+const _rateBuckets = new Map();
+
+function rateLimitOk(route, maxPerMin) {
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  let b = _rateBuckets.get(route);
+  if (!b || now - b.start > windowMs) {
+    b = { start: now, n: 0 };
+    _rateBuckets.set(route, b);
+  }
+  b.n += 1;
+  return b.n <= maxPerMin;
+}
+
 // --- Router ----------------------------------------------------------------
 
 export default {
@@ -303,6 +320,9 @@ export default {
     const path = url.pathname.replace(/\/$/, '') || '/';
 
     if (request.method === 'POST' && (path === '/answers')) {
+      if (!rateLimitOk('answers', 10)) {
+        return jsonResp(429, { ok: false, error: 'rate_limited' });
+      }
       let data;
       try { data = await request.json(); }
       catch { return jsonResp(400, { ok: false, error: 'invalid_json' }); }
@@ -310,6 +330,9 @@ export default {
     }
 
     if (request.method === 'POST' && (path === '/metrics')) {
+      if (!rateLimitOk('metrics', 20)) {
+        return jsonResp(429, { ok: false, error: 'rate_limited' });
+      }
       let data;
       try { data = await request.json(); }
       catch { return jsonResp(400, { ok: false, error: 'invalid_json' }); }
@@ -317,6 +340,9 @@ export default {
     }
 
     if (request.method === 'POST' && (path === '/' || path === '/report')) {
+      if (!rateLimitOk('report', 5)) {
+        return jsonResp(429, { ok: false, error: 'rate_limited' });
+      }
       let data;
       try { data = await request.json(); }
       catch { return jsonResp(400, { ok: false, error: 'invalid_json' }); }
