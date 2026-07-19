@@ -107,17 +107,14 @@ Ogni **STEP** è un “ticket” autonomo: obiettivo, lavoro, test, done, rischi
 
 ---
 
-## STEP 1.4 — Non loggare token video
+## STEP 1.4 — Non loggare token video ✅ DONE (2026-07-19)
 
-**Problema:** `video.src` contiene `?token=…`.
-
-**Lavoro**
-1. Estendere `redactUrl` per query `token` (già parziale) e path `/video/get/`.
-2. Audit log: mai dumpare `outerHTML` video in autoplay (solo in debug esplicito).
+**Problema:** dump HTML grezzi contenevano `video/get/…?token=`. I log di riga erano già redatti.  
+**Soluzione:** `redactSensitiveText` + dump monitor/quiz redatti; test video+HTML.
 
 **Done**
-- [ ] Test redact su URL video GSD.
-- [ ] Nessun token video in `autoplay.log` grezzo.
+- [x] Test URL video e HTML.
+- [x] Dump debug redatti.
 
 ---
 

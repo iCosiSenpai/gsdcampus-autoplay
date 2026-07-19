@@ -5,6 +5,7 @@ const { askQuizQuestion } = require('./ollama-quiz');
 const { writeJsonAtomic, readJsonSafe, readJsonCached } = require('./io');
 const { NeedHelpExit } = require('./errors');
 const { normKey, findKnownAnswer, similarity } = require('./quiz-match');
+const { redactSensitiveText } = require('./logger');
 
 // Tetto di sicurezza sul numero di domande per quiz: evita loop infiniti se la
 // piattaforma renderizza una nuova domanda a ogni iterazione senza mai finire.
@@ -284,14 +285,14 @@ async function dumpQuizDiagnostics(page, root, label, bodyText) {
     const base = path.join(dir, `${ts}_${label}`);
     let html = '';
     try { html = await page.content(); } catch (e) { /* pagina chiusa? */ }
-    try { fs.writeFileSync(base + '.html', html || ''); } catch (e) { /* ignora */ }
+    try { fs.writeFileSync(base + '.html', redactSensitiveText(html || '')); } catch (e) { /* ignora */ }
     try { await page.screenshot({ path: base + '.png', fullPage: true }); } catch (e) { /* ignora */ }
     try {
       const meta = {
         label,
         ts: new Date().toISOString(),
-        url: (page.url && page.url()) ? page.url() : '',
-        bodyText: bodyText || null,
+        url: redactSensitiveText((page.url && page.url()) ? page.url() : ''),
+        bodyText: bodyText ? redactSensitiveText(bodyText) : null,
       };
       fs.writeFileSync(base + '.json', JSON.stringify(meta, null, 2));
     } catch (e) { /* ignora */ }

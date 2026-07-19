@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { writeJsonAtomic } = require('./io');
-const { redactUrl } = require('./logger');
+const { redactUrl, redactSensitiveText } = require('./logger');
 const { appendMetric } = require('./metrics');
 
 function ensureDir(dir) {
@@ -102,7 +102,10 @@ class Monitor {
       if (page) {
         const htmlPath = path.join(this.dumpDir, `error_${stamp}.html`);
         const pngPath = path.join(this.screenshotDir, `error_${stamp}.png`);
-        fs.writeFileSync(htmlPath, await page.content().catch(() => 'Unable to dump HTML'));
+        // Redact token video/autologin prima di scrivere su disco (debug/ è locale
+        // ma non deve contenere credenziali in chiaro).
+        const rawHtml = await page.content().catch(() => 'Unable to dump HTML');
+        fs.writeFileSync(htmlPath, redactSensitiveText(rawHtml || 'Unable to dump HTML'));
         await page.screenshot({ path: pngPath, fullPage: true }).catch(() => {});
         this.log(`Debug artifacts saved: ${htmlPath}, ${pngPath}`);
       }

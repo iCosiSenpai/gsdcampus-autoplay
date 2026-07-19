@@ -7,6 +7,7 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-19
 
+- I dump di errore/diagnostica non salvano più token video o di accesso in chiaro.
 - Il censimento corsi mostra di nuovo le **percentuali corrette** dalla dashboard (prima spesso compariva "?").
 - Se l'autoplay non gira più, lo stato non resta finto "in esecuzione": si allinea da solo (niente più corse fantasma).
 - L'autoplay e i controlli partono anche **senza Google Chrome** installato: usano in automatico Chromium di Playwright.

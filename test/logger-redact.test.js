@@ -4,7 +4,7 @@
  */
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { redactUrl } = require('../src/lib/logger');
+const { redactUrl, redactSensitiveText } = require('../src/lib/logger');
 
 describe('redactUrl', () => {
   it('redige il token in /autologin/<CF>/<token>', () => {
@@ -44,5 +44,35 @@ describe('redactUrl', () => {
   it('è infallibile su input strani', () => {
     assert.equal(redactUrl(null), 'null');
     assert.equal(redactUrl(42), '42');
+  });
+
+  it('redige token su URL video/get', () => {
+    const u = 'https://tecsial.gsdcampus.it/video/get/8404.mp4?token=secrettok123';
+    const out = redactUrl(u);
+    assert.ok(!out.includes('secrettok123'));
+    assert.match(out, /token=\[REDATTO\]/);
+    assert.match(out, /\/video\/get\/8404\.mp4/);
+  });
+});
+
+describe('redactSensitiveText (HTML dump)', () => {
+  it('redige token dentro HTML video src', () => {
+    const html = '<video src="https://tecsial.gsdcampus.it/video/get/1.mp4?token=abcSECRET" class="vjs-tech"></video>';
+    const out = redactSensitiveText(html);
+    assert.ok(!out.includes('abcSECRET'));
+    assert.match(out, /token=\[REDATTO\]/);
+    assert.match(out, /vjs-tech/);
+  });
+
+  it('redige più token nella stessa stringa', () => {
+    const html = 'a?token=one&x=1 b?token=two';
+    const out = redactSensitiveText(html);
+    assert.ok(!out.includes('one'));
+    assert.ok(!out.includes('two'));
+  });
+
+  it('è lo stesso di redactUrl', () => {
+    const u = 'https://x/autologin/CF1234567890123A/tok';
+    assert.equal(redactSensitiveText(u), redactUrl(u));
   });
 });

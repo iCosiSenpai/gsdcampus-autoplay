@@ -18,22 +18,27 @@ function rotateIfNeeded(logFile) {
   }
 }
 
-// redactUrl(u): rimuove le credenziali da un URL prima che finisca nei log.
-// Il link di autologin (/autologin/<CF>/<token>) è una credenziale permanente:
-// loggarlo in chiaro in logs/autoplay.log lo espone a chiunque legga i log
-// (inclusi dump diagnostici e issue report). Redige anche query token/key/auth.
+// redactSensitiveText / redactUrl: rimuove credenziali da URL, messaggi e HTML.
+// Casi coperti (global, multi-match su dump lunghi):
+//  - /autologin/<CF>/<token>
+//  - query ?token= / &key= / &auth*=  (anche su /video/get/<id>.mp4?token=…)
 // Puro e infallibile: su qualsiasi errore ritorna l'input com'era.
-function redactUrl(u) {
+// Usare redactSensitiveText per HTML/dump; redactUrl resta alias back-compat.
+function redactSensitiveText(u) {
   try {
     let s = String(u);
     // /autologin/<CF>/<token>[...] → /autologin/<CF>/[REDATTO]
     s = s.replace(/(\/autologin\/[^/?#]+\/)[^/?#]+/gi, '$1[REDATTO]');
-    // query ?token=..., &key=..., &auth...=...
-    s = s.replace(/([?&](?:token|key|auth[^=&]*)=)[^&#]*/gi, '$1[REDATTO]');
+    // query ?token=..., &key=..., &auth...=... (video/get, Playwright errors, …)
+    s = s.replace(/([?&](?:token|key|auth[^=&]*)=)[^&#"'\s]*/gi, '$1[REDATTO]');
     return s;
   } catch (e) {
     return u;
   }
+}
+
+function redactUrl(u) {
+  return redactSensitiveText(u);
 }
 
 function createLogger(root) {
@@ -64,4 +69,4 @@ function createLogger(root) {
   return log;
 }
 
-module.exports = { createLogger, redactUrl };
+module.exports = { createLogger, redactUrl, redactSensitiveText };
