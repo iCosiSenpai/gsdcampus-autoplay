@@ -2,6 +2,7 @@
   "$schema_note": "Contratto machine-readable per il supervisore AI. Path relativi alla root repo.",
   "project": "gsdcampus-autoplay",
   "version": "1.1.0",
+  "package_version": "1.1.0",
   "entrypoints": {
     "autoplay": "src/autoplay.js",
     "start": "start.sh",
@@ -49,6 +50,8 @@
     "dashboard_csv": "node scripts/lib/dashboard-cli.js csv",
     "metrics_summary": "node scripts/lib/metrics-cli.js summary",
     "metrics_share": "node scripts/lib/metrics-cli.js share",
+    "harvest_night": "./scripts/harvest-night.sh",
+    "weekly_report": "node scripts/lib/weekly-report-cli.js [--save] [--hours 168]",
     "healthcheck": "node scripts/lib/healthcheck-cli.js",
     "issue_draft": "node scripts/lib/issue-report.js draft \"<phase>\" [\"reason\"]",
     "issue_send": "node scripts/lib/issue-report.js send",
@@ -68,9 +71,12 @@
     "workSchedule": "days + shifts",
     "ollamaModel": "string",
     "memberQueue": "string[] CF optional",
+    "memberQueueIndex": "number optional",
     "shareMetrics": "boolean opt-in",
+    "storeTag": "anonymous store label optional",
     "sessionUnstableCooldownMin": "number minutes default 30",
-    "browserChannel": "chrome | chromium | auto"
+    "notifications": "boolean default true",
+    "browserChannel": "chrome | chromium | auto | null"
   },
   "limits": {
     "do_not_edit": ["src/**", "scripts/**", "*.sh"],

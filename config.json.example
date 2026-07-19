@@ -1,5 +1,7 @@
 {
   "autologinUrl": "https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN",
+  "codice_fiscale": "",
+  "memberName": "",
   "baseUrl": "https://tecsial.gsdcampus.it/",
   "ollamaModel": "gemma4:cloud",
   "browserChannel": null,
@@ -8,8 +10,14 @@
   "issueEndpoint": "",
   "issueReportKey": "gsd-autoplay-report-key-2026-7f3a9c",
   "issueReporterToken": "",
+  "notifications": true,
+  "sessionUnstableCooldownMin": 30,
+  "shareMetrics": false,
+  "storeTag": "",
+  "memberQueue": [],
+  "memberQueueIndex": 0,
   "workSchedule": {
-    "days": [1, 2, 3, 4, 5, 6],
+    "days": [1, 2, 3, 4, 5],
     "shifts": [
       { "startHour": 9, "startMin": 0, "endHour": 13, "endMin": 0 },
       { "startHour": 16, "startMin": 0, "endHour": 20, "endMin": 0 }

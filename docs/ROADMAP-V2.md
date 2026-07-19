@@ -326,9 +326,10 @@ provare `channel: chrome` quando disponibile; stealth init script già in explor
 **Done**
 - [x] Sezione “Minima autonomia” + link roadmap/contract/security
 
-## STEP 9.3 — JSDoc @ts-check su pure modules
+## STEP 9.3 — JSDoc @ts-check su pure modules ✅ DONE (2026-07-20)
 
-`quiz-match`, `metrics`, `schedule`, `selectors`. (follow-up opzionale)
+**Done**
+- [x] `@ts-check` su quiz-match, metrics, schedule, selectors, session-policy
 
 ## STEP 9.4 — Ollama latency ✅ DONE (2026-07-19)
 
@@ -341,9 +342,17 @@ provare `channel: chrome` quando disponibile; stealth init script già in explor
 # FASE 10 — Prodotto “fleet referente” (P3)
 
 1. Report settimanale automatico (email/Worker): N corsi done / need_help per store (anonimizzato).  
+   - **Lite done (2026-07-20):** `node scripts/lib/weekly-report-cli.js [--save]` (locale).  
 2. UI locale minima (HTML su `localhost`) per status multi-CF.  
-3. Notifiche macOS già presenti: estendere a “corso X finito”, “quiz sospeso”.  
-4. Mode “solo harvest+resolve” notturno (senza video) per riempire banca.
+3. Notifiche macOS: estendere a “corso X finito”, “quiz sospeso”.  
+   - **Done (2026-07-20):** `src/lib/notify-mac.js` + hook in `monitor.update`.  
+4. Mode “solo harvest+resolve” notturno (senza video) per riempire banca.  
+   - **Done (2026-07-20):** `./scripts/harvest-night.sh`
+
+## STEP 5.4b / 8.2 — setup modular + tag (tier E)
+
+- [x] `scripts/setup/ollama.sh` + `versions.sh`  
+- [x] `package.json` 1.1.0 + tag `v1.1.0` (al push)
 
 ---
 

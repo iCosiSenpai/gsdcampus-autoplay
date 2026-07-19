@@ -3,6 +3,12 @@ const path = require('path');
 const { writeJsonAtomic } = require('./io');
 const { redactUrl, redactSensitiveText } = require('./logger');
 const { appendMetric } = require('./metrics');
+const {
+  notifyMac,
+  msgCourseDone,
+  msgQuizSospeso,
+  courseIdFromUrl,
+} = require('./notify-mac');
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -73,6 +79,7 @@ class Monitor {
 
   update(updates) {
     const prevPhase = this.status.phase;
+    const prevCourse = this.status.courseUrl;
     Object.assign(this.status, updates);
     this.status.lastUpdate = new Date().toISOString();
     this._write();
@@ -101,6 +108,25 @@ class Monitor {
           partial.event = 'session';
         }
         appendMetric(this.root, partial);
+      } catch (_) { /* mai bloccante */ }
+
+      // Notifiche macOS (E1): best-effort, mai throw.
+      try {
+        const phase = this.status.phase;
+        const courseUrl = this.status.courseUrl || prevCourse;
+        const cid = courseIdFromUrl(courseUrl);
+        if (phase === 'done') {
+          notifyMac(this.root, 'GSD Campus', msgCourseDone(cid), 'course_done', { courseUrl });
+        } else if (phase === 'need_help' || phase === 'quiz_needs_answers') {
+          const quiz = this.status.lastQuizResult || '';
+          notifyMac(
+            this.root,
+            'GSD Campus',
+            msgQuizSospeso(cid, quiz),
+            'quiz_sospeso',
+            { courseUrl }
+          );
+        }
       } catch (_) { /* mai bloccante */ }
     }
   }

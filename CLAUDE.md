@@ -33,6 +33,8 @@ Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `con
 3. Avvia con `./start.sh` (rispetta turni); Monitor sui log.
 4. Interrompi l’utente solo se autologin morto (sonda live) o bug infra (issue).
 
+Comandi extra tier E: `./scripts/harvest-night.sh` (solo harvest), `node scripts/lib/weekly-report-cli.js --save` (report locale).
+
 Roadmap dettagliata: `docs/ROADMAP-V2.md`. Contratto machine-readable: `docs/ai-contract.json`.  
 Sicurezza membri/token: `docs/SECURITY-MEMBERS.md`. Rotazione KEY/PAT: `docs/RUNBOOK-KEYS.md`.
 

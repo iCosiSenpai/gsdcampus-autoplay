@@ -39,10 +39,13 @@ PINNED_TAG=""   # es. "v1.1.0"
 **Rilascio maintainer**
 
 ```bash
+# dopo commit feature su main (package.json version 1.1.0+)
 git tag v1.1.0
 git push origin v1.1.0
-# opzionale: impostare PINNED_TAG=v1.1.0 in un fork/store install script
+# opzionale: impostare PINNED_TAG=v1.1.0 in install.sh (fork/store) per freeze
 ```
+
+Tag `v1.1.0` = baseline post tier A–E (browser resiliente, course-runner, multi-CF, metrics, notify).
 
 ## Share metriche (opt-in)
 

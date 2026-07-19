@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * metrics.js — eventi operativi privacy-safe (append-only).
  *

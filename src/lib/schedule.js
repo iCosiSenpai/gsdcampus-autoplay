@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Gestione orari lavorativi per l'automazione.
  * Legge la configurazione da config.json se disponibile, altrimenti usa default:

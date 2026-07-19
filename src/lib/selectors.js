@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * selectors.js — catalogo selettori/marker DOM critici della piattaforma GSD.
  *

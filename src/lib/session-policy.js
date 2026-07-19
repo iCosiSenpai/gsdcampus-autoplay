@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * session-policy.js — cooldown e policy anti-stress sessione (pure).
  *
