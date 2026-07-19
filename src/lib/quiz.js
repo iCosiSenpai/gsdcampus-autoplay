@@ -6,6 +6,22 @@ const { writeJsonAtomic, readJsonSafe, readJsonCached } = require('./io');
 const { NeedHelpExit } = require('./errors');
 const { normKey, findKnownAnswer, similarity } = require('./quiz-match');
 const { redactSensitiveText } = require('./logger');
+const {
+  POST_SUBMIT_MS,
+  POST_CONFIRM_MS,
+  INTERSTITIAL_CLICK_MS,
+  QUIZ_STEP_MS,
+  QUIZ_QUESTION_MS,
+} = require('./platform');
+const { SELECTORS } = require('./selectors');
+const { mergeIntoKnown, ensureKnownBankSeeded } = require('./quiz-bank');
+const { extractScore, scoreLooksPassing, detectOutcomeFromText } = require('./quiz-outcome');
+const {
+  mergeQuestionList,
+  saveNeedAnswer,
+  saveAiQuizRequest,
+  clearResolvedFromHandoff,
+} = require('./quiz-handoff');
 
 // Tetto di sicurezza sul numero di domande per quiz: evita loop infiniti se la
 // piattaforma renderizza una nuova domanda a ogni iterazione senza mai finire.
@@ -23,111 +39,12 @@ const AI_REQUEST_CONFIDENCE_THRESHOLD = 0.8;
 // Scope: evita di cliccare l'opzione di un'altra domanda se la pagina ne
 // renderizza più di una contemporaneamente.
 async function optionsLocator(page) {
-  const scoped = page.locator('form#aggiungi_risposta .opzione-risposta');
+  const formSel = SELECTORS.quiz.form;
+  const optSel = SELECTORS.quiz.option;
+  const scoped = page.locator(`${formSel} ${optSel}`);
   const n = await scoped.count().catch(() => 0);
   if (n > 0) return scoped;
-  return page.locator('.opzione-risposta');
-}
-
-// Promuove nella banca condivisa TRUSTED (known_answers.json) SOLO risposte
-// verificate: dalla piattaforma (scrape post-quiz di .risposta-corretta) o
-// dall'AI supervisore. I guess Ollama NON passano di qui (vanno in pending).
-// Non sovrascrive entry esistenti (l'overwrite esplicito lo fa l'AI via
-// answers-cli set). Normalizza le chiavi (normKey) per non duplicare "X" / "1. X".
-function mergeIntoKnown(root, newAnswers, log) {
-  if (!newAnswers || Object.keys(newAnswers).length === 0) return 0;
-  const knownPath = path.join(root, 'data', 'known_answers.json');
-  // readJsonSafe: se la banca condivisa è corrotta, non la azzera silenziosamente:
-  // lo segnala e parte da {} (perdendo solo il merge di questo run, non tutto).
-  let known = readJsonSafe(knownPath, {});
-  // Indice delle chiavi normalizzate già presenti (per dedup "X" vs "1. X").
-  const existingNorm = new Set(Object.keys(known).map(normKey));
-  let added = 0;
-  for (const [q, a] of Object.entries(newAnswers)) {
-    const nk = normKey(q);
-    if (!known[q] && !existingNorm.has(nk)) {
-      known[q] = a;
-      existingNorm.add(nk);
-      added++;
-    }
-  }
-  if (added > 0) {
-    try {
-      // Scrittura atomica (tmp + rename): un crash a metà non corrompe la banca.
-      writeJsonAtomic(knownPath, known);
-      log(`Banca trusted aggiornata: +${added} risposte verificate (piattaforma/AI).`);
-    } catch (e) {
-      log(`Impossibile aggiornare known_answers.json: ${e.message}`);
-    }
-  }
-  return added;
-}
-
-// Seede la banca trusted locale (data/known_answers.json) dalla banca condivisa
-// (data/known_answers_public.json) se il file locale manca. known_answers.json è
-// gitignorato (banca di lavoro mutata a runtime dall'autoplay): su un clone fresco
-// è assente e va inizializzato dalla banca pubblica tracciata, altrimenti il primo
-// quiz partirebbe con banca vuota. Idempotente: se il file esiste già non fa nulla
-// (l'autoplay e update-known-answers.sh lo arricchiscono a runtime).
-function ensureKnownBankSeeded(root) {
-  const knownPath = path.join(root, 'data', 'known_answers.json');
-  if (fs.existsSync(knownPath)) return;
-  const publicPath = path.join(root, 'data', 'known_answers_public.json');
-  let pub = {};
-  try { pub = JSON.parse(fs.readFileSync(publicPath, 'utf8')); } catch (_) { pub = {}; }
-  if (pub && Object.keys(pub).length > 0) {
-    try { writeJsonAtomic(knownPath, pub); } catch (_) { /* non bloccante */ }
-  }
-}
-
-function extractScore(text) {
-  const t = (text || '').toLowerCase();
-  // 1) Priorità: frazione vicino alle parole chiave "punteggio" o "voto [finale]".
-  // Evita di catturare numeri casuali del menù/indice (es. "4.3 38-39" nel sillabo).
-  const ctx = t.match(/(?:punteggio|voto(?:\s+finale)?)\s*:?\s*(\d{1,3})\s*\/\s*(\d{1,3})/);
-  if (ctx) {
-    const got = parseInt(ctx[1], 10);
-    const total = parseInt(ctx[2], 10);
-    return { text: `${got}/${total}`, pct: total ? (got / total) * 100 : 0, type: 'frac', got, total };
-  }
-  // 2) Forma italiana "X su Y" (es. "24 su 30").
-  const su = t.match(/(\d{1,3})\s+su\s+(\d{1,3})/);
-  if (su) {
-    const got = parseInt(su[1], 10);
-    const total = parseInt(su[2], 10);
-    return { text: `${got}/${total}`, pct: total ? (got / total) * 100 : 0, type: 'frac', got, total };
-  }
-  // 3) Percentuale esplicita.
-  const pct = t.match(/(\d{1,3}([.,]\d+)?)\s*%/);
-  if (pct) return { text: `${pct[1]}%`, pct: parseFloat(pct[1].replace(',', '.')), type: 'pct' };
-  // 4) Fallback: prima frazione generica "X/Y".
-  const frac = t.match(/(\d+)\s*\/\s*(\d+)/);
-  if (frac) {
-    const got = parseInt(frac[1], 10);
-    const total = parseInt(frac[2], 10);
-    return { text: `${got}/${total}`, pct: total ? (got / total) * 100 : 0, type: 'frac', got, total };
-  }
-  return null;
-}
-
-// Un punteggio >= 80% è considerato superato anche se la piattaforma scrive "non superato"
-// (workaround per esiti visualizzati male).
-function scoreLooksPassing(score) {
-  return score && Number.isFinite(score.pct) && score.pct >= 80;
-}
-
-function detectOutcomeFromText(text) {
-  const low = (text || '').toLowerCase();
-  // Pattern esito: copriamo le formulazioni reali della piattaforma GSD Campus
-  // ("Questionario superato!", "Complimenti, hai superato...", "non superato",
-  // "insufficiente", "da ripetere"...).
-  const failedText = /non\s+superato|non\s+idoneo|non\s+hai\s+superato|insufficiente|da\s+ripetere|da\s+rifare/.test(low);
-  const score = extractScore(text);
-  // Se il testo dice superato/idoneo/complimenti ed esplicitamente NON dice "non", è superato.
-  const passedText = !failedText && /superato|idoneo|complimenti|hai\s+superato/.test(low);
-  // Fallback sul punteggio: >= 80% conta come superato anche in assenza di testo chiaro.
-  const passed = passedText || scoreLooksPassing(score);
-  return { passed, failed: failedText, score };
+  return page.locator(optSel);
 }
 
 // Estrae tutte le domande e opzioni dalla pagina di quiz attiva.
@@ -189,91 +106,6 @@ async function extractCorrectAnswers(page) {
   }
 }
 
-// Dedup di una lista di domande per testo domanda (normalizzato): tiene la
-// prima occorrenza, ma se una successiva porta più info (es. ha ollamaGuess)
-// la fonde nella prima. Usato da saveNeedAnswer e saveAiQuizRequest.
-function mergeQuestionList(existing, incoming) {
-  const byKey = new Map();
-  for (const item of [...(existing || []), ...(incoming || [])]) {
-    if (!item || !item.question) continue;
-    const k = normKey(item.question);
-    if (!byKey.has(k)) {
-      byKey.set(k, { ...item });
-    } else {
-      const prev = byKey.get(k);
-      // Arricchisci: se il nuovo ha campi che il vecchio non aveva, copiali.
-      for (const f of ['options', 'ollama', 'ollamaGuess']) {
-        if (item[f] && !prev[f]) prev[f] = item[f];
-      }
-    }
-  }
-  return [...byKey.values()];
-}
-
-function saveNeedAnswer(root, questions, reason) {
-  if (!questions || questions.length === 0) return;
-  const needPath = account.stateFilePaths(root).needAnswer;
-  try {
-    // Merge (non overwrite): catture multiple nello stesso run non si perdono.
-    const prev = fs.existsSync(needPath) ? readJsonSafe(needPath, null) : null;
-    const merged = mergeQuestionList(prev && Array.isArray(prev.questions) ? prev.questions : [], questions);
-    // Scrittura atomica: il file need_answer è letto dall'AI per intervenire,
-    // non deve mai restare troncato a metà.
-    writeJsonAtomic(needPath, { reason, questions: merged, savedAt: new Date().toISOString() });
-  } catch (e) { /* ignora */ }
-}
-
-// Handoff arricchito per l'AI supervisore: per ogni domanda sconosciuta o a
-// bassa confidenza salva domanda + opzioni + guess Ollama + confidenza, così
-// l'AI può risolvere con WebSearch + ragionamento e scrivere la risposta
-// verificata nella banca TRUSTED (answers-cli set). Merge non overwrite.
-// Artefatto per-account: data/accounts/<CF>/ai_quiz_request.json.
-function saveAiQuizRequest(root, items, reason, ctx) {
-  if (!items || items.length === 0) return 0;
-  const paths = account.stateFilePaths(root);
-  const reqPath = path.join(paths.accountDir, 'ai_quiz_request.json');
-  try {
-    const prev = fs.existsSync(reqPath) ? readJsonSafe(reqPath, null) : null;
-    const merged = mergeQuestionList(prev && Array.isArray(prev.questions) ? prev.questions : [], items);
-    writeJsonAtomic(reqPath, {
-      reason,
-      courseUrl: (ctx && ctx.courseUrl) || null,
-      courseId: (ctx && ctx.courseId) || null,
-      questions: merged,
-      savedAt: new Date().toISOString()
-    });
-    return merged.length;
-  } catch (e) { /* ignora */ }
-  return 0;
-}
-
-// Rimuove dall'handoff (ai_quiz_request.json + need_answer.json) le domande già
-// RISOLTE (aggiunte alla banca trusted). Dopo che l'AI risponde, l'inbox si
-// svuota da solo: niente dati stale, niente "reset dimenticato" (l'AI non
-// ri-lavora domande già fatte). Matching robusto via normKey (ignora numero
-// randomizzato/formattazione). Ritorna quante voci ha rimosso.
-function clearResolvedFromHandoff(root, resolvedQuestions) {
-  if (!resolvedQuestions || resolvedQuestions.length === 0) return 0;
-  const resolvedKeys = new Set(resolvedQuestions.map(q => normKey(q)));
-  const paths = account.stateFilePaths(root);
-  const files = [path.join(paths.accountDir, 'ai_quiz_request.json'), paths.needAnswer];
-  let removed = 0;
-  for (const f of files) {
-    try {
-      if (!fs.existsSync(f)) continue;
-      const data = readJsonSafe(f, null);
-      if (!data || !Array.isArray(data.questions)) continue;
-      const before = data.questions.length;
-      const kept = data.questions.filter(q => !resolvedKeys.has(normKey(q.question || '')));
-      if (kept.length !== before) {
-        removed += before - kept.length;
-        writeJsonAtomic(f, { ...data, questions: kept, savedAt: new Date().toISOString() });
-      }
-    } catch (e) { /* ignora */ }
-  }
-  return removed;
-}
-
 // Salva HTML + screenshot + bodyText della pagina del quiz in debug/quiz/.
 // A prova di bomba: qualsiasi esito non chiaro o cattura fallita lascia artefatti
 // per diagnosi, così l'autopilot non fallisce MAI in silenzio. Non lancia mai.
@@ -321,7 +153,7 @@ async function clickRetryButton(page, log) {
   const text = (await btn.innerText().catch(() => '')).trim();
   log(`Trovato bottone '${text}'. Clicco per riprovare/riavviare il quiz...`);
   await btn.click().catch(() => {});
-  await page.waitForTimeout(4000);
+  await page.waitForTimeout(POST_SUBMIT_MS);
   return true;
 }
 
@@ -345,7 +177,7 @@ async function clickNextButton(page, log) {
     if (await btn.isVisible().catch(() => false)) {
       await btn.click().catch(() => {});
       log(`Cliccato bottone ${label}`);
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(QUIZ_STEP_MS);
       return true;
     }
   }
@@ -356,7 +188,7 @@ async function clickNextButton(page, log) {
     if (!FINALIZE_RE.test(txt)) {
       await submit.click().catch(() => {});
       log(`Cliccato bottone submit ('${txt.trim().slice(0, 20)}')`);
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(QUIZ_STEP_MS);
       return true;
     }
     log(`Submit '${txt.trim().slice(0, 20)}' sembra finalizzare: NON lo clicco qui.`);
@@ -401,7 +233,7 @@ async function solveActiveQuestions(page, root, log, monitor) {
   const seenQuestions = new Set(); // per non ri-contare la stessa domanda
 
   for (let i = 0; i < MAX_QUIZ_QUESTIONS; i++) {
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(QUIZ_QUESTION_MS);
     await page.waitForSelector('form h1, form h2, form h3, form h4, form h5, .opzione-risposta, button:has-text("Conferma"), button:has-text("Avanti")', { timeout: 10000 }).catch(() => {});
 
     const isRiepilogo = await page.evaluate(() => document.body.innerText.includes('Riepilogo')).catch(() => false);
@@ -419,7 +251,7 @@ async function solveActiveQuestions(page, root, log, monitor) {
       const confirmBtn = page.locator('button:has-text("Conferma")').first();
       if (await confirmBtn.isVisible().catch(() => false)) {
         await confirmBtn.click();
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(POST_CONFIRM_MS);
         if (await page.evaluate(() => document.querySelector('form h1, form h2, form h3, form h4, form h5')).catch(() => false)) continue;
         else break;
       }
@@ -562,7 +394,7 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
         const quizUrl = page.url();
         if (quizUrl.includes('/questionario/')) {
           await page.goto(quizUrl, { waitUntil: 'networkidle' }).catch(() => {});
-          await page.waitForTimeout(3000);
+          await page.waitForTimeout(INTERSTITIAL_CLICK_MS);
           captured = await extractQuestionsFromPage(page);
         }
       }
@@ -579,7 +411,7 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
       };
     }
     // Abbiamo cliccato "Riprova", continuiamo con le domande attive.
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(INTERSTITIAL_CLICK_MS);
   }
 
   // 2) Verifica se c'è il bottone "Avvia compilazione" (dashboard quiz).
@@ -595,7 +427,7 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
     if (tent != null) log(`Tentativi indicati sulla pagina: ${tent}.`);
     log("Trovato bottone 'Avvia compilazione'. Clicco per iniziare...");
     await startBtn.click();
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(POST_SUBMIT_MS);
   }
 
   // 3) Risolvi le domande attive.
@@ -628,7 +460,7 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
   }
 
   // 4) Dopo aver risposto, verifica l'esito finale.
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(INTERSTITIAL_CLICK_MS);
   const finalOutcome = await page.evaluate(() => {
     const text = document.body ? document.body.innerText : '';
     return { bodyText: text.slice(0, 12000) };
@@ -673,7 +505,7 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
       const quizUrl = page.url();
       if (quizUrl.includes('/questionario/')) {
         await page.goto(quizUrl, { waitUntil: 'networkidle' }).catch(() => {});
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(INTERSTITIAL_CLICK_MS);
         captured = await extractQuestionsFromPage(page);
       }
     }

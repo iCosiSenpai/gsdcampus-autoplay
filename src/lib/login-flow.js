@@ -6,6 +6,7 @@
  */
 
 const { redactUrl } = require('./logger');
+const { INTERSTITIAL_CLICK_MS, POST_SUBMIT_MS } = require('./platform');
 
 // Gestisce eventuali pagine intermedie post-autologin, come:
 // - scelta utente/ruolo;
@@ -46,7 +47,7 @@ async function handlePostLoginInterstitial(page, log) {
           log(`Pagina intermedia rilevata (${currentUrl}). Clicco '${sel}'...`);
         }
         await btn.click().catch(() => {});
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(INTERSTITIAL_CLICK_MS);
         return true;
       }
     }
@@ -66,7 +67,7 @@ async function handlePostLoginInterstitial(page, log) {
         const submitBtn = page.locator('button[type="submit"], button.btn-primary, input[type="submit"]').first();
         if (await submitBtn.isVisible().catch(() => false)) {
           await submitBtn.click().catch(() => {});
-          await page.waitForTimeout(3000);
+          await page.waitForTimeout(INTERSTITIAL_CLICK_MS);
         }
         return true;
       }
@@ -111,7 +112,7 @@ async function handleCourseInformativa(page, log) {
       });
     }
     await submitBtn.click().catch(e => log(`Errore click submit: ${e.message}`));
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(POST_SUBMIT_MS);
     log(`Dopo submit: URL = ${redactUrl(page.url())}`);
     return true;
   } catch (e) {
@@ -143,7 +144,7 @@ async function acceptInformativa(page, log) {
       }
     }
     await btn.click().catch(e => log(`Errore click conferma informativa: ${e.message}`));
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(POST_SUBMIT_MS);
     log(`Dopo conferma informativa: URL = ${redactUrl(page.url())}`);
     return true;
   } catch (e) {
@@ -172,7 +173,7 @@ async function acceptUsageDeclaration(page, log) {
       await cb.check().catch(() => {});
     }
     await btn.click({ force: true }).catch(e => log(`Errore click 'Confermo e proseguo': ${e.message}`));
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(POST_SUBMIT_MS);
 
     // Fallback: se il modal SweetAlert rimane aperto e blocca i click futuri, rimuovilo dal DOM.
     await page.evaluate(() => {

@@ -154,6 +154,30 @@ function readMetricsTail(root, n = 20) {
   return out;
 }
 
+/**
+ * Payload privacy-safe da condividere (opt-in): solo conteggi phase, no CF/URL.
+ * Pure.
+ */
+function buildMetricsSharePayload(summary, opts = {}) {
+  const byPhase = {};
+  const src = (summary && summary.byPhase) || {};
+  for (const [k, v] of Object.entries(src)) {
+    const phase = String(k).slice(0, 64);
+    const n = Math.max(0, Math.floor(Number(v) || 0));
+    if (phase && n > 0) byPhase[phase] = n;
+  }
+  return {
+    event: 'metrics_batch',
+    hours: summary && summary.hours != null ? Number(summary.hours) : 168,
+    total: summary && summary.total != null ? Number(summary.total) : 0,
+    byPhase,
+    // store tag opzionale anonimo (es. "store-roma-1"), mai CF
+    storeTag: opts.storeTag ? String(opts.storeTag).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) : undefined,
+    from: summary && summary.from,
+    to: summary && summary.to,
+  };
+}
+
 module.exports = {
   appendMetric,
   buildMetricEvent,
@@ -161,6 +185,7 @@ module.exports = {
   classifyQuizResult,
   summarizeMetrics,
   readMetricsTail,
+  buildMetricsSharePayload,
   metricsPath,
   ALLOWED_KEYS,
   MAX_METRICS_BYTES,

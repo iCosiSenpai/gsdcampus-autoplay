@@ -5,6 +5,7 @@
  *   POST /  o  POST /report  → apre issue GitHub (segnalazione bug AI)
  *   POST /answers            → merge additivo di risposte quiz su
  *                              data/known_answers_public.json (Contents API)
+ *   POST /metrics            → batch phase-only (privacy-safe, no CF); ack only
  *
  * PAT in secret ISSUE_TOKEN (e opz. ANSWERS_TOKEN). Scope necessari:
  *   Issues: Read and write
@@ -247,6 +248,53 @@ async function handleAnswers(data, env) {
   return jsonResp(502, { ok: false, error: 'conflict_retries_exhausted' });
 }
 
+// --- Metrics (privacy-safe aggregates only) --------------------------------
+
+function sanitizeMetricsPayload(data) {
+  if (!data || typeof data !== 'object') return null;
+  const byPhase = {};
+  const src = data.byPhase && typeof data.byPhase === 'object' ? data.byPhase : {};
+  let total = 0;
+  for (const [k, v] of Object.entries(src)) {
+    const phase = String(k).slice(0, 64).replace(/[^a-zA-Z0-9_:-]/g, '');
+    const n = Math.max(0, Math.min(100000, Math.floor(Number(v) || 0)));
+    if (!phase || n === 0) continue;
+    // Scarta se sembra PII (CF ecc.)
+    if (looksLikePii(phase)) continue;
+    byPhase[phase] = n;
+    total += n;
+  }
+  if (total === 0 && !(data.total > 0)) return null;
+  const storeTag = data.storeTag
+    ? String(data.storeTag).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32)
+    : null;
+  return {
+    event: 'metrics_batch',
+    hours: Math.max(1, Math.min(720, Math.floor(Number(data.hours) || 168))),
+    total: Math.max(total, Math.floor(Number(data.total) || 0)),
+    byPhase,
+    storeTag,
+  };
+}
+
+async function handleMetrics(data, env) {
+  if (!checkKey(data, env)) {
+    return jsonResp(401, { ok: false, error: 'bad_key' });
+  }
+  const clean = sanitizeMetricsPayload(data);
+  if (!clean) {
+    return jsonResp(400, { ok: false, error: 'no_valid_metrics' });
+  }
+  // Nessuna persistenza GitHub: solo ack. Eventuale analytics lato CF Logs.
+  // Non loggare storeTag se assente; mai body grezzo con possibili leak.
+  return jsonResp(200, {
+    ok: true,
+    accepted: true,
+    total: clean.total,
+    phases: Object.keys(clean.byPhase).length,
+  });
+}
+
 // --- Router ----------------------------------------------------------------
 
 export default {
@@ -261,6 +309,13 @@ export default {
       return handleAnswers(data, env);
     }
 
+    if (request.method === 'POST' && (path === '/metrics')) {
+      let data;
+      try { data = await request.json(); }
+      catch { return jsonResp(400, { ok: false, error: 'invalid_json' }); }
+      return handleMetrics(data, env);
+    }
+
     if (request.method === 'POST' && (path === '/' || path === '/report')) {
       let data;
       try { data = await request.json(); }
@@ -272,7 +327,7 @@ export default {
       return jsonResp(200, {
         ok: true,
         service: 'gsdcampus-autoplay-receiver',
-        routes: ['POST /report', 'POST /answers'],
+        routes: ['POST /report', 'POST /answers', 'POST /metrics'],
       });
     }
 

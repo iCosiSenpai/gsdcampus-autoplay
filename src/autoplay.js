@@ -4,8 +4,6 @@ const path = require('path');
 const { launchBrowser } = require('./lib/browser');
 const { createLogger, redactUrl } = require('./lib/logger');
 const { Monitor } = require('./lib/monitor');
-const { solveQuiz } = require('./lib/quiz');
-const { watchVideo } = require('./lib/video');
 const { describeSchedule } = require('./lib/schedule');
 const { makeShiftChecker } = require('./lib/shift-watch');
 const courseState = require('./lib/course-state');
@@ -13,11 +11,11 @@ const { writeDashboard } = require('./lib/dashboard');
 const { writeAiTodo } = require('./lib/ai-todo');
 const {
   handlePostLoginInterstitial,
-  handleCourseInformativa,
   acceptInformativa,
-  acceptUsageDeclaration,
 } = require('./lib/login-flow');
 const { collectCoursesFromDom, enrichCourseRows } = require('./lib/dashboard-parse');
+const { createCourseRunner } = require('./lib/course-runner');
+const { maybeAdvanceOnAllDone } = require('./lib/member-queue');
 
 // Finalizza lo stato su disco a fine run: dashboard aggregata + inbox unico
 // dell'AI (logs/ai_todo.json). Non lancia mai.
@@ -27,7 +25,13 @@ function finalizeState() {
 }
 const { writeJsonAtomic } = require('./lib/io');
 const { OffHoursExit, AutologinError, SessionError, AllCoursesNeedHelpExit, DashboardEmptyError, NeedHelpExit } = require('./lib/errors');
-const { dashboardUrl, userAgent } = require('./lib/platform');
+const {
+  dashboardUrl,
+  userAgent,
+  DASHBOARD_POLL_MS,
+  INTERSTITIAL_CLICK_MS,
+  POST_SUBMIT_MS,
+} = require('./lib/platform');
 
 const ROOT = path.join(__dirname, '..');
 const DATA_DIR = path.join(ROOT, 'data');
@@ -60,8 +64,6 @@ if (ACTIVE_CF) {
 const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 const IGNORE_HOURS = process.argv.includes('--ignore-hours');
-const MAX_MISSING_PERMISSION = 3;
-const MAX_COURSE_ITER = 120;
 const MAX_LOGIN_DROPS = 4;
 
 // Predicati di riconoscimento pagina (login vs dashboard) centralizzati in
@@ -80,481 +82,21 @@ function saveSession(state) {
   }
 }
 
+
+// Runner del singolo corso (lezioni + quiz). Dipendenze iniettate.
+const courseRunner = createCourseRunner({
+  root: ROOT,
+  log,
+  monitor,
+  config,
+  ignoreHours: IGNORE_HOURS,
+  paths: _paths,
+  saveSession,
+});
+const { runCourse } = courseRunner;
+
 // loadSession rimosso: era codice morto (mai chiamato). Lo stato di sessione
 // vero è in-memory; SESSION_FILE è solo un artefatto di cleanup.
-
-async function solveQuizWrapper(page, courseUrl) {
-  try {
-    const result = await solveQuiz(page, ROOT, log, monitor, courseUrl);
-    // Backward compat: solveQuiz restituisce un oggetto.
-    if (result && typeof result === 'object') {
-      return result;
-    }
-    return { outcome: result ? 'solved' : 'failed', passed: !!result };
-  } catch (e) {
-    await monitor.recordError(page, e, 'solveQuiz');
-    return { outcome: 'error', passed: false, error: e.message };
-  }
-}
-
-// Naviga sulla pagina del corso e restituisce la percentuale di completamento
-// riportata dalla piattaforma per una specifica lezione.
-async function getLessonProgressOnCoursePage(page, courseUrl, lessonHref) {
-  try {
-    await page.goto(courseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    // 8s: la piattaforma può impiegare diversi secondi a persistere il 100% dopo
-    // la fine del video (visto: 97% subito dopo fine video, 100% ~10s dopo). Con
-    // 3s capitava spesso il "Tentativo 1" inutile; 8s dà un margine confortevole.
-    await page.waitForTimeout(8000);
-    // Su sessione fragile il goto rimbalza su /login: NON tornare null silenzioso
-    // (sennà runCourse crede "lezione non completata" e dopo 3 tentativi marca
-    // need_help un corso legittimamente completato). Segnala il drop di sessione:
-    // runAutoplay esce con session_unstable + cooldown invece di insistere.
-    if (await isLoginPage(page)) {
-      throw new SessionError('Sessione caduta verificando il progresso della lezione (redirect a /login dopo goto corso).');
-    }
-    const rows = await page.evaluate(() => {
-      const all = [...document.querySelectorAll('a[href*="/lezione/show/"]')];
-      return all.map(a => {
-        const block = (a.closest('tr, .row, li, .card, .card-body') || a.parentElement);
-        const txt = (block?.innerText || '').replace(/\s+/g, ' ').trim();
-        const m = txt.match(/(\d+[.,]\d+)\s*%/);
-        return { href: a.href, pct: m ? parseFloat(m[1].replace(',', '.')) : null };
-      });
-    });
-    const found = rows.find(r => r.href === lessonHref);
-    return found ? found.pct : null;
-  } catch (e) {
-    if (e instanceof SessionError) throw e; // propaga il drop, non inghiottirlo
-    return null;
-  }
-}
-
-async function runCourse(page, courseUrl, sessionState, state, shiftCheck) {
-  const emptyUrls = new Set();
-  const stuckUrls = new Set(); // lezioni bloccate al <100% dopo 3 tentativi: saltate, non abbandonano il corso
-  const lessonAttempts = new Map();
-  let missingPermissionCount = 0;
-  let iter = 0;
-
-  log(`Inizio corso ${courseUrl}. Stato: ${JSON.stringify(courseState.getCourse(state, courseUrl))}`);
-
-  while (true) {
-    if (++iter > MAX_COURSE_ITER) {
-      log(`Corso ${courseUrl}: superato il limite di ${MAX_COURSE_ITER} iterazioni senza completamento. Passo al prossimo.`);
-      return;
-    }
-    // Check fine turno anche qui, in cima a ogni iterazione del corso: senza
-    // questo, il while sulle lezioni poteva girare a lungo (un video lungo) e
-    // oltrepassare la fine turno. Con shiftCheck condiviso, la tolleranza di
-    // extra-time è la stessa del loop esterno e di watchVideo.
-    if (shiftCheck && !IGNORE_HOURS) {
-      const s = shiftCheck.evaluate();
-      if (s.extraTimeArmed) log(`Turno appena terminato. Extra-time fino alle ${s.extraTimeUntil ? new Date(s.extraTimeUntil).toISOString() : 'N/A'} per completare il contenuto in corso (corso ${courseUrl}).`);
-      if (s.stop) {
-        log(`Fuori orario durante il corso ${courseUrl}. Fermo graceful: lo scheduler riprenderà al prossimo turno.`);
-        throw new OffHoursExit('Fine turno durante il corso');
-      }
-    }
-    monitor.update({ phase: 'checking', courseUrl });
-
-    try {
-      // Se siamo già sulla dashboard (es. subito dopo discoverCourses), NON
-      // ricaricarla: ogni goto in più stressa la sessione quando è fragile e
-      // la piattaforma può rimbalzarci su /login. Ricarichiamo solo se serve.
-      if (!page.url().includes('/corso/listAllByUser')) {
-        log('Ritorno dashboard per accesso al corso...');
-        await page.goto(dashboardUrl(config), { waitUntil: 'domcontentloaded', timeout: 60000 });
-      }
-      for (let w = 0; w < 30; w++) {
-        if (await isDashboardLoaded(page)) break;
-        if (await isLoginPage(page)) break;
-        await page.waitForTimeout(500);
-      }
-      await page.waitForTimeout(2000);
-
-      const targetId = courseUrl.split('/show/')[1];
-      log(`Searching for course ID ${targetId} in dashboard...`);
-
-      // Cliccare il link "Apri" del corso nella dashboard è il percorso "naturale"
-      // che la piattaforma riconosce: preserva la sessione molto meglio di una
-      // goto diretta a /corso/show/X (che su sessione fragile rimbalza su /login).
-      // Aspettiamo che il link sia nel DOM (la dashboard può renderizzare le card
-      // in lazy) e preferiamo sempre il click alla goto diretta.
-      const linkSel = `a[href*="/corso/show/${targetId}"]`;
-      let courseLink = null;
-      for (let w = 0; w < 20; w++) {
-        if (await page.locator(linkSel).count().catch(() => 0) > 0) {
-          courseLink = page.locator(linkSel).first();
-          break;
-        }
-        if (await isLoginPage(page)) break;
-        await page.waitForTimeout(500);
-      }
-
-      if (courseLink && (await courseLink.isVisible().catch(() => false))) {
-        log(`Link corso trovato tramite href per ID ${targetId}. Clicco per entrare...`);
-        try {
-          await courseLink.click({ timeout: 10000 });
-        } catch (clickErr) {
-          log(`Click corso non andato a buon fine (${clickErr.message}); provo click JS forzato.`);
-          await page.evaluate((sel) => { const a = document.querySelector(sel); if (a) a.click(); }, linkSel).catch(() => {});
-        }
-        await page.waitForTimeout(5000);
-      } else if (courseLink) {
-        // Link presente nel DOM ma non "visibile" (card collassata/off-screen/animazione):
-        // click via JS invece di arrenderci e fare la goto diretta (che fa cadere la sessione).
-        log(`Link corso per ID ${targetId} presente ma non visibile. Click JS forzato...`);
-        await page.evaluate((sel) => { const a = document.querySelector(sel); if (a) a.click(); }, linkSel).catch(() => {});
-        await page.waitForTimeout(5000);
-      } else {
-        log(`Link corso per ID ${targetId} NON trovato in dashboard. Provo navigazione diretta...`);
-        await page.goto(courseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.waitForTimeout(5000);
-      }
-    } catch (e) {
-      log(`Errore durante l'accesso al corso ${courseUrl}: ${e.message}`);
-      await monitor.recordError(page, e, 'accessCourse');
-      await page.waitForTimeout(5000);
-      continue;
-    }
-
-    if (await isLoginPage(page)) {
-      // Sessione caduta. NON re-hitiamo l'autologin: ogni hit consuma/degrada il
-      // token, e la raffica di re-login è proprio la causa dell'instabilità che
-      // stiamo curando (la piattaforma rate-limita l'autologin usato troppe volte
-      // nello stesso giorno). Usciamo subito con SessionError: il catch esterno,
-      // visto che il token era già valido, emette session_unstable (exit 4) e lo
-      // scheduler fa cooldown, così il token recupera e il prossimo run è stabile.
-      throw new SessionError('Sessione caduta durante l\'accesso al corso (pagina di login). Token probabilmente degradato dal sovrauso: esco senza re-login per non consumarlo ulteriormente.');
-    }
-
-    if (page.url().includes('error?code=missing_permission')) {
-      missingPermissionCount++;
-      log(`Siamo in pagina MISSING_PERMISSION (tentativo ${missingPermissionCount}/${MAX_MISSING_PERMISSION}).`);
-      if (missingPermissionCount >= MAX_MISSING_PERMISSION) {
-        log(`Corso ${courseUrl} non accessibile: troppi MISSING_PERMISSION. Salto al prossimo corso.`);
-        courseState.markCourseNeedHelp(ROOT, state, courseUrl, 'missing_permission');
-        monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
-        return;
-      }
-      try {
-        await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
-        let attempts = 0;
-        while (page.url().includes('autologin') && attempts < 20) {
-          await page.waitForTimeout(1000);
-          attempts++;
-        }
-        await page.waitForTimeout(5000);
-      } catch (e) {
-        log(`Errore durante il re-login: ${e.message}`);
-      }
-      continue;
-    }
-    missingPermissionCount = 0;
-    sessionState.loginDrops = 0;
-
-    // Gestione pagina informativa (privacy/condizioni) che precede alcuni corsi.
-    await handleCourseInformativa(page, log);
-    // Gestione modal "Dichiarazione di fruizione" sulla pagina del corso.
-    await acceptUsageDeclaration(page, log);
-
-    let scoredLinks = [];
-    try {
-      scoredLinks = await page.evaluate(() => {
-        const allLinks = [...document.querySelectorAll('a')];
-        const lessonOrQuiz = allLinks.filter(a => {
-          const href = a.href || '';
-          return href.includes('/lezione/show/') || href.includes('/questionario/');
-        });
-        let links = lessonOrQuiz.length > 0 ? lessonOrQuiz : [];
-        // Fallback sui bottoni "Apri" se non abbiamo trovato href diretti.
-        if (links.length === 0) {
-          links = [...document.querySelectorAll('a.btn.btn-sm.btn-primary, a.btn-primary, button.btn-primary')]
-            .filter(a => /apri|inizia|guarda|avvia|visualizza/i.test(a.innerText));
-        }
-        return links.map(a => {
-          const block = (a.closest('tr, .row, li, .card-body, .card') || a.parentElement || a);
-          const text = (block.innerText || '');
-          const m = text.match(/(\d+[.,]\d+)\s*%/);
-          const pct = m ? parseFloat(m[1].replace(',', '.')) : 100;
-          const href = a.href || '';
-          const linkText = (a.innerText || '').trim();
-          const kind = /\/lezione\/show\//.test(href) ? 'lezione' : (/\/questionario\//.test(href) ? 'questionario' : 'altro');
-          return { href, text: text.slice(0, 120), linkText, kind, pct };
-        });
-      });
-      const lessonCount = scoredLinks.filter(l => l.kind === 'lezione').length;
-      const quizCount = scoredLinks.filter(l => l.kind === 'questionario').length;
-      log(`Trovati ${scoredLinks.length} link nel corso (${lessonCount} lezioni, ${quizCount} quiz): ${JSON.stringify(scoredLinks)}`);
-      if (scoredLinks.length === 0) {
-        log('ATTENZIONE: nessun link lezione/questionario trovato. Salvo dump HTML per analisi.');
-        await monitor.recordError(page, new Error('No lesson/quiz links found'), 'courseParsing');
-      }
-    } catch (e) {
-      log(`Errore parsing link: ${e.message}`);
-      await page.waitForTimeout(2000);
-      continue;
-    }
-
-    // Rileva corsi PDF-only guardando il DOM globale: utile quando il corso apre una
-    // pagina informativa con solo link "Scarica il PDF" e nessuna lezione/quiz.
-    const pageHasPdfOnly = await page.evaluate(() => {
-      const anchors = [...document.querySelectorAll('a')];
-      const hasLessonOrQuiz = anchors.some(a => {
-        const h = a.href || '';
-        return h.includes('/lezione/show/') || h.includes('/questionario/');
-      });
-      if (hasLessonOrQuiz) return false;
-      return anchors.some(a => /scarica\s+il\s+pdf|\.pdf|data:application\/pdf/i.test((a.href || '') + ' ' + (a.innerText || '')));
-    });
-    const hasLessonsOrQuizzes = scoredLinks.some(l => l.kind === 'lezione' || l.kind === 'questionario');
-    if ((!hasLessonsOrQuizzes && pageHasPdfOnly) || (scoredLinks.length === 0 && pageHasPdfOnly)) {
-      log(`Corso ${courseUrl} contiene solo PDF (nessuna lezione/video/quiz). Lo marco come completato.`);
-      courseState.markCourseDone(ROOT, state, courseUrl);
-      monitor.update({ phase: 'done', courseStateSummary: courseState.summarize(state) });
-      return;
-    }
-
-    const c = courseState.getCourse(state, courseUrl);
-    const doneLessons = Array.isArray(c.completedLessons) ? c.completedLessons : [];
-    // Fonte di verità per l'avanzamento è la percentuale mostrata dalla piattaforma.
-    // Se una lezione era stata segnata come completata localmente ma la piattaforma
-    // mostra ancora < 100%, la riprendiamo. emptyUrls serve per saltare temporaneamente
-    // lezioni che non contengono video/quiz riconoscibili; stuckUrls per le lezioni
-    // bloccate al <100% dopo 3 tentativi (skip persistente nel run, ri-provate nel
-    // prossimo run scheduler).
-    // SEQUENZIALE: scoredLinks è già in ordine di pagina (DOM, raccolto dal
-    // page.evaluate sopra). NON ordiniamo per percentuale: si prosegue nell'ordine
-    // naturale (lezione 1, 2, 3...), riprendendo al primo posto le lezioni già
-    // iniziate ma non a 100%. Prima il sort per pct saltava alla lezione meno
-    // avanzata → "come gli pare".
-    const availableLinks = scoredLinks
-      .filter(l => l.pct < 100 && !emptyUrls.has(l.href) && !stuckUrls.has(l.href));
-    const nextHref = availableLinks.length > 0 ? availableLinks[0].href : null;
-
-    if (!nextHref) {
-      if (emptyUrls.size > 0) {
-        log('Reset filtri vuoti...');
-        emptyUrls.clear();
-        continue;
-      }
-
-      // Restano solo lezioni bloccate al <100% (stuckUrls): il corso non può
-      // progredire oltre → need_help. A differenza del vecchio comportamento
-      // (che abbandonava il corso al 3° tentativo di UNA lezione e faceva sì che
-      // il for esterno saltasse al corso successivo nella stessa passata), ora
-      // abbiamo prima portato avanti tutte le altre lezioni del corso in ordine.
-      if (stuckUrls.size > 0) {
-        log(`Corso ${courseUrl}: ${stuckUrls.size} lezione/i bloccate al <100% dopo 3 tentativi, nessun'altra progressabile. Segnalo need_help.`);
-        courseState.markCourseNeedHelp(ROOT, state, courseUrl, `lezioni bloccate al <100%: ${[...stuckUrls].join(', ')}`);
-        monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
-        return;
-      }
-
-      const currentUrl = page.url();
-      if (!currentUrl.includes('/corso/show/')) {
-        log(`Spostamento inatteso: ${currentUrl}. Ritorno al login...`);
-        try {
-          await page.goto(config.autologinUrl, { waitUntil: 'load', timeout: 60000 });
-          let attempts = 0;
-          while (page.url().includes('autologin') && attempts < 20) {
-            await page.waitForTimeout(1000);
-            attempts++;
-          }
-          await page.waitForTimeout(5000);
-        } catch (e) {
-          log(`Errore re-login: ${e.message}`);
-        }
-        continue;
-      }
-
-      log('Verifico quiz finale...');
-      try {
-        // Rilevazione robusta: oltre al link diretto /questionario/, guardiamo
-        // anche il bottone "Avvia compilazione" e la sezione "Questionari finali".
-        // Serve a non marcare done un corso che HA un questionario pendente ma il
-        // cui link non è un <a href="/questionario/"> (falso-done storico).
-        const quizInfo = await page.evaluate(() => {
-          const a = document.querySelector('a[href*="/questionario/"]');
-          const btns = [...document.querySelectorAll('a, button')];
-          const avvia = btns.find(b => /avvia compilazione/i.test(b.innerText || ''));
-          const avviaHref = avvia && avvia.tagName === 'A' ? avvia.href : null;
-          const body = document.body ? document.body.innerText : '';
-          return {
-            quizHref: a ? a.href : (avviaHref || null),
-            hasQuestionnaireSignal: !!a || !!avvia || /questionari finali/i.test(body),
-          };
-        });
-        const quizLink = quizInfo.quizHref;
-        if (quizLink) {
-          // Clicca il link del quiz dalla pagina corso (il goto diretto può perdere la sessione).
-          const quizLocator = page.locator(`a[href="${quizLink}"]`).first();
-          try {
-            await quizLocator.click({ timeout: 10000 });
-          } catch (clickErr) {
-            log(`Click quiz non andato a buon fine (${clickErr.message}); provo click forzato/goto.`);
-            await quizLocator.click({ force: true, timeout: 10000 }).catch(async () => {
-              await page.goto(quizLink);
-            });
-          }
-          await page.waitForTimeout(4000);
-          const quizResult = await solveQuizWrapper(page, courseUrl);
-
-          if (quizResult.passed) {
-            log(`Quiz finale di ${courseUrl} superato.`);
-            courseState.markCourseDone(ROOT, state, courseUrl, true);
-            saveSession({ courseUrl, phase: 'quiz_done' });
-            monitor.update({ phase: 'done', courseStateSummary: courseState.summarize(state) });
-            return;
-          }
-
-          // Quiz non superato: il wrapper ha già catturato le domande in data/need_answer.json.
-          // Segnalo il corso come "need_help" e passo al prossimo corso. L'AI/utente leggerà
-          // need_answer.json, aggiungerà le risposte a known_answers.json e riavvierà.
-          if (quizResult.outcome === 'need_help' || quizResult.outcome === 'failed' || quizResult.outcome === 'unknown') {
-            courseState.incrementQuizAttempt(ROOT, state, courseUrl, quizResult.resultText);
-            courseState.markCourseNeedHelp(ROOT, state, courseUrl, quizResult.reason || 'quiz non superato');
-            const needAnswerPath = _paths.needAnswer;
-            const needAnswerSaved = fs.existsSync(needAnswerPath);
-            if (needAnswerSaved) {
-              log(`Quiz finale di ${courseUrl} non superato (${quizResult.resultText}). Corso segnato come 'need_help'; domande salvate in ${needAnswerPath}. Passo al prossimo corso.`);
-            } else {
-              log(`Quiz finale di ${courseUrl} non superato (${quizResult.resultText}). Corso segnato come 'need_help'. ATTENZIONE: non sono riuscito a catturare le domande in ${needAnswerPath}; sarà necessario un intervento manuale/AI.`);
-            }
-            monitor.update({ phase: 'need_help', courseUrl, lastQuizResult: quizResult.resultText, courseStateSummary: courseState.summarize(state) });
-            return;
-          }
-
-          continue;
-        }
-        // C'è un segnale di questionario (sezione "Questionari finali" o bottone
-        // "Avvia compilazione") ma non siamo riusciti a risolverne il link:
-        // NON marchiamo done a torto (falso-done storico). Segnaliamo need_help
-        // così la riconciliazione/AI lo recupera invece di perderlo.
-        if (quizInfo.hasQuestionnaireSignal) {
-          log(`Corso ${courseUrl}: rilevato un questionario finale ma non raggiungibile automaticamente. Segnalo need_help (non marco done).`);
-          courseState.markCourseNeedHelp(ROOT, state, courseUrl, 'questionario finale presente ma link non risolvibile automaticamente');
-          monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
-          return;
-        }
-      } catch (e) {
-        log(`Errore quiz: ${e.message}`);
-        await monitor.recordError(page, e, 'finalQuiz');
-      }
-
-      log(`Corso ${courseUrl} TERMINATO (nessun questionario finale).`);
-      courseState.markCourseDone(ROOT, state, courseUrl, false);
-      saveSession({ courseUrl, phase: 'done' });
-      monitor.update({ phase: 'done', courseStateSummary: courseState.summarize(state) });
-      return;
-    }
-
-    log(`Apertura: ${nextHref}`);
-    saveSession({ courseUrl, lessonUrl: nextHref, phase: 'lesson' });
-
-    try {
-      // Clicca il link dalla pagina corso: il goto diretto a /lezione/show/... può
-      // riportare alla pagina di login dopo aver accettato la dichiarazione di fruizione.
-      const lessonLink = page.locator(`a[href="${nextHref}"]`).first();
-      try {
-        await lessonLink.click({ timeout: 10000 });
-      } catch (clickErr) {
-        log(`Click lezione non andato a buon fine (${clickErr.message}); provo click forzato.`);
-        await lessonLink.click({ force: true, timeout: 10000 }).catch(() => {});
-      }
-      await page.waitForTimeout(4000);
-    } catch (e) {
-      log(`Errore apertura lezione via click: ${e.message}. Provo con goto diretto...`);
-      try {
-        await page.goto(nextHref, { waitUntil: 'domcontentloaded' });
-        await page.waitForTimeout(3000);
-      } catch (e2) {
-        log(`Errore navigazione: ${e2.message}`);
-        await monitor.recordError(page, e2, 'navigateLesson');
-        continue;
-      }
-    }
-
-    if (await isLoginPage(page)) {
-      // Stesso principio del drop in dashboard: niente re-login autologin (consuma
-      // il token e causa il rate-limit che stiamo curando). Esco subito con
-      // SessionError -> session_unstable (exit 4) + cooldown dello scheduler.
-      throw new SessionError('Sessione caduta durante l\'apertura della lezione (pagina di login). Esco senza re-login per non degradare il token.');
-    }
-
-    const isQuizDashboard = await page.evaluate(() => {
-      const btn = document.querySelector('a.btn-primary, button.btn-primary');
-      return !!btn && btn.innerText.toLowerCase().includes('avvia compilazione');
-    }).catch(() => false);
-
-    if (isQuizDashboard) {
-      monitor.update({ phase: 'quiz_dashboard', lessonUrl: nextHref });
-      log('Dashboard Quiz...');
-      const startUrl = await page.evaluate(() => {
-        const btn = Array.from(document.querySelectorAll('a.btn-primary')).find(a => a.innerText.toLowerCase().includes('avvia compilazione'));
-        return btn ? btn.href : null;
-      }).catch(() => null);
-      if (startUrl) {
-        emptyUrls.clear();
-        await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await solveQuizWrapper(page, courseUrl);
-      } else {
-        emptyUrls.add(nextHref);
-      }
-      continue;
-    }
-
-    // h1..h5 (non solo h4): stessa lista di quiz.js — un quiz con la domanda in
-    // un heading diverso da h4 non veniva riconosciuto e la lezione era trattata
-    // come contenuto generico.
-    const isQuiz = await page.evaluate(() => !!document.querySelector('form h1, form h2, form h3, form h4, form h5')).catch(() => false);
-    if (isQuiz) {
-      monitor.update({ phase: 'quiz', lessonUrl: nextHref });
-      emptyUrls.clear();
-      await solveQuizWrapper(page, courseUrl);
-      continue;
-    }
-
-    const hasVideo = await page.evaluate(() => !!document.querySelector('video')).catch(() => false);
-    if (hasVideo) {
-      monitor.update({ phase: 'video', lessonUrl: nextHref });
-      emptyUrls.clear();
-      await watchVideo(page, log, monitor, shiftCheck);
-
-      // Verifica che la piattaforma abbia effettivamente registrato il progresso a 100%.
-      const lessonProgress = await getLessonProgressOnCoursePage(page, courseUrl, nextHref);
-      if (lessonProgress !== null && lessonProgress >= 99) {
-        log(`Lezione ${nextHref} verificata al ${lessonProgress}%: completata.`);
-        courseState.addCompletedLesson(ROOT, state, courseUrl, nextHref);
-      } else {
-        const attempts = (lessonAttempts.get(nextHref) || 0) + 1;
-        lessonAttempts.set(nextHref, attempts);
-        log(`Lezione ${nextHref} non risulta completata sulla piattaforma (progresso: ${lessonProgress}%). Tentativo ${attempts}.`);
-        if (attempts >= 3) {
-          // NON abbandonare il corso per una singola lezione bloccata: la salto e
-          // continuo con le altre lezioni dello STESSO corso (progressione
-          // sequenziale). Il corso viene segnato need_help solo se TUTTE le
-          // lezioni rimanenti sono bloccate (ramo !nextHref sopra). Il vecchio
-          // return qui faceva sì che il for esterno saltasse al corso successivo
-          // nella stessa passata → "un po' di tutti i corsi" senza finirne nessuno.
-          // Le lezioni saltate sono ri-provate nel prossimo run scheduler
-          // (stuckUrls è in-memory), così i race temporanei (piattaforma che
-          // persiste il 100% in ritardo) si auto-risolvono.
-          log(`Lezione ${nextHref} bloccata a ${lessonProgress}% dopo 3 tentativi. La salto e continuo con le prossime lezioni del corso.`);
-          stuckUrls.add(nextHref);
-        } else {
-          emptyUrls.add(nextHref);
-        }
-      }
-      continue;
-    }
-
-    log(`Senza contenuto (${nextHref}).`);
-    emptyUrls.add(nextHref);
-    await page.waitForTimeout(5000);
-  }
-}
 
 async function runAutoplay() {
   let browser;
@@ -686,11 +228,11 @@ async function runAutoplay() {
           // Attendi il redirect dall'autologin (normalmente immediato)
           let attempts = 0;
           while (page.url().includes('autologin') && attempts < 20) {
-            await page.waitForTimeout(1000);
+            await page.waitForTimeout(DASHBOARD_POLL_MS * 2);
             attempts++;
           }
           // Pausa per stabilizzare la sessione dopo l'autologin
-          await page.waitForTimeout(3000);
+          await page.waitForTimeout(INTERSTITIAL_CLICK_MS);
           // Gestisci la pagina di accettazione informativa (privacy/scheda tecnica)
           // che la piattaforma mostra dopo il login. Va PRIMA di handlePostLoginInterstitial:
           // quella matcha "privacy" nel testo ma cerca checkbox (qui non ce ne sono) e il
@@ -708,9 +250,9 @@ async function runAutoplay() {
           for (let w = 0; w < 40; w++) {
             if (await isDashboardLoaded(page)) break;
             if (await isLoginPage(page)) break;
-            await page.waitForTimeout(500);
+            await page.waitForTimeout(DASHBOARD_POLL_MS);
           }
-          await page.waitForTimeout(2000);
+          await page.waitForTimeout(DASHBOARD_POLL_MS * 4);
 
           // Test di salute: verifica che la dashboard contenga corsi.
           const dashboardLinks = await page.evaluate(() =>
@@ -720,12 +262,12 @@ async function runAutoplay() {
 
           if (await isLoginPage(page)) {
             log(`Login non riuscito al tentativo ${la} (la piattaforma mostra la pagina di login).`);
-            await page.waitForTimeout(4000);
+            await page.waitForTimeout(POST_SUBMIT_MS);
             continue;
           }
           if (!(await isDashboardLoaded(page))) {
             log(`Attenzione: la dashboard non sembra caricata al tentativo ${la}. Riprovo.`);
-            await page.waitForTimeout(3000);
+            await page.waitForTimeout(INTERSTITIAL_CLICK_MS);
             continue;
           }
           loggedIn = true;
@@ -733,7 +275,7 @@ async function runAutoplay() {
           log(`URL finale dopo login: ${redactUrl(page.url())}`);
         } catch (e) {
           log(`Errore durante l'autologin (tentativo ${la}): ${e.message}`);
-          await page.waitForTimeout(3000);
+          await page.waitForTimeout(INTERSTITIAL_CLICK_MS);
         }
       }
       if (!loggedIn) {
@@ -782,9 +324,9 @@ async function runAutoplay() {
             for (let w = 0; w < 30; w++) {
               if (await isDashboardLoaded(page)) break;
               if (await isLoginPage(page)) break;
-              await page.waitForTimeout(500);
+              await page.waitForTimeout(DASHBOARD_POLL_MS);
             }
-            await page.waitForTimeout(2000);
+            await page.waitForTimeout(DASHBOARD_POLL_MS * 4);
             // Card + progress-bar style width (stesso parser del census).
             const rawCards = await page.evaluate(collectCoursesFromDom);
             const discovered = enrichCourseRows(rawCards);
@@ -931,6 +473,15 @@ async function runAutoplay() {
       if (e instanceof AllCoursesNeedHelpExit || e.code === 'ALL_NEED_HELP') {
         log('TUTTI I CORSI COMPLETATI O IN ATTESA DI AIUTO:', e.message);
         monitor.update({ running: false, phase: 'need_help', lastError: e.message, courseStateSummary: courseState.summarize(state) });
+        // Coda multi-CF: se config.memberQueue ha ≥2 entry, avanza al prossimo.
+        try {
+          const adv = maybeAdvanceOnAllDone(ROOT, config, true, log);
+          if (adv && adv.ok) {
+            monitor.update({ phase: 'member_queue_advanced', lastError: `next=${adv.to}` });
+          }
+        } catch (advErr) {
+          log(`member-queue: ${advErr.message}`);
+        }
         if (browser) { try { await browser.close(); } catch (_) {} }
         finalizeState();
         process.exit(0);

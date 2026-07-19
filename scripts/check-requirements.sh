@@ -6,6 +6,9 @@
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
+# shellcheck source=scripts/setup/package-hash.sh
+. "$DIR/scripts/setup/package-hash.sh"
+
 missing=0
 
 log_missing() {
@@ -27,20 +30,7 @@ get_ollama_model() {
 }
 OLLAMA_MODEL="$(get_ollama_model)"
 
-# Verifica se package.json/package-lock.json sono allineati a node_modules
-package_hash_ok() {
-  local hash_file="$DIR/.package_hash"
-  [ -f "$hash_file" ] || return 1
-  local current=""
-  if command -v sha256sum &>/dev/null; then
-    current=$( (sha256sum "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null || true) | sha256sum | awk '{print $1}')
-  elif command -v shasum &>/dev/null; then
-    current=$( (shasum -a 256 "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null || true) | shasum -a 256 | awk '{print $1}')
-  else
-    current=$(stat -f "%N%z%m" "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null | md5)
-  fi
-  [ "$current" = "$(cat "$hash_file" 2>/dev/null)" ]
-}
+# package_hash_ok da scripts/setup/package-hash.sh
 
 # 1. Homebrew (opzionale, serve per node/ollama su alcuni sistemi)
 if command -v brew &>/dev/null; then

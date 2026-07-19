@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const {
   validateAnswersPayload,
   mergeAnswersAdditive,
+  chunkEntries,
   MAX_ENTRIES,
 } = require('../scripts/lib/answers-share');
 
@@ -57,6 +58,21 @@ describe('validateAnswersPayload', () => {
     const { ok, errors } = validateAnswersPayload(big);
     assert.equal(Object.keys(ok).length, MAX_ENTRIES);
     assert.ok(errors.some(e => /too many/i.test(e)));
+  });
+});
+
+describe('chunkEntries', () => {
+  it('spezza in chunk da N', () => {
+    const obj = {};
+    for (let i = 0; i < 120; i++) obj['q' + i] = 'a' + i;
+    const chunks = chunkEntries(obj, 50);
+    assert.equal(chunks.length, 3);
+    assert.equal(Object.keys(chunks[0]).length, 50);
+    assert.equal(Object.keys(chunks[1]).length, 50);
+    assert.equal(Object.keys(chunks[2]).length, 20);
+  });
+  it('oggetto vuoto → un chunk vuoto', () => {
+    assert.deepEqual(chunkEntries({}, 50), [{}]);
   });
 });
 

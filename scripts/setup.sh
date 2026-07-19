@@ -4,6 +4,10 @@ set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
+# Hash package.json per npm install condizionale (modulo condiviso).
+# shellcheck source=scripts/setup/package-hash.sh
+. "$DIR/scripts/setup/package-hash.sh"
+
 # Claude Code CLI installa il binario in ~/.local/bin; assicuriamo che sia
 # subito disponibile nel PATH di questo script, anche negli shell non interattivi
 # che non caricano .zshrc.
@@ -72,23 +76,7 @@ ensure_local_bin_in_path() {
 # Helpers per aggiornamento condizionale delle dipendenze
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Calcola un hash stabile di package.json + package-lock.json.
-# Usato per capire se è necessario rieseguire npm install.
-calc_package_hash() {
-  if command -v sha256sum &>/dev/null; then
-    (sha256sum "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null || true) | sha256sum | awk '{print $1}'
-  elif command -v shasum &>/dev/null; then
-    (shasum -a 256 "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null || true) | shasum -a 256 | awk '{print $1}'
-  else
-    # Fallback per macOS senza shasum (improbabile): nome, dimensione e mtime.
-    stat -f "%N%z%m" "$DIR/package.json" "$DIR/package-lock.json" 2>/dev/null | md5
-  fi
-}
-
-# Salva l'hash attuale in .package_hash
-save_package_hash() {
-  calc_package_hash > "$DIR/.package_hash"
-}
+# package-hash: scripts/setup/package-hash.sh (sourced sotto)
 
 # Attende che il server Ollama risponda su http://127.0.0.1:11434.
 # Se non risponde, tenta di avviarlo tramite il daemon interno. NON bloccante: se
@@ -189,13 +177,6 @@ ensure_ollama_cli() {
 }
 
 # True se package.json/package-lock.json sono cambiati rispetto all'ultimo hash salvato.
-package_hash_changed() {
-  [ ! -f "$DIR/.package_hash" ] && return 0
-  local current saved
-  current=$(calc_package_hash)
-  saved=$(cat "$DIR/.package_hash" 2>/dev/null || echo "")
-  [ "$current" != "$saved" ]
-}
 
 # Versioni minime consigliate delle dipendenze esterne. Se un collega ha già una
 # versione >= di questa, lo script NON reinstalla e NON si blocca: va avanti.

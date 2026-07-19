@@ -90,4 +90,30 @@ describe('detectOutcomeFromText', () => {
     const o = detectOutcomeFromText('Punteggio: 10/30');
     assert.equal(o.passed, false);
   });
+
+  // Snippet da scrape live piattaforma (Alessio / corsi GSD).
+  it('snippet live: superato al 9° tentativo Voto finale 24/30', () => {
+    const body =
+      'Questionario superato! Complimenti, hai compilato e superato il questionario al 9° tentativo. Voto finale 24 / 30 Storico tentativi effettuati';
+    const o = detectOutcomeFromText(body);
+    assert.equal(o.passed, true);
+    assert.ok(o.score);
+    assert.equal(o.score.got, 24);
+    assert.equal(o.score.total, 30);
+    assert.equal(o.score.pct, 80);
+  });
+
+  it('snippet live: superato 27/30 e 30/30', () => {
+    assert.equal(detectOutcomeFromText('Pagina di esito: superato (27/30)').passed, true);
+    const o = detectOutcomeFromText('Questionario superato! Voto finale 30/30');
+    assert.equal(o.passed, true);
+    assert.equal(o.score.got, 30);
+  });
+
+  it('snippet live: non superato con punteggio basso', () => {
+    const o = detectOutcomeFromText('Questionario non superato. Punteggio: 12/30. Da ripetere.');
+    assert.equal(o.failed, true);
+    assert.ok(!o.passed);
+    assert.equal(o.score.got, 12);
+  });
 });

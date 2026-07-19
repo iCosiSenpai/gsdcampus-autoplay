@@ -175,21 +175,17 @@ node scripts/harvest-answers.js --reconcile --reset
 - [x] Evento ended + near-end poll.
 - [x] Test pure.
 
-## STEP 3.2 — Less waitForTimeout in video/corso
+## STEP 3.2 — Less waitForTimeout in video/corso ✅ DONE (2026-07-19)
 
 **Lavoro:** costanti in `platform.js` (`PROGRESS_PERSIST_MS=8000`, …); dove possibile `waitForSelector` / `waitForURL`.
 
-**Done:** elenco costanti centrali; meno magic number sparsi (non zero timeout: alcuni restano per latenza piattaforma).
+**Done**
+- [x] Costanti in `platform.js` + wiring autoplay/login-flow/quiz/course-runner.
 
-## STEP 3.3 — Lezioni non-video (PDF / scorm / testo)
+## STEP 3.3 — Lezioni non-video (PDF / scorm / testo) ✅ DONE (2026-07-19)
 
-**Lavoro:** da scrape/exploration, classificare tipi lezione; se esistono senza `<video>`, oggi possono restare stuck.
-
-1. Probe su corsi Alessio: quante lezioni senza video.
-2. Handler: “segna fruizione” / scroll / bottone completa se presente.
-3. Se impossibile: `stuckUrls` + need_help con reason chiara.
-
-**Done:** inventory + handler o need_help esplicito (niente loop silenzioso).
+**Done**
+- [x] `handleNonVideoLesson` in `course-runner.js` (completa/PDF → skip esplicito dopo 3 tentativi).
 
 ---
 
@@ -211,63 +207,59 @@ Solo se 4.1 mostra falsi miss:
 - normalizzazione sinonimi (“secondo le fonti”…)
 - embedding opzionale (Ollama) **solo** come suggerimento, mai auto-promote
 
-## STEP 4.3 — Share robusto oltre 50 entry
+## STEP 4.3 — Share robusto oltre 50 entry ✅ DONE (2026-07-19)
 
-Oggi share manda max 50.  
-**Lavoro:** chunk multipli in `answers-share` / Worker; o `share --all` a batch.
+**Done**
+- [x] `chunkEntries` + multi-POST; `share --all` senza cap 50.
 
-## STEP 4.4 — Outcome quiz: storico tentativi
+## STEP 4.4 — Outcome quiz: storico tentativi ✅ DONE (2026-07-19)
 
-**Evidenza live:** “superato al 9° tentativo… Voto finale 24/30”.  
-Verificare `extractScore` + `detectOutcomeFromText` su snippet reale (aggiungere test da bodySnippet live).
+**Done**
+- [x] Test snippet live “9° tentativo… 24/30” in `quiz-outcome.test.js`.
 
 ---
 
 # FASE 5 — Architettura codice (P1/P2)
 
-## STEP 5.1 — Split `course-runner` da autoplay
+## STEP 5.1 — Split `course-runner` da autoplay ✅ DONE (2026-07-19)
 
-Come da assessment B esteso:
-- `src/lib/course-runner.js` ← `runCourse`, `getLessonProgress…`
-- `autoplay.js` ← solo login, discover, loop corsi, exit codes
+**Done**
+- [x] `src/lib/course-runner.js` + autoplay ~550 LOC.
 
-**Done:** autoplay < ~600 LOC; stessi test behavior; no change exit codes.
+## STEP 5.2 — Split quiz-solve / quiz-handoff ✅ DONE (2026-07-19)
 
-## STEP 5.2 — Split quiz-solve / quiz-handoff
+**Done**
+- [x] `quiz-bank.js`, `quiz-handoff.js`, `quiz-outcome.js`; `quiz.js` re-export + solve.
 
-- `quiz-solve.js`, `quiz-handoff.js`, `quiz-bank.js`  
-- `quiz.js` thin re-export
+## STEP 5.3 — Usare `selectors.js` nei call-site ✅ DONE (2026-07-19)
 
-## STEP 5.3 — Usare `selectors.js` nei call-site
+**Done**
+- [x] Quiz form/options + course/lesson link helpers in course-runner.
 
-Migrare stringhe hardcode gradualmente (quiz form, course links) → un solo posto se la piattaforma cambia skin.
+## STEP 5.4 — setup.sh modular ✅ DONE (parziale 2026-07-19)
 
-## STEP 5.4 — setup.sh modular
-
-`scripts/setup/{deps,ollama,config,whoareyou}.sh` sourced.
+**Done**
+- [x] `scripts/setup/package-hash.sh` sourced da setup + check-requirements.
+- [ ] Split completo deps/ollama/whoareyou (follow-up).
 
 ---
 
 # FASE 6 — Multi-membro & fleet (P2)
 
-## STEP 6.1 — Coda multi-CF su un Mac
+## STEP 6.1 — Coda multi-CF su un Mac ✅ DONE (2026-07-19)
 
-```text
-config.memberQueue: [CF1, CF2, …]
-scheduler: a fine corsi o fine turno → set-active next → restart autoplay
-```
-
-**Done:** 2 account di test completano in sequenza senza intervento.
+**Done**
+- [x] `member-queue.js` + advance su AllCoursesNeedHelpExit; `config.memberQueue`.
 
 ## STEP 6.2 — Dashboard aggregata utile
 
 - `dashboard-cli` già esiste: aggiungere “eta ultimo run”, “ultima phase”, “n need_help”.
 - Export CSV per referente.
 
-## STEP 6.3 — Metrics aggregate opzionali (privacy)
+## STEP 6.3 — Metrics aggregate opzionali (privacy) ✅ DONE (2026-07-19)
 
-Worker `POST /metrics` batch settimanale: solo conteggi phase, **no** CF.  
-Rate-limit + opt-in `config.shareMetrics: true`.
+**Done**
+- [x] Worker `POST /metrics` + `metrics-cli share` + opt-in `shareMetrics`.
 
 ---
 
@@ -296,15 +288,14 @@ provare `channel: chrome` quando disponibile; stealth init script già in explor
 
 Allineare messaggi setup: “Chrome consigliato, Chromium ok”.
 
-## STEP 8.2 — Release pin
+## STEP 8.2 — Release pin ✅ DONE (docs 2026-07-19)
 
-- Tag `v1.1.0` su commit A–D  
-- `PINNED_TAG` documentato per store che vogliono freeze  
-- Checksum opzionale
+- [x] `PINNED_TAG` documentato in `docs/SECURITY-MEMBERS.md` (+ install.sh già supportato)
+- [ ] Tag `v1.1.0` quando il maintainer decide il freeze
 
-## STEP 8.3 — members.db audit
+## STEP 8.3 — members.db audit ✅ DONE (2026-07-19)
 
-Cosa contiene (token?); se token in git → **fuori git** o cifrati; documentare consenso.
+- [x] Audit in `docs/SECURITY-MEMBERS.md` (token, gitignore, 0600, consenso)
 
 ## STEP 8.4 — Rotazione KEY / PAT
 

@@ -14,12 +14,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          # Allineato a engines.node (>=22); 24 = Active LTS recente su Actions.
+          node-version: '24'
 
       # dev-check.sh è zsh (come il resto del progetto macOS).
       - name: Install zsh
         run: sudo apt-get update && sudo apt-get install -y zsh
 
-      # Pure unit tests + sintassi: non serve npm install / Playwright.
+      # Pure unit tests + sintassi: non serve npm install / Playwright
+      # (browser.js lazy-require playwright).
       - name: Run dev-check
         run: zsh ./scripts/dev-check.sh

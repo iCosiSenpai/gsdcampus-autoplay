@@ -30,11 +30,27 @@ function looksLikePii(s) {
 }
 
 /**
+ * Partiziona un oggetto in chunk da al più `size` chiavi (ordine Object.entries).
+ * Pure. Usato per POST multipli quando la banca supera MAX_ENTRIES.
+ */
+function chunkEntries(obj, size = MAX_ENTRIES) {
+  const n = Math.max(1, size | 0);
+  const entries = Object.entries(obj || {});
+  const chunks = [];
+  for (let i = 0; i < entries.length; i += n) {
+    chunks.push(Object.fromEntries(entries.slice(i, i + n)));
+  }
+  return chunks.length ? chunks : [{}];
+}
+
+/**
  * Filtra e valida un oggetto domanda→risposta.
  * Ritorna { ok: {q:a,...}, skipped: n, errors: string[] }.
  * Pure: usata dai test e dal client prima del POST.
+ * @param {{ truncate?: boolean }} opts — se truncate=false non taglia a MAX_ENTRIES
+ *   (usare con chunkEntries per multi-POST).
  */
-function validateAnswersPayload(answers) {
+function validateAnswersPayload(answers, { truncate = true } = {}) {
   const ok = {};
   const errors = [];
   let skipped = 0;
@@ -42,10 +58,11 @@ function validateAnswersPayload(answers) {
     return { ok: {}, skipped: 0, errors: ['answers must be a plain object'] };
   }
   const entries = Object.entries(answers);
-  if (entries.length > MAX_ENTRIES) {
+  if (truncate && entries.length > MAX_ENTRIES) {
     errors.push(`too many entries (${entries.length} > ${MAX_ENTRIES}); truncating`);
   }
-  for (const [rawQ, rawA] of entries.slice(0, MAX_ENTRIES)) {
+  const slice = truncate ? entries.slice(0, MAX_ENTRIES) : entries;
+  for (const [rawQ, rawA] of slice) {
     const q = String(rawQ || '').trim();
     const a = String(rawA || '').trim();
     if (!q || !a) { skipped++; continue; }
@@ -158,21 +175,49 @@ async function shareAnswersToRemote(answersObj) {
   if (!key) {
     return { ok: false, error: 'no_key' };
   }
-  const { ok: clean, skipped, errors } = validateAnswersPayload(answersObj);
+  // Non truncare: spezziamo in chunk da MAX_ENTRIES e facciamo N POST.
+  const { ok: clean, skipped, errors } = validateAnswersPayload(answersObj, { truncate: false });
   const n = Object.keys(clean).length;
   if (n === 0) {
     return { ok: false, error: 'no_valid_answers', skipped, detail: errors.join('; ') || undefined };
   }
-  const res = await postJson(endpoint, { key, answers: clean });
-  if (res.ok) {
-    return { ...res, skipped, localValid: n };
+  const chunks = chunkEntries(clean, MAX_ENTRIES);
+  let added = 0;
+  let total = null;
+  let lastMsg = null;
+  for (let i = 0; i < chunks.length; i++) {
+    const res = await postJson(endpoint, { key, answers: chunks[i] });
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: res.error,
+        detail: res.detail,
+        skipped,
+        localValid: n,
+        chunks: chunks.length,
+        chunksOk: i,
+        added,
+      };
+    }
+    added += res.added != null ? res.added : 0;
+    if (res.total != null) total = res.total;
+    lastMsg = res.message || lastMsg;
   }
-  return { ...res, skipped, localValid: n };
+  return {
+    ok: true,
+    added,
+    total,
+    message: lastMsg,
+    skipped,
+    localValid: n,
+    chunks: chunks.length,
+  };
 }
 
 module.exports = {
   validateAnswersPayload,
   mergeAnswersAdditive,
+  chunkEntries,
   shareAnswersToRemote,
   getShareEndpoint,
   getShareKey,

@@ -204,13 +204,13 @@ if (cmd === 'stats') {
     for (const [q, a] of Object.entries(known)) {
       if (String(q).startsWith('README')) continue;
       payload[q] = a;
-      if (++n >= 50) break;
+      n++;
     }
     if (n === 0) {
       console.log('Banca trusted vuota: niente da condividere.');
       process.exit(0);
     }
-    console.log(`Preparo share --all di ${n} risposte trusted (max 50)...`);
+    console.log(`Preparo share --all di ${n} risposte trusted (chunk da 50)...`);
   } else {
     console.log('Nessuna nuova risposta locale da condividere (banca pubblica già allineata).');
     console.log('Per ritentare l\'invio remoto: node scripts/lib/answers-cli.js share --all');
@@ -221,7 +221,8 @@ if (cmd === 'stats') {
       if (res.added === 0) {
         console.log('Receiver: nessuna voce nuova sul remoto (già presenti). ok.');
       } else {
-        console.log(`Receiver: +${res.added} risposte committate su main (totale banca ~${res.total != null ? res.total : '?'}).`);
+        const ch = res.chunks && res.chunks > 1 ? ` in ${res.chunks} chunk` : '';
+        console.log(`Receiver: +${res.added} risposte committate su main${ch} (totale banca ~${res.total != null ? res.total : '?'}).`);
         console.log('I colleghi le riceveranno al prossimo "Aggiorna e avvia".');
       }
       process.exit(0);
