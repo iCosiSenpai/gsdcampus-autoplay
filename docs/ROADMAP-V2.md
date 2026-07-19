@@ -96,18 +96,14 @@ Ogni **STEP** è un “ticket” autonomo: obiettivo, lavoro, test, done, rischi
 
 ---
 
-## STEP 1.3 — Parsing % dashboard robusto
+## STEP 1.3 — Parsing % dashboard robusto ✅ DONE (2026-07-19)
 
-**Problema live:** per ogni corso il link “Apri” non porta % nel closest; il titolo e “150 ore / 100%” stanno altrove nella card.
-
-**Lavoro**
-1. In `discoverCourses` / census (harvest + autoplay): salire a `.card` intera, non al solo bottone.
-2. Fallback: regex su `card.innerText` per `(\d+[.,]?\d*)\s*%` e titolo (prima riga lunga).
-3. Fixture HTML da dump live (redatto) in `test/fixtures/dashboard-card.snippet.html` + test pure se estrazione è pure function.
+**Problema:** census usava `(aria-label || style).match(%)` ma aria è la ditta → pct null.  
+**Soluzione:** `src/lib/dashboard-parse.js` legge `style width: N%` prima; census + discoverCourses.
 
 **Done**
-- [ ] Census riporta % coerenti con pagina corso per Alessio (7 corsi, 4×100% attesi al 17/07 — rivalidare live).
-- [ ] Test fixture: da HTML sample → 7 id + almeno alcune %.
+- [x] Fixture + test 100 / 30.51 / 0.
+- [x] Live dump Alessio: 4×100, 18387≈30.51, 2×0.
 
 ---
 

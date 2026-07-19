@@ -17,6 +17,7 @@ const {
   acceptInformativa,
   acceptUsageDeclaration,
 } = require('./lib/login-flow');
+const { collectCoursesFromDom, enrichCourseRows } = require('./lib/dashboard-parse');
 
 // Finalizza lo stato su disco a fine run: dashboard aggregata + inbox unico
 // dell'AI (logs/ai_todo.json). Non lancia mai.
@@ -784,23 +785,20 @@ async function runAutoplay() {
               await page.waitForTimeout(500);
             }
             await page.waitForTimeout(2000);
-            const links = await page.evaluate(() => {
-              const seen = new Set();
-              return [...document.querySelectorAll('a[href*="/corso/show/"]')]
-                .map(a => a.href)
-                .filter(href => {
-                  const id = href.match(/\/corso\/show\/(\d+)/)?.[1];
-                  if (!id || seen.has(id)) return false;
-                  seen.add(id);
-                  return true;
-                });
-            });
+            // Card + progress-bar style width (stesso parser del census).
+            const rawCards = await page.evaluate(collectCoursesFromDom);
+            const discovered = enrichCourseRows(rawCards);
+            const links = discovered.map(c => c.url);
             const fresh = links.filter(url => !courseState.isCourseDoneOrNeedHelp(state, url));
             if (fresh.length === 0 && links.length > 0) {
               log('Tutti i corsi scoperti risultano completati o bloccati.');
             }
             if (fresh.length > 0) {
-              log(`Trovati ${fresh.length} corsi attivi su ${links.length} totali.`);
+              const pctHint = discovered
+                .filter(c => fresh.includes(c.url))
+                .map(c => `#${c.courseId}${c.pct != null ? ' ' + c.pct + '%' : ''}`)
+                .join(', ');
+              log(`Trovati ${fresh.length} corsi attivi su ${links.length} totali${pctHint ? ` (${pctHint})` : ''}.`);
               return fresh;
             }
             if (links.length > 0) {

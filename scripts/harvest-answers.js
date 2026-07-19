@@ -32,6 +32,7 @@ const courseState = require('../src/lib/course-state');
 const { writeAiTodo } = require('../src/lib/ai-todo');
 const db = require('../src/lib/db');
 const { launchBrowser } = require('../src/lib/browser');
+const { collectCoursesFromDom, enrichCourseRows } = require('../src/lib/dashboard-parse');
 
 const ROOT = path.resolve(__dirname, '..');
 const MAX_STEPS = 60;   // tetto di sicurezza sul numero di domande sfogliate
@@ -224,23 +225,10 @@ async function questionnaireStatus(page, quizUrl) {
 // pagina, niente navigazione per-corso). Scrive logs/course_census.json.
 async function census(page, config) {
   const state = courseState.readState(ROOT);
-  const courses = await page.evaluate(() => {
-    const out = [];
-    document.querySelectorAll('.card').forEach(card => {
-      const link = card.querySelector('a[href*="/corso/show/"]');
-      if (!link) return;
-      const titleEl = card.querySelector('.card-title');
-      const title = (titleEl ? titleEl.innerText : '').trim();
-      const bar = card.querySelector('.progress-bar');
-      let pct = null;
-      if (bar) {
-        const m = (bar.getAttribute('aria-label') || bar.getAttribute('style') || '').match(/([\d]+[.,][\d]+|\d+)\s*%/);
-        if (m) pct = parseFloat(m[1].replace(',', '.'));
-      }
-      out.push({ url: link.href, title, pct });
-    });
-    return out;
-  });
+  // collectCoursesFromDom: grezzi dalla .card; enrichCourseRows: pct da style width
+  // (aria-label è la ditta, non la % — v. src/lib/dashboard-parse.js).
+  const raw = await page.evaluate(collectCoursesFromDom);
+  const courses = enrichCourseRows(raw);
 
   const rows = courses.map(c => {
     const cs = courseState.getCourse(state, c.url);
