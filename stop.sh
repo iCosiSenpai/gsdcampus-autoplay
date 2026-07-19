@@ -111,6 +111,11 @@ fi
 # Rimuovi il segnale di stop se ancora presente
 rm -f "$DIR/$STOP_FILE"
 
+# Status: forza running=false / phase stopped se erano rimasti "in corso"
+if [ -f "$DIR/scripts/lib/status-cli.js" ]; then
+  node "$DIR/scripts/lib/status-cli.js" reconcile --force-stopped >/dev/null 2>&1 || true
+fi
+
 echo ""
 ui_hr
 ok "${GREEN}${BOLD}Autoplay fermato${NC}"

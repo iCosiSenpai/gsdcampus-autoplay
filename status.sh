@@ -114,6 +114,15 @@ fi
 echo ""
 info "Stato runtime"
 
+# Riconcilia running/phase orfani (processo morto ma status ancora "in corso").
+# Idempotente se lo scheduler/autoplay è davvero vivo.
+if [ -f "$DIR/scripts/lib/status-cli.js" ]; then
+  REC_OUT=$(node "$DIR/scripts/lib/status-cli.js" reconcile 2>/dev/null || true)
+  if printf '%s\n' "$REC_OUT" | grep -c 'riconciliato' >/dev/null 2>&1; then
+    info "Status allineato: nessun processo attivo (running/phase corretti)."
+  fi
+fi
+
 # Fase salvata e freschezza dello status.json: se il file è vecchio (nessun
 # aggiornamento da minuti) significa che descrive un run ORMAI TERMINATO, non lo
 # stato attuale. Senza questa distinzione si rischia di riportare all'utente un

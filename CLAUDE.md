@@ -60,7 +60,7 @@ Sei stato aperto per portare avanti in autonomia il corso e-learning GSD Campus.
 ## Comandi a disposizione
 
 - `./scripts/prepare-package.sh --yes --zip` — crea sul Desktop una copia pulita del progetto e uno zip da dare a un collega (rimuove dati personali, log, pid, config.json personale).
-- `./status.sh` — vedi stato attuale, log, heartbeat, orario configurato, prossimo turno.
+- `./status.sh` — vedi stato attuale, log, heartbeat, orario configurato, prossimo turno. **Riconcilia** da solo `logs/status.json` se `running:true` ma nessun processo è vivo (niente corse fantasma).
 - `./start.sh` — avvia scheduler autoplay in background headless (rispetta gli orari di lavoro: si ferma a fine turno e riparte automaticamente all'inizio del successivo).
 - `./start.sh --ignore-hours` — avvia subito ignorando gli orari di lavoro.
 - `./stop.sh` — ferma autoplay e scheduler.

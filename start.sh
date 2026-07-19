@@ -76,6 +76,10 @@ if [ -f "$PID_FILE" ]; then
 else
   ok "Nessuna istanza attiva."
 fi
+# Pulisce status.json se un run precedente ha lasciato running:true orfano.
+if [ -f "$DIR/scripts/lib/status-cli.js" ]; then
+  node "$DIR/scripts/lib/status-cli.js" reconcile >/dev/null 2>&1 || true
+fi
 # Lock atomica anti-doppio-avvio: noclobber crea il PID file solo se non esiste,
 # in modo esclusivo. Previene che due start.sh lanciati in rapida successione
 # passino entrambi il check "nessuna istanza" e avviino due scheduler concorrenti.

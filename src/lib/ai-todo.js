@@ -26,7 +26,9 @@ function buildAiTodo(root) {
     const ms = Date.now() - new Date(status.lastUpdate).getTime();
     if (Number.isFinite(ms)) statusAgeMin = Math.floor(ms / 60000);
   }
-  const statusStale = statusAgeMin != null && statusAgeMin > 3 && !status.running;
+  // Stale se lastUpdate > 3 min: anche con running:true orfano (status-reconcile
+  // lo corregge in status.sh/stop; qui segnaliamo comunque all'AI).
+  const statusStale = statusAgeMin != null && statusAgeMin > 3;
 
   // Richieste quiz aperte (per l'account attivo).
   let openQuizRequests = 0;
@@ -47,6 +49,9 @@ function buildAiTodo(root) {
 
   // Costruisci le azioni consigliate (in ordine di priorità).
   const actions = [];
+  if (statusStale && status.running) {
+    actions.push('status.json dice running ma è vecchio: probabilmente processo morto — ./status.sh riconcilia, o ./stop.sh + ./start.sh.');
+  }
   if (status.phase === 'autologin_invalid') actions.push('Verifica il link autologin con la sonda live (healthcheck-cli.js) prima di concludere che è scaduto.');
   if (openQuizRequests > 0) actions.push(`Risolvi ${openQuizRequests} domanda/e in ai_quiz_request.json con WebSearch/ragionamento, poi answers-cli resolve, poi resetCourse + start.`);
   if (falseDones) actions.push(`${falseDones} corso/i con questionario finale pendente segnato done: sono già stati rimessi in coda (reconcile).`);

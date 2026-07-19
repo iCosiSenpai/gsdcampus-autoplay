@@ -85,18 +85,14 @@ Ogni **STEP** è un “ticket” autonomo: obiettivo, lavoro, test, done, rischi
 
 ---
 
-## STEP 1.2 — Pulizia stato sporchato + guardie status
+## STEP 1.2 — Pulizia stato sporchato + guardie status ✅ DONE (2026-07-19)
 
-**Problema:** smoke `Monitor` ha scritto `courseUrl=…/99`, `phase=quiz`, `running=true` senza processo.
-
-**Lavoro**
-1. `status.sh` / start: se `running=true` ma PID morto → force `running=false`, phase `stopped`.
-2. Script `scripts/lib/status-cli.js reset-stale` o integrare in `stop.sh`.
-3. Non scrivere status da test se non in tmp dir (test Monitor già usano cwd — fix test/metrics per usare tmp root).
+**Problema:** `running:true` / phase video|quiz orfani senza processo.  
+**Soluzione:** `src/lib/status-reconcile.js` + `status-cli reconcile`; wired in status/stop/start.
 
 **Done**
-- [ ] Dopo `./stop.sh` o `status.sh`, niente `running=true` orfano.
-- [ ] Test Monitor non sporca `logs/status.json` del progetto.
+- [x] Dopo status/stop, niente `running=true` orfano.
+- [x] Test pure `test/status-reconcile.test.js`.
 
 ---
 
