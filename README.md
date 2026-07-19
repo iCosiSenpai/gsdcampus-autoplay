@@ -133,8 +133,11 @@ cd ~/gsdcampus-autoplay && rm -f config.json && ./scripts/setup.sh && ./launch-a
 ./scripts/uninstall.sh                  # rimuove dipendenze, modelli, CLI e progetto (conferma)
 ./scripts/prepare-package.sh --yes      # crea sul Desktop copia pulita per un collega
 ./scripts/prepare-package.sh --yes --zip # ...e anche lo zip
-./scripts/dev-check.sh                  # controlli statici pre-push (sintassi + lint anti-SIGPIPE)
-./scripts/doctor.sh [--full]            # checkup a semaforo (con --full verifica anche il link autologin)
+./scripts/dev-check.sh                  # controlli pre-push (sintassi + lint anti-SIGPIPE + test unitari)
+npm test                                # solo test unitari (node:test, pure functions, no browser)
+./scripts/doctor.sh [--full]            # checkup a semaforo (selettori DOM + con --full sonda autologin)
+node scripts/lib/metrics-cli.js summary # metriche phase ultime 24h (logs/metrics.jsonl, no dati personali)
+node scripts/lib/selector-probe.js      # verifica marker DOM critici sulle fixture
 # CHANGELOG.md: aggiungere una sezione "## data" con bullet semplici a ogni push
 # rilevante — il curl mostra le righe nuove nel box "Novità" dopo l'update.
 
@@ -197,7 +200,7 @@ I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i tu
 
 ## Quiz e banca risposte condivisa
 
-- La **banca risposte condivisa** vive su due livelli: `data/known_answers.json` è la banca **TRUSTED locale** (per-Mac, non committata — cresce con le risposte verificate che l'autoplay scopre su quella macchina); `data/known_answers_public.json` è la banca **condivisa committata** nel repo, uguale per tutti i colleghi, da cui i nuovi install si seedano e che l'aggiornamento scarica e mergia nel file locale. Cresce solo con risposte verificate — dalla piattaforma (scrape post-quiz delle risposte corrette) o dall'AI supervisore (ricerca online + ragionamento). I tentativi di Ollama **non** vengono mai promossi automaticamente (restano per-account in `pending_quiz_answers.json`): così un quiz superato al 24/30 = 80% non inserisce più risposte sbagliate nella banca condivisa di tutta la classe. Il manutentore pubblica le nuove risposte verificate con `node scripts/lib/answers-cli.js publish` (poi commit+push).
+- La **banca risposte condivisa** vive su due livelli: `data/known_answers.json` è la banca **TRUSTED locale** (per-Mac, non committata — cresce con le risposte verificate che l'autoplay scopre su quella macchina); `data/known_answers_public.json` è la banca **condivisa committata** nel repo, uguale per tutti i colleghi, da cui i nuovi install si seedano e che l'aggiornamento scarica e mergia nel file locale. Cresce solo con risposte verificate — dalla piattaforma (scrape post-quiz delle risposte corrette) o dall'AI supervisore (ricerca online + ragionamento). I tentativi di Ollama **non** vengono mai promossi automaticamente (restano per-account in `pending_quiz_answers.json`): così un quiz superato al 24/30 = 80% non inserisce più risposte sbagliate nella banca condivisa di tutta la classe. La distribuzione ai colleghi **non richiede git push**: `./scripts/publish-answers.sh` invia le risposte al Cloudflare Worker del manutentore, che le unisce (solo aggiunte, mai sovrascritture) e le committà su `main`.
 - Se una domanda non è in banca, lo script chiede a Ollama (modello configurabile in `config.json` tramite `ollamaModel`) con **few-shot** (esempi verificati) + **self-consistency** (3 campionamenti + voto a maggioranza). Per monitor/autoplay il modello cloud più economico e sufficiente per quiz in italiano è `gemma4:cloud`.
 - Le domande sconosciute o a bassa confidenza finiscono in `data/accounts/<CF>/ai_quiz_request.json` (con i tentativi di Ollama e la confidenza): l'AI supervisore le risolve e scrive la risposta verificata nella banca TRUSTED. L'esito (superato/non superato + punteggio) finisce in `logs/status.json` (`lastQuizResult`) ed è mostrato da `./status.sh`.
 - Se Ollama non sa rispondere, il quiz si ferma e salva la domanda in `data/accounts/<CF>/need_answer.json` + `ai_quiz_request.json`.

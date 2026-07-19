@@ -1,8 +1,11 @@
 # Configurazione Cloudflare Worker per il receiver delle issue.
 # Deploy:  cd worker && wrangler deploy
 #
-# ISSUE_TOKEN è un SECRET (il PAT GitHub issues:write del maintainer): impostalo
-# con  wrangler secret put ISSUE_TOKEN   (incolla il PAT quando te lo chiede).
+# ISSUE_TOKEN è un SECRET (PAT fine-grained del maintainer): impostalo con
+#   wrangler secret put ISSUE_TOKEN
+# Scope sulla sola repo iCosiSenpai/gsdcampus-autoplay:
+#   • Issues: Read and write   (POST /report)
+#   • Contents: Read and write (POST /answers → known_answers_public.json)
 # NON scriverlo mai qui dentro — wrangler.toml è committato nella repo PUBBLICA.
 #
 # KEY è una chiave NON-segreta: filtra solo i bot più trivial. È pubblica (sta

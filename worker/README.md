@@ -1,94 +1,85 @@
-# Receiver delle issue (Cloudflare Worker)
+# Receiver Cloudflare Worker (issue + banca risposte)
 
-Questo Worker riceve le segnalazioni di bug che l'AI supervisore dei colleghi
-non riesce a risolvere in loco e le trasforma in **issue GitHub** sulla repo del
-maintainer (`iCosiSenpai/gsdcampus-autoplay`).
+Questo Worker serve **due** canali, attivi per tutti i colleghi senza token GitHub
+sul Mac:
 
-Perché serve: per rendere la segnalazione **attiva per tutti** gli utenti che
-installano via curl — senza che il maintainer distribuisca un token a ciascuno —
-il PAT GitHub dovrebbe stare nel pacchetto pubblico. Ma GitHub **blocca il push**
-di un PAT in una repo pubblica (push protection) e **lo auto-revoca** in pochi
-minuti (secret scanning). Quindi il PAT resta **segreto lato Worker**
-(`ISSUE_TOKEN`); il pacchetto pubblico contiene solo l'**endpoint URL** + una
-**chiave non-segreta**. L'AI dei colleghi fa HTTP POST del draft già redatto →
-il Worker apre l'issue. Nessun token sui Mac dei colleghi, nessun account GitHub.
+| Route | Uso |
+|-------|-----|
+| `POST /` o `POST /report` | L'AI apre una **issue** GitHub (bug codice/infra) |
+| `POST /answers` | L'AI **pubblica risposte quiz** verificate → commit su `data/known_answers_public.json` |
+
+Perché serve: GitHub **blocca** i PAT in repo pubbliche (push protection + secret
+scanning). Il PAT resta **segreto lato Worker** (`ISSUE_TOKEN`); il pacchetto
+contiene solo endpoint URL + chiave non-segreta (`KEY`).
 
 ## Deploy (una volta, ~10 min, gratuito)
 
-Prerequisiti: Node.js + npm. Poi:
-
 ```bash
-# 1. Wrangler (CLI di Cloudflare). Puoi usare npx invece di installarlo globalmente.
-npm install -g wrangler        # oppure:  npx wrangler ...
-
-# 2. Login Cloudflare (una volta, apre il browser). Serve un account Cloudflare
-#    gratuito (non serve carta di credito per il Workers free tier).
+npm install -g wrangler   # oppure npx wrangler ...
 wrangler login
-
-# 3. Deploya il Worker da questa cartella.
 cd worker
 wrangler deploy
-#    → stampa l'URL del Worker, es:
-#      https://gsd-issue-report.<tuo-account>.workers.dev
+# → es. https://gsd-issue-report.<account>.workers.dev
 
-# 4. Imposta il PAT GitHub come SECRET (mai nel repo).
 wrangler secret put ISSUE_TOKEN
-#    → incolla il fine-grained PAT (scope Issues: Read and write, solo la repo
-#      iCosiSenpai/gsdcampus-autoplay). Viene conservato come secret Cloudflare.
+# → fine-grained PAT GitHub con SOLO sulla repo iCosiSenpai/gsdcampus-autoplay:
+#      • Issues: Read and write
+#      • Contents: Read and write   ← necessario per POST /answers
 ```
 
-## Attiva la segnalazione per tutti i colleghi
+### Attiva per tutti
 
-Dopo il deploy, l'URL del Worker va **committato** nel pacchetto pubblico così
-ogni collega lo ha di default:
+1. URL del deploy → `DEFAULT_ENDPOINT` in `scripts/lib/receiver-config.js`
+2. `KEY` in `wrangler.toml` = `DEFAULT_KEY` in `receiver-config.js`
+3. Commit + push su `main` + `wrangler deploy` dopo ogni cambio Worker
 
-1. Copia l'URL stampato da `wrangler deploy` (es. `https://gsd-issue-report.<account>.workers.dev`).
-2. Incollalo in `DEFAULT_ISSUE_ENDPOINT` in `scripts/lib/issue-report.js`
-   (sostituisci la stringa vuota `''`).
-3. Verifica che `DEFAULT_ISSUE_KEY` in `issue-report.js` corrisponda a `KEY` in
-   `wrangler.toml` (il default già allineato: `gsd-autoplay-report-key-2026-7f3a9c`).
-4. Commit + push su `main`. Da quel momento la segnalazione è attiva per tutti.
-
-## Test
+## Test issue
 
 ```bash
-cd ~/gsdcampus-autoplay
 node scripts/lib/issue-report.js draft "test_receiver"
-# controlla il draft (nessun CF / autologin URL / token), poi:
 node scripts/lib/issue-report.js send
-# → "Issue creata: https://github.com/iCosiSenpai/gsdcampus-autoplay/issues/<n>"
 ```
 
-Chiudi subito l'issue di test. Se il `send` refusa con "github_token" → il PAT
-del Worker non è valido o senza scope `issues:write`: ruotalo con
-`wrangler secret put ISSUE_TOKEN`. Se refusa con "bad_key" → `KEY` nel Worker e
-`DEFAULT_ISSUE_KEY` nel modulo non coincidono.
+## Test answers (share senza git push)
 
-## (Opzionale) Label `auto-report`
+```bash
+# Dopo aver aggiunto risposte trusted (resolve) e allineato la public locale:
+node scripts/lib/answers-cli.js share
+# oppure l'AI lancia:
+./scripts/publish-answers.sh
 
-Il Worker cerca di mettere la label `auto-report`; se non esiste (GitHub 422)
-ritenta senza label. Per crearla (così le issue sono etichettate e filtrabili):
-GitHub → repo → Issues → Labels → New label `auto-report` (colore a piacere).
+# Curl manuale:
+curl -sS -X POST "$ENDPOINT/answers" \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"gsd-autoplay-report-key-2026-7f3a9c","answers":{"Domanda di test share?":"Risposta di test"}}'
+```
 
-## (Opzionale) Rate limiting anti-spam
+Esiti utili:
+- `github_token` → PAT senza Contents:write (o Issues:write): ruota `ISSUE_TOKEN`
+- `bad_key` → KEY non allineata
+- `ok: true, added: 0` → voci già in banca (noop, corretto)
+- `ok: true, added: N` → commit su `main`; i colleghi le prendono con "Aggiorna e avvia"
 
-Endpoint e chiave sono pubblici: chiunque legga la repo può POSTare. Il volume è
-basso (l'AI chiede conferma umana prima di spedire), ma per blindare lo spam:
-Cloudflare dashboard → Security → WAF → Rate limiting rules → una regola sulla
-route `gsd-issue-report.*.workers.dev` / `*` con soglia es. 5 req/minuto per IP
-→ action "Block".
+## Comportamento merge risposte
+
+- **Solo additivo**: non sovrascrive mai una domanda già presente
+- Max 50 entry/request, limiti lunghezza, scarta PII (CF/autologin/PAT)
+- Retry su conflitto SHA (409) fino a 3 volte
+
+## Rate limiting (consigliato)
+
+Cloudflare → Security → WAF → Rate limiting su `gsd-issue-report.*.workers.dev`:
+es. 10 req/min per IP su `/answers`, 5/min su `/report`.
 
 ## Rotazione
 
-- **PAT compromesso/scaduto**: `wrangler secret put ISSUE_TOKEN` (rimpiazza).
-- **Chiave**: cambia `KEY` in `wrangler.toml` + `DEFAULT_ISSUE_KEY` in
-  `issue-report.js`, poi `wrangler deploy` + commit + push.
+- **PAT**: `wrangler secret put ISSUE_TOKEN`
+- **KEY**: cambia in `wrangler.toml` + `scripts/lib/receiver-config.js`, deploy + commit
 
-## Cos'è pubblico e cos'è segreto
+## Cos'è pubblico / segreto
 
 | Item | Dove | Pubblico? |
-|---|---|---|
-| Codice Worker (`issue-receiver.js`, `wrangler.toml`) | repo `worker/` | sì |
-| Endpoint URL del Worker | `issue-report.js` `DEFAULT_ISSUE_ENDPOINT` | sì |
-| `KEY` (chiave non-segreta) | `wrangler.toml` + `issue-report.js` | sì |
-| `ISSUE_TOKEN` (PAT GitHub) | Cloudflare secret (`wrangler secret`) | **NO** |
+|------|------|-----------|
+| Codice Worker | `worker/` | sì |
+| Endpoint + KEY | `receiver-config.js` + `wrangler.toml` | sì |
+| `ISSUE_TOKEN` | Cloudflare secret | **NO** |

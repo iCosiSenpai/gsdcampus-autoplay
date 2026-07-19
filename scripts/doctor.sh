@@ -105,7 +105,16 @@ else
   chk_err "Configurazione mancante o non valida" "rilancia il comando curl (fa partire il setup guidato)"
 fi
 
-# 8. (--full) Sonda LIVE del link autologin: apre un browser headless.
+# 8. Probe selettori DOM (fixture offline): avvisa se il layout atteso dalla
+# piattaforma non matcha più i marker critici (quiz form, link corsi, …).
+if node "$DIR/scripts/lib/selector-probe.js" >/dev/null 2>&1; then
+  chk_ok "Selettori pagina corso (fixture) allineati"
+else
+  chk_err "Selettori pagina corso non allineati alle fixture" \
+    "la piattaforma potrebbe aver cambiato layout — rilancia il curl per aggiornare, o chiedi all'AI di aprire un'issue"
+fi
+
+# 9. (--full) Sonda LIVE del link autologin: apre un browser headless.
 if [ "$FULL" = true ]; then
   info "Sonda LIVE del link autologin in corso ${DIM}(~30s, fino a 5 min se il link è morto)${NC}..."
   if node "$DIR/scripts/lib/healthcheck-cli.js" >/dev/null 2>&1; then
@@ -116,8 +125,8 @@ if [ "$FULL" = true ]; then
 fi
 
 # Riga finale a semaforo.
-NCHECKS=7
-[ "$FULL" = true ] && NCHECKS=8
+NCHECKS=8
+[ "$FULL" = true ] && NCHECKS=9
 TOTAL_OK=$((NCHECKS - CRIT - WARN))
 [ "$TOTAL_OK" -lt 0 ] && TOTAL_OK=0
 echo ""

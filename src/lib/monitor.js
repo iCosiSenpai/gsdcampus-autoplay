@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { writeJsonAtomic } = require('./io');
 const { redactUrl } = require('./logger');
+const { appendMetric } = require('./metrics');
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -71,9 +72,22 @@ class Monitor {
   }
 
   update(updates) {
+    const prevPhase = this.status.phase;
     Object.assign(this.status, updates);
     this.status.lastUpdate = new Date().toISOString();
     this._write();
+    // Metriche privacy-safe: solo su cambio phase (non a ogni tick 5s).
+    if (updates && updates.phase != null && updates.phase !== prevPhase) {
+      try {
+        appendMetric(this.root, {
+          phase: this.status.phase,
+          courseUrl: this.status.courseUrl,
+          lessonUrl: this.status.lessonUrl,
+          lastQuizResult: this.status.lastQuizResult,
+          uptimeSec: this.status.uptimeSec,
+        });
+      } catch (_) { /* mai bloccante */ }
+    }
   }
 
   async recordError(page, error, context = '') {

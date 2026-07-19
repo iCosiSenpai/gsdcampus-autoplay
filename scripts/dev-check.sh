@@ -4,6 +4,7 @@
 # classi di errore già viste in produzione.
 #
 # Uso:  ./scripts/dev-check.sh        (exit 0 = tutto verde)
+# Alias: npm run dev-check
 set -eu -o pipefail
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,7 +15,7 @@ source "$DIR/scripts/lib/ui.sh"
 FAIL=0
 
 # 1. Sintassi shell (zsh per gli script del progetto, bash per install.sh).
-step "1/3" "Sintassi shell"
+step "1/4" "Sintassi shell"
 for f in *.sh scripts/*.sh scripts/lib/*.sh; do
   [ -f "$f" ] || continue
   if [ "$f" = "install.sh" ]; then
@@ -29,7 +30,7 @@ fi
 [ "$FAIL" -eq 0 ] && ok "Sintassi shell ok."
 
 # 2. Sintassi JavaScript.
-step "2/3" "Sintassi JavaScript"
+step "2/4" "Sintassi JavaScript"
 JS_FAIL=0
 for f in src/*.js src/lib/*.js scripts/*.js scripts/lib/*.js worker/*.js; do
   [ -f "$f" ] || continue
@@ -41,7 +42,7 @@ done
 # Bug visto in produzione (07/2026): grep -q esce al primo match chiudendo la
 # pipe, il comando a sinistra muore di SIGPIPE (141) e sotto pipefail la
 # pipeline fallisce ANCHE col match trovato. Usare 'grep -c PAT >/dev/null'.
-step "3/3" "Lint: grep -q in pipeline sotto pipefail"
+step "3/4" "Lint: grep -q in pipeline sotto pipefail"
 LINT_FAIL=0
 for f in *.sh scripts/*.sh scripts/lib/*.sh; do
   [ -f "$f" ] || continue
@@ -57,6 +58,15 @@ for f in *.sh scripts/*.sh scripts/lib/*.sh; do
   fi
 done
 [ "$LINT_FAIL" -eq 0 ] && ok "Nessun '| grep -q' sotto pipefail."
+
+# 4. Test unitari (node:test, pure functions — niente browser/rete).
+step "4/4" "Test unitari"
+if node --test test/*.test.js; then
+  ok "Test unitari ok."
+else
+  err "Test unitari falliti."
+  FAIL=1
+fi
 
 echo ""
 if [ "$FAIL" -eq 0 ]; then

@@ -167,5 +167,6 @@ module.exports = {
   isCourseDoneOrNeedHelp,
   summarize,
   allDoneOrNeedHelp,
-  resetCourse
+  resetCourse,
+  courseIdFromUrl, // pure; esposto per test unitari
 };

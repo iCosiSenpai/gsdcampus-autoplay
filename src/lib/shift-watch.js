@@ -28,9 +28,12 @@ const EXTRA_TIME_MIN = 15;
 // ri-armato all'infinito → non ci si fermava MAI durante un gap lungo. Con il
 // transizione-edge, durante il gap wasInWork resta false e l'extra-time non si
 // ri-arma: ci si ferma davvero a 15 min dalla vera fine turno.
-function makeShiftChecker() {
+// nowFn / isWorkTimeFn: DI opzionale per i test unitari (clock fake, orario
+// simulato). In produzione si chiama makeShiftChecker() senza argomenti →
+// comportamento identico a prima (Date.now + schedule.isWorkTime).
+function makeShiftChecker({ nowFn = () => Date.now(), isWorkTimeFn = isWorkTime } = {}) {
   let extraTimeUntil = 0; // 0 = nessuna extra-time attiva
-  let wasInWork = isWorkTime(new Date());
+  let wasInWork = isWorkTimeFn(new Date(nowFn()));
 
   // Valuta lo stato di turno. Ritorna:
   //   { inWork, stop, extraTime, extraTimeArmed, end, start, extraTimeUntil }
@@ -41,9 +44,11 @@ function makeShiftChecker() {
   //   (utile per loggarla una volta, non a ogni 30s).
   // - end/start: prossimi confini di turno (per log e monitor).
   function evaluate() {
-    const now = Date.now();
+    const now = nowFn();
     const d = new Date(now);
-    const inWork = isWorkTime(d);
+    const inWork = isWorkTimeFn(d);
+    // nextWorkEnd/Start restano da schedule reale: i test di edge-trigger non
+    // dipendono da end/start, solo da stop/extraTime/extraTimeArmed.
     const end = nextWorkEnd(d);
     const start = nextWorkStart(d);
 

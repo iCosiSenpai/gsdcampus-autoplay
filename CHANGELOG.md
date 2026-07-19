@@ -5,6 +5,13 @@ il comando curl mostra automaticamente le righe nuove di questo file.
 (Per il maintainer: aggiungere una sezione `## data` con bullet brevi a ogni
 push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
+## 2026-07-19
+
+- Lo stato mostra da quanto tempo non si aggiorna (evita di confondere un run vecchio con la situazione attuale); il checkup verifica anche i selettori della piattaforma.
+- Le risposte dei quiz verificate si distribuiscono a **tutti i colleghi anche senza permessi git**: l'AI le invia a un servizio del manutentore che le pubblica per tutti.
+- Codice riorganizzato senza cambiare il comportamento: matching quiz e pagine di login/informativa in moduli separati (più facile da mantenere e testare).
+- Aggiunti test automatici sulle funzioni critiche (quiz, orari, log, stato corsi) e un controllo CI su GitHub: i fix vengono verificati prima di arrivare ai colleghi.
+
 ## 2026-07-17
 
 - Aggiunto un avviso automatico: il sistema ora ti informa se c'è una nuova versione disponibile e ti consiglia di aggiornare.

@@ -46,7 +46,30 @@ if (s.note) lines.push(['Nota', s.note]);
 if (s.lastError) lines.push(['Ultimo errore', s.lastError]);
 if (s.running !== undefined) lines.push(['Running', s.running ? 'sì' : 'no']);
 if (s.startedAt) lines.push(['Avviato alle', s.startedAt]);
-if (s.lastUpdate) lines.push(['Ultimo aggiornamento', s.lastUpdate]);
+if (s.lastUpdate) {
+  lines.push(['Ultimo aggiornamento', s.lastUpdate]);
+  const ageMs = Date.now() - new Date(s.lastUpdate).getTime();
+  if (Number.isFinite(ageMs) && ageMs >= 0) {
+    const ageMin = Math.floor(ageMs / 60000);
+    const ageSec = Math.floor((ageMs % 60000) / 1000);
+    const ageLabel = ageMin >= 1 ? `${ageMin} min` : `${ageSec} s`;
+    lines.push(['Età stato', ageLabel]);
+    // Soglia allineata a ai-todo / monitor-course (3 min).
+    if (ageMin > 3) {
+      if (s.running) {
+        lines.push([
+          'ATTENZIONE',
+          `Stato non aggiornato da ${ageMin} min pur risultando running: processo forse bloccato — controlla i log o riavvia.`,
+        ]);
+      } else {
+        lines.push([
+          'ATTENZIONE',
+          `Stato vecchio (${ageMin} min fa, running=no): NON è la situazione attuale. Lancia ./status.sh o la sonda live se sospetti problemi di accesso.`,
+        ]);
+      }
+    }
+  }
+}
 
 const width = lines.reduce((m, [k]) => Math.max(m, k.length), 0);
 lines.forEach(([k, v]) => console.log('  ' + k.padEnd(width + 2) + v));

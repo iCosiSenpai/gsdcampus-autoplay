@@ -11,7 +11,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test test/*.test.js",
+    "dev-check": "./scripts/dev-check.sh",
     "import-members": "node scripts/import-members.js"
   },
   "dependencies": {
