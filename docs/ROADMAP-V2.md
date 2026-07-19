@@ -166,17 +166,14 @@ node scripts/harvest-answers.js --reconcile --reset
 
 # FASE 3 — Video player & lezioni (P1)
 
-## STEP 3.1 — Contratto video basato su scrape
+## STEP 3.1 — Contratto video basato su scrape ✅ DONE (2026-07-19)
 
-**Evidenza:** Video.js, `vjs-tech`, duration nota, **0** percent DOM utili.
-
-**Lavoro**
-1. Documentare in `video.js` il contratto: truth = `currentTime >= duration - ε` OR ended event; DOM % solo se candidate non-vjs.
-2. Test unitari sulla pure logic di parse % (estrarre funzione da evaluate se possibile).
-3. Opzionale: listen `ended` event oltre al poll 30s (più reattivo fine video).
+**Soluzione:** helper pure + flag `ended` su window + poll 2s negli ultimi 10s; test `test/video.test.js`.
 
 **Done**
-- [ ] Commento + test; niente regressione “falso 100% buffer”.
+- [x] Contratto documentato in video.js.
+- [x] Evento ended + near-end poll.
+- [x] Test pure.
 
 ## STEP 3.2 — Less waitForTimeout in video/corso
 

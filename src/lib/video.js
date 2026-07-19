@@ -1,6 +1,18 @@
 const { SessionError, OffHoursExit } = require('./errors');
 const { isLoginPage } = require('./page-detect');
 
+// Contratto completamento (scrape 07/2026, player Video.js / vjs-tech):
+//  1) evento HTMLMediaElement 'ended' (più reattivo del solo poll)
+//  2) currentTime >= duration - 1.5s  (non uscire al 95%: la piattaforma
+//     salva la posizione e riparte da lì → lezione bloccata al 93-94%)
+//  3) % DOM solo se candidati NON-vjs e in scope del video (anti falso 100% buffer)
+// Nessun candidato DOM → ok: restano (1)+(2)+check post-video su pagina corso.
+
+const NEAR_END_SEC = 1.5;
+const POLL_MS = 30000;
+const POLL_NEAR_END_MS = 2000;
+const NEAR_END_WINDOW_SEC = 10;
+
 function formatTime(t) {
   if (!isFinite(t)) return '--:--';
   const m = Math.floor(t / 60);
@@ -8,11 +20,45 @@ function formatTime(t) {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/** Pure: parse % da testo corto del player (non paragrafi lunghi). */
+function parsePlayerPctText(t) {
+  const txt = String(t || '').trim();
+  if (!txt || txt.length > 20) return null;
+  const m = txt.match(/(\d{1,3})(?:[.,]\d+)?\s*%/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/** Pure: true se currentTime è a ridosso della fine reale. */
+function isVideoNearEnd(currentTime, duration, epsilonSec = NEAR_END_SEC) {
+  return Number.isFinite(duration) && duration > 0
+    && Number.isFinite(currentTime)
+    && currentTime >= duration - epsilonSec;
+}
+
+/** Pure: % DOM sufficiente a considerare completato. */
+function isDomPctComplete(domPct) {
+  return domPct !== null && domPct !== undefined && Number(domPct) >= 99;
+}
+
+/**
+ * Pure: decisione di fine video da flag.
+ * @param {{ ended?: boolean, nearEnd?: boolean, domComplete?: boolean }} f
+ */
+function shouldFinishVideo(f = {}) {
+  return !!(f.ended || f.nearEnd || f.domComplete);
+}
+
+/** Pure: intervallo poll — vicino alla fine più frequente. */
+function videoPollMs(currentTime, duration) {
+  if (Number.isFinite(duration) && duration > 0 && Number.isFinite(currentTime)
+      && currentTime >= duration - NEAR_END_WINDOW_SEC) {
+    return POLL_NEAR_END_MS;
+  }
+  return POLL_MS;
+}
+
 // Rimette in play il <video> corrente (mute + play). In headless il player viene
-// spesso messo in pausa dal throttle del tab o dall'heartbeat della piattaforma:
-// un play() basta a ripartire dallo stesso currentTime. È una recovery molto
-// più leggera di un page.reload(), che su sessioni fragili fa rimbalzare su
-// /login e consuma il token (vedi memoria sul "sovrauso del token").
+// spesso messo in pausa dal throttle del tab o dall'heartbeat della piattaforma.
 async function ensurePlaying(page) {
   await page.evaluate(() => {
     const v = document.querySelector('video');
@@ -23,10 +69,30 @@ async function ensurePlaying(page) {
   }).catch(() => {});
 }
 
-// Aspetta che il <video> rimonti dopo un reload (la pagina può montarlo in lazy
-// o passare da un'interstitial "dichiarazione di fruizione"). Restituisce false
-// se entro timeoutMs non c'è, così il chiamante non scambia "video non ancora
-// montato" per "video scomparso = lezione finita".
+/** Installa flag window.__gsdVideoEnded sull'elemento video (dopo load/reload). */
+async function installEndedListener(page) {
+  await page.evaluate(() => {
+    window.__gsdVideoEnded = false;
+    const v = document.querySelector('video');
+    if (!v) return;
+    if (v.ended) {
+      window.__gsdVideoEnded = true;
+      return;
+    }
+    // Rimuovi listener precedenti se rieseguito (reload).
+    if (window.__gsdVideoEndedHandler) {
+      try { v.removeEventListener('ended', window.__gsdVideoEndedHandler); } catch (_) {}
+    }
+    window.__gsdVideoEndedHandler = () => { window.__gsdVideoEnded = true; };
+    v.addEventListener('ended', window.__gsdVideoEndedHandler);
+  }).catch(() => {});
+}
+
+async function readEndedFlag(page) {
+  return await page.evaluate(() => !!window.__gsdVideoEnded).catch(() => false);
+}
+
+// Aspetta che il <video> rimonti dopo un reload.
 async function waitForVideo(page, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -37,29 +103,55 @@ async function waitForVideo(page, timeoutMs) {
   return false;
 }
 
+async function readVideoStatus(page) {
+  return await page.evaluate(() => {
+    const v = document.querySelector('video');
+    let domPct = null;
+    const parsePct = (t) => {
+      const txt = String(t || '').trim();
+      if (!txt || txt.length > 20) return null;
+      const m = txt.match(/(\d{1,3})(?:[.,]\d+)?\s*%/);
+      return m ? parseInt(m[1], 10) : null;
+    };
+    const sel = '[class*="percent"], [class*="progress"], [class*="avanzamento"], [class*="fruizione"]';
+    const cands = [...document.querySelectorAll(sel)]
+      .filter(el => !/(^|\s)vjs-/.test(String(el.className || '')))
+      .map(el => ({ el, pct: parsePct(el.innerText) }))
+      .filter(c => c.pct !== null);
+    if (cands.length && v) {
+      let scope = v.parentElement;
+      for (let i = 0; i < 4 && scope && !cands.some(c => scope.contains(c.el)); i++) {
+        scope = scope.parentElement;
+      }
+      const inScope = scope ? cands.filter(c => scope.contains(c.el)) : [];
+      if (inScope.length) domPct = inScope[0].pct;
+    }
+    if (domPct === null && cands.length === 1) domPct = cands[0].pct;
+    return {
+      status: v ? { ended: v.ended, t: v.currentTime, d: v.duration } : null,
+      domPct,
+      flagEnded: !!window.__gsdVideoEnded,
+    };
+  }).catch(() => ({ status: null, domPct: null, flagEnded: false }));
+}
+
 async function watchVideo(page, log, monitor, shiftCheck) {
   log('Video in corso...');
   await ensurePlaying(page);
+  await installEndedListener(page);
 
   let finished = false;
   let lastTime = -1;
+  let lastDuration = NaN;
   let freezeCount = 0;
   let reloadCount = 0;
   const MAX_RELOADS = 3;
   const startedAt = Date.now();
-  // Tetto di sicurezza: anche se "ended" non scatta mai (player rotto, duration NaN),
-  // non restare bloccati all'infinito su una singola lezione.
   const MAX_WATCH_MS = 3 * 60 * 60 * 1000; // 3 ore
 
   while (!finished) {
-    await page.waitForTimeout(30000);
+    await page.waitForTimeout(videoPollMs(lastTime, lastDuration));
 
-    // Check fine turno anche in mezzo al video: senza questo, l'autoplay
-    // attraversava la fine turno senza fermarsi (il check viveva solo nel loop
-    // esterno di autoplay.js, raggiunto solo a corsi finiti). Con shiftCheck
-    // condiviso, l'extra-time (15 min) concede di completare il video in corso;
-    // scaduta, esco graceful (la piattaforma salva la posizione di fruizione,
-    // lo scheduler riprende al turno successivo dal punto esatto).
     if (shiftCheck) {
       const s = shiftCheck.evaluate();
       if (s.extraTimeArmed) log(`Turno appena terminato. Extra-time fino alle ${s.extraTimeUntil ? new Date(s.extraTimeUntil).toISOString() : 'N/A'} per completare il video in corso.`);
@@ -74,85 +166,41 @@ async function watchVideo(page, log, monitor, shiftCheck) {
       break;
     }
 
-    const result = await page.evaluate(() => {
-      const v = document.querySelector('video');
-      // Percentuale di avanzamento mostrata dal player (player custom).
-      // Bug storico: si prendeva la PRIMA percentuale di TUTTA la pagina
-      // (bodyText.match(/%/)), ma video.js espone una % di BUFFER
-      // ("vjs-control-text-loaded-percentage", arriva a 100% appena il file è
-      // scaricato) e la pagina può mostrare % non correlate (sidebar, altre
-      // lezioni) → falso "video completato" e lezione abbandonata a metà.
-      // Ora: solo elementi con classe percent/progress/avanzamento/fruizione,
-      // MAI i controlli video.js, con testo corto (niente paragrafi), preferendo
-      // quelli nel container del <video>. Nessun candidato → null: restano le
-      // fonti di verità currentTime>=duration-1.5 e il check post-video sulla
-      // pagina corso (degradazione sicura, mai completamento anticipato).
-      let domPct = null;
-      const parsePct = (t) => {
-        const txt = String(t || '').trim();
-        if (!txt || txt.length > 20) return null;
-        const m = txt.match(/(\d{1,3})(?:[.,]\d+)?\s*%/);
-        return m ? parseInt(m[1], 10) : null;
-      };
-      const sel = '[class*="percent"], [class*="progress"], [class*="avanzamento"], [class*="fruizione"]';
-      const cands = [...document.querySelectorAll(sel)]
-        .filter(el => !/(^|\s)vjs-/.test(String(el.className || '')))
-        .map(el => ({ el, pct: parsePct(el.innerText) }))
-        .filter(c => c.pct !== null);
-      if (cands.length && v) {
-        // Risali dal <video> di max 4 livelli cercando un container che
-        // contenga un candidato: è la % del player, non di altro.
-        let scope = v.parentElement;
-        for (let i = 0; i < 4 && scope && !cands.some(c => scope.contains(c.el)); i++) {
-          scope = scope.parentElement;
-        }
-        const inScope = scope ? cands.filter(c => scope.contains(c.el)) : [];
-        if (inScope.length) domPct = inScope[0].pct;
-      }
-      // Fuori dal container del video: accetta solo se il candidato è UNICO in
-      // tutta la pagina (nessuna ambiguità possibile).
-      if (domPct === null && cands.length === 1) domPct = cands[0].pct;
-      return {
-        status: v ? { ended: v.ended, t: v.currentTime, d: v.duration } : null,
-        domPct
-      };
-    }).catch(() => ({ status: null, domPct: null }));
+    // Flag ended (listener) — non aspetta il prossimo poll lungo.
+    if (await readEndedFlag(page)) {
+      log('Video completato (evento ended).');
+      finished = true;
+      break;
+    }
 
-    const { status, domPct } = result;
+    const result = await readVideoStatus(page);
+    const { status, domPct, flagEnded } = result;
 
     if (!status) {
       log('Video element scomparso, esco.');
       break;
     }
 
+    lastDuration = status.d;
     monitor?.update({ phase: 'video', videoProgress: `${formatTime(status.t)} / ${formatTime(status.d)}` });
     log(`Video: ${formatTime(status.t)} / ${formatTime(status.d)}` + (domPct !== null ? ` (DOM: ${domPct}%)` : ''));
 
-    // Fonte di verità 1: percentuale mostrata dal player nel DOM.
-    if (domPct !== null && domPct >= 99) {
-      log(`Video considerato completato dalla percentuale DOM (${domPct}%).`);
-      finished = true;
-      break;
-    }
-
-    // Fonte di verità 2: currentTime a ridosso della fine REALE (entro 1.5s).
-    // Importante: NON uscire al 95% della durata. La piattaforma salva la posizione
-    // di fruizione e fa ripartire il video da lì (es. al 94%); se uscissimo al 95%
-    // dopo pochi secondi dalla ripresa, il video non arriverebbe mai alla fine e la
-    // piattaforma NON accrediterrebbe l'ultimo tratto → lezione bloccata al 93-94%.
-    // Va lasciato arrivare all'evento 'ended' (o a d-1.5) perché la piattaforma
-    // accredita il 100% solo a fine reale (confirmato live: play 955→1014s → 100%).
-    if (Number.isFinite(status.d) && status.d > 0 && status.t >= status.d - 1.5) {
+    if (shouldFinishVideo({
+      ended: status.ended || flagEnded,
+      nearEnd: isVideoNearEnd(status.t, status.d),
+      domComplete: isDomPctComplete(domPct),
+    })) {
+      if (isDomPctComplete(domPct) && !status.ended && !flagEnded && !isVideoNearEnd(status.t, status.d)) {
+        log(`Video considerato completato dalla percentuale DOM (${domPct}%).`);
+      } else if (status.ended || flagEnded) {
+        log('Video completato (ended).');
+      }
       finished = true;
       break;
     }
 
     if (status.t === lastTime) {
       freezeCount++;
-      // Recovery leggera: prima di ricaricare la pagina, prova a riavviare il play().
-      // Se il player era solo in pausa (caso headless tipico), al prossimo check il
-      // currentTime sarà avanzato e freezeCount si resetta. Niente reload -> niente
-      // stress sulla sessione.
       await ensurePlaying(page);
       log(`Video progress stalled. Freeze count: ${freezeCount}/3`);
       if (freezeCount >= 3) {
@@ -163,18 +211,11 @@ async function watchVideo(page, log, monitor, shiftCheck) {
         }
         log(`Video frozen detected! Recovery action: reloading page (Attempt ${reloadCount}/${MAX_RELOADS})...`);
         await page.reload({ waitUntil: 'domcontentloaded' });
-        // Dopo il reload il <video> può metterci qualche secondo a rimontare (lazy)
-        // o la pagina può essere rimbalzata su /login: aspettiamo il remount invece
-        // di dichiarare subito "video scomparso = finito" al primo check.
         const remounted = await waitForVideo(page, 30000);
         if (remounted) {
           await ensurePlaying(page);
+          await installEndedListener(page);
         } else {
-          // Dopo reload il <video> non è rimontato: quasi sempre la sessione è
-          // caduta e la pagina è rimbalzata su /login. Prima si usciva in modo
-          // silenzioso e runCourse insisteva per 3 cicli marcando need_help;
-          // ora lanciamo SessionError -> runAutoplay esce con session_unstable
-          // (exit 4) e lo scheduler fa cooldown, lasciando riprendere il token.
           if (await isLoginPage(page).catch(() => false)) {
             throw new SessionError('Sessione caduta durante la riproduzione del video (redirect a /login dopo reload).');
           }
@@ -188,12 +229,21 @@ async function watchVideo(page, log, monitor, shiftCheck) {
       freezeCount = 0;
       reloadCount = 0;
     }
-
-    if (status.ended) finished = true;
   }
 
   monitor?.update({ videoProgress: 'finished' });
   log('Video finito.');
 }
 
-module.exports = { watchVideo };
+module.exports = {
+  watchVideo,
+  formatTime,
+  parsePlayerPctText,
+  isVideoNearEnd,
+  isDomPctComplete,
+  shouldFinishVideo,
+  videoPollMs,
+  NEAR_END_SEC,
+  POLL_MS,
+  POLL_NEAR_END_MS,
+};
