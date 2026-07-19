@@ -13,7 +13,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { chromium } = require('playwright');
+// Lazy-require: i test pure di resolveLaunchPlan/isChromeMissingError non
+// devono caricare playwright (in CI non c'è npm install di default).
 
 const DEFAULT_LAUNCH_ARGS = [
   '--disable-blink-features=AutomationControlled',
@@ -82,6 +83,7 @@ async function launchBrowser(options = {}) {
   const log = typeof options.log === 'function' ? options.log : defaultLog;
   const config = options.config || readBrowserConfig(options.root);
   const plan = resolveLaunchPlan(config);
+  const { chromium } = require('playwright');
 
   let lastErr = null;
   for (const attempt of plan.attempts) {

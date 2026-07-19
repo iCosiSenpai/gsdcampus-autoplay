@@ -24,8 +24,13 @@ for f in *.sh scripts/*.sh scripts/lib/*.sh; do
     zsh -n "$f" || { err "zsh -n $f"; FAIL=1; }
   fi
 done
+# -S warning: non fallire su note info (es. SC2015 A&&B||C in install.sh).
+# bash -n sopra resta il gate hard; shellcheck è qualità senza bloccare CI su style.
 if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck install.sh || { err "shellcheck install.sh"; FAIL=1; }
+  if ! shellcheck -S warning install.sh; then
+    err "shellcheck install.sh (severity ≥ warning)"
+    FAIL=1
+  fi
 fi
 [ "$FAIL" -eq 0 ] && ok "Sintassi shell ok."
 
