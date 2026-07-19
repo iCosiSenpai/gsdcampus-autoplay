@@ -868,7 +868,9 @@ async function runAutoplay() {
         let worked = false;
         for (const courseUrl of courseUrls) {
           log(`Controllo corso: ${courseUrl}`);
-          await runCourse(page, courseUrl, sessionState, state, shiftCheck);
+          // Con --ignore-hours non passare shiftCheck: altrimenti watchVideo
+          // ferma il video a fine turno (extra-time) anche in ignore-hours.
+          await runCourse(page, courseUrl, sessionState, state, IGNORE_HOURS ? null : shiftCheck);
           worked = true;
         }
 
