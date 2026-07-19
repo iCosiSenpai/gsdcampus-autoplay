@@ -2,6 +2,7 @@
   "autologinUrl": "https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN",
   "baseUrl": "https://tecsial.gsdcampus.it/",
   "ollamaModel": "gemma4:cloud",
+  "browserChannel": null,
   "courseUrls": [],
   "reportIssues": true,
   "issueEndpoint": "",

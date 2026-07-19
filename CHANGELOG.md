@@ -7,6 +7,7 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-19
 
+- L'autoplay e i controlli partono anche **senza Google Chrome** installato: usano in automatico Chromium di Playwright.
 - Lo stato mostra da quanto tempo non si aggiorna (evita di confondere un run vecchio con la situazione attuale); il checkup verifica anche i selettori della piattaforma.
 - Le risposte dei quiz verificate si distribuiscono a **tutti i colleghi anche senza permessi git**: l'AI le invia a un servizio del manutentore che le pubblica per tutti.
 - Codice riorganizzato senza cambiare il comportamento: matching quiz e pagine di login/informativa in moduli separati (più facile da mantenere e testare).

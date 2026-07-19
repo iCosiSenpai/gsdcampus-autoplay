@@ -15,9 +15,9 @@
  * di questo script va committato.
  */
 
-const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
+const { launchBrowser } = require('../src/lib/browser');
 
 const ROOT = path.join(__dirname, '..');
 const OUT_ROOT = path.join(ROOT, 'debug', 'exploration');
@@ -224,11 +224,8 @@ async function exploreAccount(browser, autologinUrl, summary) {
   ensureDir(OUT_ROOT);
   const summary = { startedAt: new Date().toISOString(), accounts: [] };
 
-  const browser = await chromium.launch({
-    channel: 'chrome',
-    headless: true,
-    args: ['--disable-blink-features=AutomationControlled', '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-  });
+  const { browser, backend } = await launchBrowser({ headless: true });
+  console.log(`[browser] backend=${backend}`);
 
   for (const link of links) {
     await exploreAccount(browser, link, summary).catch(e => console.log('account error', e.message));

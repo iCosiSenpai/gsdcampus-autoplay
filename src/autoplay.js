@@ -1,7 +1,7 @@
-const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
+const { launchBrowser } = require('./lib/browser');
 const { createLogger, redactUrl } = require('./lib/logger');
 const { Monitor } = require('./lib/monitor');
 const { solveQuiz } = require('./lib/quiz');
@@ -648,16 +648,9 @@ async function runAutoplay() {
         log('Impossibile rimuovere storage/session state precedente:', e.message);
       }
 
-      browser = await chromium.launch({
-        channel: 'chrome',
-        headless: true,
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage'
-        ]
-      });
+      const launched = await launchBrowser({ headless: true, log, config });
+      browser = launched.browser;
+      log(`Browser backend: ${launched.backend}`);
 
       // Contesto pulito: NON carichiamo mai vecchi storageState. Il login
       // via autologin URL imposterà i cookie corretti da zero.

@@ -14,7 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 const { redactUrl } = require('./logger');
-const { chromium } = require('playwright');
+const { launchBrowser } = require('./browser');
 const { isLoginPage, isDashboardLoaded, countCourseLinks } = require('./page-detect');
 const { dashboardUrl, userAgent } = require('./platform');
 
@@ -49,11 +49,14 @@ async function checkAutologin(root, opts = {}) {
 
   let browser;
   try {
-    browser = await chromium.launch({
-      channel: 'chrome',
+    const launched = await launchBrowser({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      config,
+      root,
+      log: opts.log,
     });
+    browser = launched.browser;
+    result.browserBackend = launched.backend;
     const ctx = await browser.newContext({
       viewport: { width: 1440, height: 900 },
       userAgent: userAgent(config),

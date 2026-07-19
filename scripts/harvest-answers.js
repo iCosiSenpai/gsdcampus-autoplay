@@ -24,7 +24,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { chromium } = require('playwright');
 const { redactUrl } = require('../src/lib/logger');
 const { isLoginPage, isDashboardLoaded } = require('../src/lib/page-detect');
 const { dashboardUrl, userAgent } = require('../src/lib/platform');
@@ -32,6 +31,7 @@ const { saveAiQuizRequest } = require('../src/lib/quiz');
 const courseState = require('../src/lib/course-state');
 const { writeAiTodo } = require('../src/lib/ai-todo');
 const db = require('../src/lib/db');
+const { launchBrowser } = require('../src/lib/browser');
 
 const ROOT = path.resolve(__dirname, '..');
 const MAX_STEPS = 60;   // tetto di sicurezza sul numero di domande sfogliate
@@ -344,10 +344,8 @@ async function main() {
   fs.mkdirSync(outDir, { recursive: true });
   log(`account: ${config.memberName || who}${opt.dryRun ? ' · DRY-RUN' : ''}`);
 
-  const browser = await chromium.launch({
-    channel: 'chrome', headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-  });
+  const { browser, backend } = await launchBrowser({ headless: true, config, root: ROOT, log });
+  log(`browser backend: ${backend}`);
   const allQuestions = [];
   try {
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, userAgent: userAgent(config) });
