@@ -3,9 +3,10 @@
 ## v1.1.0 (2026-07-20)
 
 ### Per i colleghi (fleet)
-- **Banca risposte**: `resolve` fa **auto-share** al Worker (i Mac ricevono le risposte al prossimo update/start senza che qualcuno faccia push a mano). Opt-out: `autoShareAnswers: false`.
+- **Account:** `data/members.db` nel repo → setup **«Chi sei?»** (cerca il nome). Niente incolla link, niente CSV sul Mac del collega.
+- **Banca risposte**: `resolve` fa **auto-share** al Worker. Opt-out: `autoShareAnswers: false`.
 - **Sync banca** all’avvio di `./start.sh` (merge public→trusted, max 1 volta / 6 ore).
-- **Coda multi-CF** su un Mac: `members-cli queue set CF1 CF2` — a fine corsi avanza e lo scheduler riparte in ~60s.
+- **Coda multi-CF** su un Mac: `members-cli queue set CF1 CF2` (CF già in members.db).
 - **Notifiche macOS**: corso completato / quiz da risolvere.
 - Browser: Chrome consigliato, **Chromium ok**.
 - Report locale: `weekly-report-cli.js`; harvest senza video: `harvest-night.sh`.
