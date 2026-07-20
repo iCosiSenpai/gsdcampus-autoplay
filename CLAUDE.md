@@ -149,8 +149,8 @@ All'apertura procedi da solo (v. sezione "Autonomia"): orientati con `ai_todo.js
    - Se la sonda dice **VALIDO**: era un falso allarme / stato vecchio. Non chiedere nuovi link: basta riavviare con `./start.sh` (o `--ignore-hours`).
    - Se la sonda dice **NON valido**: allora il link autentica davvero più. NON riavviare in loop; procedi in questo ordine:
    1. Se `data/members.db` esiste, prova DA SOLO a **re-selezionare il membro** dal database (`node scripts/lib/members-cli.js set-active <CF>` col CF del membro attivo) e riavvia: il db può contenere un token aggiornato. Coinvolgi l'utente solo se anche questo token è scaduto.
-   2. Se il token nel database è anch'esso scaduto, l'utente deve fornire un nuovo elenco CSV: esegui `node scripts/import-members.js "<percorso csv>"` (esporta da Numbers: File ▸ Esporta ▸ CSV) e poi re-seleziona il membro.
-   3. Fallback manuale: chiedi all'utente il link aggiornato, aggiorna `config.json` con il tool Edit (mantenendo `codice_fiscale` coerente) e riavvia con `./start.sh`.
+   2. **Prima il link (caso comune):** chiedi all'utente il **nuovo link di autologin** (la maggior parte dei colleghi NON ha il CSV sul Mac). Aggiorna `config.json` / `set-active` e riavvia.
+   3. **Solo se il referente ha l'export FNC** e serve rinfrescare molti account: `import-members` dal CSV, poi set-active. Non chiedere il CSV a chi non ce l'ha.
 6. **Quiz non superato / domande a bassa confidenza / corso in `need_help`**: se `logs/status.json` mostra `phase: "need_help"` o `"quiz_needs_answers"`, o il log emette `[AI_QUIZ_REQUEST] ... domande a bassa confidenza salvate in ai_quiz_request.json`, lo script ha già automaticamente:
    - catturato le domande del quiz in `data/accounts/<CF>/need_answer.json`;
    - scritto l'handoff arricchito in `data/accounts/<CF>/ai_quiz_request.json` (domanda + opzioni + guess Ollama + confidenza);

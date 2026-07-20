@@ -8,20 +8,26 @@
 | Contenuto | `codice_fiscale`, `nome`, `cognome`, **`autologin_url`** (token di accesso), `imported_at` |
 | Git | **gitignorato** (non va in push). Se finisce in un zip “per colleghi”, lo script `prepare-package` lo esclude. |
 | Permessi | `0600` (solo utente Mac) al `initDb` |
-| Consenso | l’elenco utenti/CF e i link di autologin sono dati personali/credenziali: importare solo CSV autorizzati dall’organizzazione; non condividere il DB su chat o drive pubblici |
+| Consenso | CF e link di autologin sono credenziali: non in git, non in chat pubbliche |
+
+**Come entra l’account sul Mac (ordine di priorità)**
+
+1. **Collega (caso normale):** incolla **solo il proprio link autologin** in setup / “Chi sei?”. **Nessun CSV richiesto.**
+2. **Referente (opzionale):** ha l’export FNC → `import-members` una volta su quel Mac (o AirDrop del solo CSV a chi fa la coda multi-CF).  
+3. **Mai:** mettere `members.db` o CSV con token su GitHub / zip pubblici.
 
 **Cosa non fare**
 
 - Non committare `data/members.db` o dump CSV con URL autologin.
 - Non copiare `data/accounts/<CF>/storage_state.json` tra account (cookie di sessione).
 - Non loggare URL autologin interi (il logger redige token/CF).
+- Non dire ai colleghi “serve il CSV” se possono incollare il link.
 
-**Rotazione token**
+**Rotazione token (referente o chi ha l’export)**
 
-1. Esporta CSV aggiornato dalla piattaforma.
-2. `node scripts/import-members.js "<csv>"`
-3. `node scripts/lib/members-cli.js set-active <CF>`
-4. `./start.sh`
+1. Nuovo link dall’utente **oppure** CSV aggiornato se gestisci l’elenco.
+2. Link: aggiorna `config.json` / set-active. CSV: `node scripts/import-members.js "<csv>"` poi set-active.
+3. `./start.sh`
 
 ## PINNED_TAG (install immutabile)
 

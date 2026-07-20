@@ -25,7 +25,15 @@ Tutto il resto (requisiti, orari, manutenzione) è più in basso e di solito non
 | **Quiz bloccato** | L’AI risolve e condivide in automatico (`resolve` → Worker). Gli altri Mac le ricevono al prossimo update. |
 | **“Link scaduto”** | Spesso è solo `session_unstable` (rate-limit). L’AI deve verificare con la sonda live prima di chiedere un link nuovo. Vedi `docs/RUNBOOK-SESSION.md`. |
 
-**Elenco utenti (CSV):** se hai esportato l’elenco FNC in `~/Downloads`, al setup l’AI/import lo può usare. Il database `members.db` **non** viaggia su GitHub (contiene token).
+**Accesso al corso (importante — NON serve il CSV a tutti):**
+
+| Chi | Cosa serve sul Mac |
+|-----|--------------------|
+| **Collega normale** | Solo il **tuo link di autologin** (te lo dà il referente / lo copi dalla piattaforma). Al setup scegli *incolla link* se non c’è un elenco. **Non serve** nessun file CSV. |
+| **Referente / chi ha l’export FNC** | Opzionale: CSV elenco utenti → `import-members` così “Chi sei?” cerca per nome. Il CSV **non** viene da GitHub e **non** è sul Mac di default. |
+| **Coda multi-persona su un Mac** | Serve che quei CF siano in `members.db` (import CSV *una volta* da chi ha l’elenco, o link già salvati). Non chiedere il CSV a chi non ce l’ha. |
+
+`members.db` **non** è su GitHub (contiene token). Ogni Mac ha il suo.
 
 **Pin versione (store cauti):** un admin può impostare `PINNED_TAG=v1.1.0` in `install.sh` per non seguire il `main` mobile. Dettagli: `docs/SECURITY-MEMBERS.md`, `docs/CHANGELOG.md`.
 
@@ -64,7 +72,10 @@ Durante la prima installazione il Terminale ti chiederà alcune cose: rispondi c
 - La **password del Mac (sudo)**: una sola volta, all'inizio.
 - Eventuali conferme di **installazione/aggiornamento** (anche `y/n`) → rispondi **sempre sì**.
 - Il **login Ollama** (per il modello AI) → inserisci le credenziali.
-- La **selezione del tuo account** dall'elenco membri del corso: cerchi per nome, cognome o codice fiscale e scegli il numero corrispondente (niente più link da incollare). Se l'elenco non è ancora stato importato, lo script ti propone di importare il CSV; in alternativa puoi ancora incollare manualmente il link di autologin.
+- **Il tuo account** — due modi (basta **uno**):
+  1. **Incolla il link di autologin** (il modo normale se non hai un elenco utenti sul Mac).
+  2. Se sul Mac c’è già un database membri (importato dal referente), cerchi per nome/CF e scegli dalla lista.
+  - **Non** ti serve un CSV in Download. Il CSV serve solo a chi gestisce l’elenco completo FNC.
 - I **giorni lavorativi** dello store (es. lun–ven).
 - La **modalità oraria**:
   1. **Continuato** — un solo turno (es. 09:00–18:00).

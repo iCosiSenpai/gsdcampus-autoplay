@@ -363,7 +363,7 @@ provare `channel: chrome` quando disponibile; stealth init script già in explor
 | F1 auto-share su `resolve` | [x] |
 | F2 bank pull su `start.sh` (6h) | [x] |
 | F3 `members-cli queue` + restart 60s | [x] |
-| F4 CSV/token docs (no git) | [x] README-COLLEGHI |
+| F4 accesso account | [x] default = **link autologin** (no CSV); CSV solo referente |
 | F5 onboarding fleet README | [x] |
 | F6 AI fleet ai-todo + CLAUDE | [x] |
 | F7 weekly + storeTag (già E) | [x] lite |
