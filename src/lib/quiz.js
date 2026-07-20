@@ -304,11 +304,22 @@ async function solveActiveQuestions(page, root, log, monitor) {
       uncertainCount++;
     }
     log(`!!! DOMANDA NON NOTA: ${q.text.slice(0, 60)}... — non rispondo, la passo all'AI.`);
+    // Ollama = solo hint per l'AI. Non decide la finalizzazione (attempt-protective).
+    // useOllamaForQuiz:false → salta (il supervisore esterno riempie known_answers).
     let ollamaGuess = null;
+    let useOllama = true;
     try {
-      const a = await askQuizQuestion(q.text, q.opts.map(o => o.text), log, root);
-      if (a) ollamaGuess = { letter: a.letter, text: a.text, confidence: a.confidence, strategy: a.strategy };
-    } catch (_) { /* Ollama è solo un hint: se non risponde, pazienza */ }
+      const cfg = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8'));
+      if (cfg && cfg.useOllamaForQuiz === false) useOllama = false;
+    } catch (_) {}
+    if (useOllama) {
+      try {
+        const a = await askQuizQuestion(q.text, q.opts.map(o => o.text), log, root);
+        if (a) ollamaGuess = { letter: a.letter, text: a.text, confidence: a.confidence, strategy: a.strategy };
+      } catch (_) { /* Ollama è solo un hint: se non risponde, pazienza */ }
+    } else {
+      log('useOllamaForQuiz=false: salto Ollama, handoff diretto al supervisore AI.');
+    }
     aiRequests.push({ question: q.text, options: q.opts.map(o => o.text), ollamaGuess });
     saveNeedAnswer(root, [{ question: q.text, options: q.opts.map(o => o.text) }], 'domanda non nota (tentativo protetto)');
     // Avanti SENZA rispondere (consentito dalla piattaforma; non finalizza).
