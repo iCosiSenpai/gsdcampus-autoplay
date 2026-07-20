@@ -12,6 +12,8 @@ const fs = require('fs');
 const path = require('path');
 const { readJsonSafe, writeJsonAtomic } = require('./io');
 const account = require('./account');
+const { bankLag } = require('./bank-sync');
+const { getQueue, currentIndex, peekNextCf } = require('./member-queue');
 
 // Costruisce l'oggetto todo dallo stato su disco. Non lancia mai.
 function buildAiTodo(root) {
@@ -19,6 +21,8 @@ function buildAiTodo(root) {
   const status = readJsonSafe(path.join(logsDir, 'status.json'), {});
   const pending = readJsonSafe(path.join(logsDir, 'pending_questionnaires.json'), null);
   const census = readJsonSafe(path.join(logsDir, 'course_census.json'), null);
+  let config = {};
+  try { config = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8')); } catch (_) {}
 
   // Freschezza dello status: età in minuti, esplicita (l'AI non deve dedurla).
   let statusAgeMin = null;
@@ -47,13 +51,35 @@ function buildAiTodo(root) {
     ? pending.coursesWithPendingQuiz.filter(c => c.localDone).length
     : null;
 
+  // Fleet: coda multi-CF + lag banca (local vs public file).
+  const queue = getQueue(config);
+  const qIdx = currentIndex(config);
+  const nextCf = peekNextCf(config);
+  const queueRemaining = queue.length >= 2
+    ? Math.max(0, queue.length - 1) // almeno un altro CF in coda
+    : 0;
+  let lag = { trusted: 0, publicFile: 0, onlyLocal: 0, onlyPublic: 0 };
+  try { lag = bankLag(root); } catch (_) {}
+
   // Costruisci le azioni consigliate (in ordine di priorità).
   const actions = [];
   if (statusStale && status.running) {
     actions.push('status.json dice running ma è vecchio: probabilmente processo morto — ./status.sh riconcilia, o ./stop.sh + ./start.sh.');
   }
   if (status.phase === 'autologin_invalid') actions.push('Verifica il link autologin con la sonda live (healthcheck-cli.js) prima di concludere che è scaduto.');
-  if (openQuizRequests > 0) actions.push(`Risolvi ${openQuizRequests} domanda/e in ai_quiz_request.json con WebSearch/ragionamento, poi answers-cli resolve, poi resetCourse + start.`);
+  if (status.phase === 'session_unstable') actions.push('session_unstable: link OK, cooldown — non chiedere nuovo autologin; attendi e ./start.sh.');
+  if (openQuizRequests > 0) {
+    actions.push(`Risolvi ${openQuizRequests} domanda/e in ai_quiz_request.json con WebSearch, poi answers-cli resolve (auto-share ai colleghi), poi resetCourse + start.`);
+  }
+  if (lag.onlyLocal > 0) {
+    actions.push(`${lag.onlyLocal} risposte trusted solo locali: answers-cli share (o resolve già auto-share).`);
+  }
+  if (lag.onlyPublic > 0) {
+    actions.push(`${lag.onlyPublic} risposte in public non ancora in trusted: update-known-answers o start (sync).`);
+  }
+  if (queue.length >= 2) {
+    actions.push(`Coda multi-CF (${queue.length}): attivo idx ${qIdx}, prossimo ${nextCf || '?'}. A fine corsi avanza da solo — non fermarti al primo CF.`);
+  }
   if (falseDones) actions.push(`${falseDones} corso/i con questionario finale pendente segnato done: sono già stati rimessi in coda (reconcile).`);
   if (census && census.total != null) actions.push(`Corsi: ${census.total} totali (${census.at100} al 100%, ${census.partial} parziali, ${census.at0} a 0%).`);
 
@@ -67,6 +93,14 @@ function buildAiTodo(root) {
     quizCourse,
     falseDones,
     census: census ? { total: census.total, at100: census.at100, partial: census.partial, at0: census.at0 } : null,
+    // Fleet
+    memberQueue: queue,
+    memberQueueIndex: qIdx,
+    nextMemberCf: nextCf,
+    queueRemaining,
+    bankLag: lag,
+    activeCf: config.codice_fiscale || null,
+    memberName: config.memberName || null,
     actions,
   };
 }

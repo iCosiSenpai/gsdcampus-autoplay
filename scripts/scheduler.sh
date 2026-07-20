@@ -279,11 +279,17 @@ while true; do
     node "$DIR/src/autoplay.js" --ignore-hours 2>&1 | tee -a "$LOG_FILE" || EXIT_CODE=${pipestatus[1]}
     notify_on_exit "$EXIT_CODE"
     if [[ "$EXIT_CODE" -eq 0 ]]; then
-      # Uscita pulita: fine turno oppure tutti i corsi completati/in attesa di aiuto (need_help).
-      # Non riavviare subito a vuoto; attendi 10 minuti così l'AI/utente può intervenire.
+      # Uscita pulita: fine turno / all done / need_help. Se phase=member_queue_advanced
+      # (coda multi-CF) riparti in 60s sul prossimo membro; altrimenti 10 min.
       CRASH_COUNT=0
-      log "Autoplay terminato con codice 0. Riavvio tra 10 minuti (evito loop a vuoto, need_help o fine turno)..."
-      wait_ms 600000
+      PHASE=$(node -e "try{const s=require('./logs/status.json');process.stdout.write(s.phase||'')}catch(e){}" 2>/dev/null || echo "")
+      if [[ "$PHASE" = "member_queue_advanced" ]]; then
+        log "Autoplay: coda multi-CF avanzata. Riavvio tra 60s sul prossimo membro..."
+        wait_ms 60000
+      else
+        log "Autoplay terminato con codice 0. Riavvio tra 10 minuti (evito loop a vuoto, need_help o fine turno)..."
+        wait_ms 600000
+      fi
     elif [[ "$EXIT_CODE" -eq 4 ]]; then
       # session_unstable: token valido ma sessione instabile. Cooldown configurabile
       # (config.sessionUnstableCooldownMin, default 30) — non martellare l'autologin.
@@ -306,6 +312,12 @@ while true; do
     notify_on_exit "$EXIT_CODE"
     if [[ "$EXIT_CODE" -eq 0 ]]; then
       CRASH_COUNT=0
+      PHASE=$(node -e "try{const s=require('./logs/status.json');process.stdout.write(s.phase||'')}catch(e){}" 2>/dev/null || echo "")
+      if [[ "$PHASE" = "member_queue_advanced" ]]; then
+        log "Coda multi-CF avanzata. Riavvio tra 60s sul prossimo membro..."
+        wait_ms 60000
+        continue
+      fi
       log "Autoplay terminato con codice 0 (fine turno). Calcolo prossimo turno..."
     elif [[ "$EXIT_CODE" -eq 4 ]]; then
       CRASH_COUNT=0

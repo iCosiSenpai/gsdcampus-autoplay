@@ -146,10 +146,8 @@ if (cmd === 'stats') {
   console.log(`Salvata (trusted): "${q.slice(0, 70)}" → "${a.slice(0, 50)}"`);
   if (cleaned > 0) console.log(`  (rimossa da ${cleaned} voce/i dell'handoff AI)`);
 } else if (cmd === 'resolve') {
-  // resolve = set + pulizia handoff + publish nella banca condivisa, in un colpo.
-  // È il comando che l'AI supervisore usa dopo aver VERIFICATO una risposta: la
-  // rende trusted locale, svuota l'inbox e la mette subito nella banca pubblica
-  // (file). Il push ai colleghi lo fa poi ./scripts/publish-answers.sh.
+  // resolve = set + handoff clear + merge public file + auto-share Worker (fleet F1).
+  // autoShareAnswers default true (opt-out in config.json).
   const q = process.argv[3];
   const a = process.argv[4];
   if (!q || !a) {
@@ -163,7 +161,31 @@ if (cmd === 'stats') {
   const added = mergeIntoPublic({ [q]: a });
   console.log(`Risolta: "${q.slice(0, 70)}" → "${a.slice(0, 50)}"`);
   console.log(`  trusted: aggiornata · handoff: -${cleaned} · banca condivisa: ${added.length > 0 ? '+1 (nuova)' : 'già presente'}`);
-  if (added.length > 0) console.log('  Per distribuirla ai colleghi (anche senza git push): ./scripts/publish-answers.sh');
+
+  let autoShare = true;
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+    if (cfg && cfg.autoShareAnswers === false) autoShare = false;
+  } catch (_) {}
+  if (added.length > 0 && autoShare) {
+    // Share remoto best-effort: non fallisce resolve se Worker down.
+    shareAnswersToRemote({ [q]: a }).then((res) => {
+      if (res.ok) {
+        console.log(`  share Worker: ok (+${res.added != null ? res.added : '?'} remote)`);
+      } else {
+        console.log(`  share Worker: skip (${res.error || 'fail'}) — riprova: ./scripts/publish-answers.sh`);
+      }
+      process.exit(0);
+    }).catch((e) => {
+      console.log(`  share Worker: errore ${e.message} — riprova: ./scripts/publish-answers.sh`);
+      process.exit(0);
+    });
+  } else {
+    if (added.length > 0 && !autoShare) {
+      console.log('  autoShareAnswers=false: per distribuire usa ./scripts/publish-answers.sh');
+    }
+    process.exit(0);
+  }
 } else if (cmd === 'audit') {
   const known = readJson(KNOWN, {});
   const entries = Object.entries(known).filter(([q]) => !String(q).startsWith('README'));
@@ -239,7 +261,21 @@ if (cmd === 'stats') {
     console.error('Share remoto errore:', e.message);
     process.exit(1);
   });
+} else if (cmd === 'lag' || cmd === 'missing-vs-public') {
+  // F8: lag trusted locale vs public file (e opz. quante solo-local da share).
+  const { bankLag } = require(path.join(ROOT, 'src', 'lib', 'bank-sync'));
+  const lag = bankLag(ROOT);
+  console.log(`Trusted locale:  ${lag.trusted}`);
+  console.log(`Public (file):   ${lag.publicFile}`);
+  console.log(`Solo locale (da share):  ${lag.onlyLocal}`);
+  console.log(`Solo public (da pull):   ${lag.onlyPublic}`);
+  if (lag.onlyLocal > 0) {
+    console.log('→ node scripts/lib/answers-cli.js share   (o share --all)');
+  }
+  if (lag.onlyPublic > 0) {
+    console.log('→ ./scripts/update-known-answers.sh  oppure start.sh (sync throttled)');
+  }
 } else {
-  console.error(`Comando sconosciuto: ${cmd}\nComandi: stats | list | merge | set | resolve | audit | publish | share`);
+  console.error(`Comando sconosciuto: ${cmd}\nComandi: stats | list | merge | set | resolve | audit | publish | share | lag`);
   process.exit(1);
 }

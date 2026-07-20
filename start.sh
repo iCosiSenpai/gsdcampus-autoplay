@@ -45,6 +45,18 @@ fi
 ok "Configurazione trovata."
 info "Orario configurato: $(node "$SCHEDULE_CLI" describe 2>/dev/null || echo 'non disponibile')"
 
+# F2 fleet: merge banca pubblica → trusted (throttle 6h, best-effort offline).
+if [ -f "$DIR/src/lib/bank-sync.js" ]; then
+  node -e "
+    const { syncPublicBank } = require('./src/lib/bank-sync');
+    syncPublicBank('.', { log: (m) => console.log(m) }).then((r) => {
+      if (r.skipped) process.exit(0);
+      if (r.ok && r.added > 0) console.log('[bank-sync] +' + r.added + ' da public');
+      else if (!r.ok) console.log('[bank-sync] skip: ' + (r.error || 'fail'));
+    }).catch(() => {});
+  " 2>/dev/null || true
+fi
+
 echo ""
 step "2/5" "Verifica requisiti"
 if [ -f "$DIR/scripts/check-requirements.sh" ]; then

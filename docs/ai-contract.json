@@ -52,6 +52,9 @@
     "metrics_share": "node scripts/lib/metrics-cli.js share",
     "harvest_night": "./scripts/harvest-night.sh",
     "weekly_report": "node scripts/lib/weekly-report-cli.js [--save] [--hours 168]",
+    "answers_lag": "node scripts/lib/answers-cli.js lag",
+    "members_queue_list": "node scripts/lib/members-cli.js queue list",
+    "members_queue_set": "node scripts/lib/members-cli.js queue set CF1 CF2",
     "healthcheck": "node scripts/lib/healthcheck-cli.js",
     "issue_draft": "node scripts/lib/issue-report.js draft \"<phase>\" [\"reason\"]",
     "issue_send": "node scripts/lib/issue-report.js send",
@@ -76,6 +79,8 @@
     "storeTag": "anonymous store label optional",
     "sessionUnstableCooldownMin": "number minutes default 30",
     "notifications": "boolean default true",
+    "autoShareAnswers": "boolean default true (resolve → Worker)",
+    "autoUpdate": "boolean default true",
     "browserChannel": "chrome | chromium | auto | null"
   },
   "limits": {

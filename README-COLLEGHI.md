@@ -14,6 +14,23 @@ Tutto il resto (requisiti, orari, manutenzione) è più in basso e di solito non
 
 ---
 
+
+## Fleet: un Mac, uno o più colleghi
+
+| Scenario | Cosa fare |
+|----------|-----------|
+| **Un collega su questo Mac** | Install → “Chi sei?” → orari → l’AI avvia i corsi. |
+| **Più colleghi sullo stesso Mac** | Dopo il primo account: chiedi all’AI *“metti in coda anche MARIO e LUCA”* (o `members-cli queue set CF1 CF2`). A fine corsi passa da solo al prossimo. |
+| **Aggiornare risposte quiz da altri store** | “Aggiorna e avvia” (curl) **oppure** lascia che `./start.sh` / auto-update notturno mergino la banca pubblica. Non serve git. |
+| **Quiz bloccato** | L’AI risolve e condivide in automatico (`resolve` → Worker). Gli altri Mac le ricevono al prossimo update. |
+| **“Link scaduto”** | Spesso è solo `session_unstable` (rate-limit). L’AI deve verificare con la sonda live prima di chiedere un link nuovo. Vedi `docs/RUNBOOK-SESSION.md`. |
+
+**Elenco utenti (CSV):** se hai esportato l’elenco FNC in `~/Downloads`, al setup l’AI/import lo può usare. Il database `members.db` **non** viaggia su GitHub (contiene token).
+
+**Pin versione (store cauti):** un admin può impostare `PINNED_TAG=v1.1.0` in `install.sh` per non seguire il `main` mobile. Dettagli: `docs/SECURITY-MEMBERS.md`, `docs/CHANGELOG.md`.
+
+---
+
 ## ⭐ 1. Comando principale (installazione, aggiornamento, avvio)
 
 1. Apri il **Terminale** sul Mac (Spotlight → scrivi "Terminale" → Invio).

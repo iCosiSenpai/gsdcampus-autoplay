@@ -26,6 +26,18 @@ Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `con
 ---
 
 
+
+## Modalità fleet (tutti i colleghi / multi-CF)
+
+All’apertura orientati su **questo Mac**, non su un solo cognome:
+1. `node scripts/lib/members-cli.js active` + `queue list` (se coda).
+2. `node scripts/lib/dashboard-cli.js list` e `answers-cli stats` / `lag`.
+3. Risolvi quiz con `answers-cli resolve` (**auto-share** ai colleghi via Worker; non chiedere permesso).
+4. Se `memberQueue` ha ≥2 CF: a fine corsi del membro attivo **non fermarti** — lo scheduler riparte sul prossimo (~60s).
+5. `session_unstable` ≠ link morto (RUNBOOK-SESSION). Publish/share sempre dopo un batch di risposte.
+
+---
+
 ## Minima autonomia (tier D)
 
 1. Leggi `logs/ai_todo.json` (o `./status.sh`) → orientati.

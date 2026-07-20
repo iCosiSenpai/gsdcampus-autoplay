@@ -21,6 +21,8 @@
  *   node scripts/lib/members-cli.js migrate-legacy
  *       Sposta i file di stato legacy (data/*.json personali) nella cartella
  *       data/accounts/<CF>/ del membro attivo. Idempotente, non sovrascrive.
+ *   node scripts/lib/members-cli.js queue list|set|clear|add
+ *       Coda multi-CF su questo Mac (config.memberQueue). set CF1,CF2 o set CF1 CF2.
  */
 
 const fs = require('fs');
@@ -170,7 +172,59 @@ if (cmd === 'search') {
     console.log(`Migrati ${mig.moved} file in ${mig.dest}`);
   }
 
+} else if (cmd === 'queue') {
+  const sub = process.argv[3] || 'list';
+  const cfg = readConfig();
+  const norm = (s) => String(s || '').trim().toUpperCase().replace(/,/g, ' ');
+  if (sub === 'list') {
+    const q = Array.isArray(cfg.memberQueue) ? cfg.memberQueue : [];
+    if (q.length === 0) {
+      console.log('Coda vuota (config.memberQueue). Un solo account attivo alla volta.');
+      console.log('Imposta: node scripts/lib/members-cli.js queue set CF1 CF2');
+    } else {
+      console.log(`Coda (${q.length}):`);
+      q.forEach((cf, i) => {
+        const m = db.getMember(ROOT, cf);
+        const name = m ? [m.nome, m.cognome].filter(Boolean).join(' ') : '?';
+        const mark = (cfg.codice_fiscale || '').toUpperCase() === String(cf).toUpperCase() ? ' ← attivo' : '';
+        console.log(`  ${i + 1}. ${cf} — ${name}${mark}`);
+      });
+      console.log(`memberQueueIndex: ${cfg.memberQueueIndex != null ? cfg.memberQueueIndex : '(auto)'}`);
+    }
+  } else if (sub === 'clear') {
+    delete cfg.memberQueue;
+    delete cfg.memberQueueIndex;
+    writeConfig(cfg);
+    console.log('Coda multi-CF cancellata.');
+  } else if (sub === 'set' || sub === 'add') {
+    const raw = process.argv.slice(4).join(' ');
+    if (!raw.trim()) {
+      console.error('Uso: members-cli.js queue set CF1 CF2 ...   oppure  queue set CF1,CF2');
+      process.exit(1);
+    }
+    const parts = raw.split(/[\s,]+/).map((x) => x.trim().toUpperCase()).filter(Boolean);
+    const missing = parts.filter((cf) => !db.getMember(ROOT, cf));
+    if (missing.length) {
+      console.error(`CF non in members.db: ${missing.join(', ')}`);
+      process.exit(1);
+    }
+    let queue = parts;
+    if (sub === 'add') {
+      const prev = Array.isArray(cfg.memberQueue) ? cfg.memberQueue.map((c) => String(c).toUpperCase()) : [];
+      queue = [...new Set([...prev, ...parts])];
+    }
+    cfg.memberQueue = queue;
+    cfg.memberQueueIndex = Math.max(0, queue.indexOf(String(cfg.codice_fiscale || '').toUpperCase()));
+    if (cfg.memberQueueIndex < 0) cfg.memberQueueIndex = 0;
+    writeConfig(cfg);
+    console.log(`Coda impostata (${queue.length}): ${queue.join(', ')}`);
+    console.log('A fine corsi dell\'attivo, autoplay avanza al prossimo e lo scheduler riparte (~60s).');
+  } else {
+    console.error('Uso: members-cli.js queue list|set|add|clear');
+    process.exit(1);
+  }
+
 } else {
-  console.error(`Comando sconosciuto: ${cmd}\nComandi: search | list | select | active | set-active | stats | migrate-legacy`);
+  console.error(`Comando sconosciuto: ${cmd}\nComandi: search | list | select | active | set-active | stats | migrate-legacy | queue`);
   process.exit(1);
 }

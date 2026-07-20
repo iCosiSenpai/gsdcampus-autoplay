@@ -478,6 +478,16 @@ async function runAutoplay() {
           const adv = maybeAdvanceOnAllDone(ROOT, config, true, log);
           if (adv && adv.ok) {
             monitor.update({ phase: 'member_queue_advanced', lastError: `next=${adv.to}` });
+            try {
+              const { notifyMac } = require('./lib/notify-mac');
+              notifyMac(
+                ROOT,
+                'GSD Campus',
+                `Coda: passo a ${adv.name || adv.to}.`,
+                'course_done',
+                {}
+              );
+            } catch (_) {}
           }
         } catch (advErr) {
           log(`member-queue: ${advErr.message}`);

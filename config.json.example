@@ -11,6 +11,8 @@
   "issueReportKey": "gsd-autoplay-report-key-2026-7f3a9c",
   "issueReporterToken": "",
   "notifications": true,
+  "autoShareAnswers": true,
+  "autoUpdate": true,
   "sessionUnstableCooldownMin": 30,
   "shareMetrics": false,
   "storeTag": "",
