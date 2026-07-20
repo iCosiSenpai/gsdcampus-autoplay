@@ -25,17 +25,19 @@ Tutto il resto (requisiti, orari, manutenzione) è più in basso e di solito non
 | **Quiz bloccato** | L’AI risolve e condivide in automatico (`resolve` → Worker). Gli altri Mac le ricevono al prossimo update. |
 | **“Link scaduto”** | Spesso è solo `session_unstable` (rate-limit). L’AI deve verificare con la sonda live prima di chiedere un link nuovo. Vedi `docs/RUNBOOK-SESSION.md`. |
 
-**Accesso al corso (importante — NON serve il CSV a tutti):**
+**Accesso al corso (come funziona per tutti):**
 
-| Chi | Cosa serve sul Mac |
-|-----|--------------------|
-| **Collega normale** | Solo il **tuo link di autologin** (te lo dà il referente / lo copi dalla piattaforma). Al setup scegli *incolla link* se non c’è un elenco. **Non serve** nessun file CSV. |
-| **Referente / chi ha l’export FNC** | Opzionale: CSV elenco utenti → `import-members` così “Chi sei?” cerca per nome. Il CSV **non** viene da GitHub e **non** è sul Mac di default. |
-| **Coda multi-persona su un Mac** | Serve che quei CF siano in `members.db` (import CSV *una volta* da chi ha l’elenco, o link già salvati). Non chiedere il CSV a chi non ce l’ha. |
+1. Con l’install/`curl` arriva già **`data/members.db`**: elenco colleghi + link di autologin (è **tracciato in git**, consenso del titolare — non lo crei tu).
+2. Al setup **“Chi sei?”**: cerchi **nome/cognome/CF** e scegli te stesso dalla lista. **Non incolli niente.** L’autologin è già nel DB.
+3. **CSV**: serve **solo al maintainer/referente** per *aggiornare* l’elenco quando i token ruotano, poi fa commit di `members.db`. **I colleghi non usano e non hanno il CSV.**
 
-`members.db` **non** è su GitHub (contiene token). Ogni Mac ha il suo.
+| Chi | Cosa fa |
+|-----|---------|
+| **Collega** | curl → Chi sei? (cerca il tuo nome) → orari → AI. Zero link da incollare, zero CSV. |
+| **Coda multi-persona sul Mac** | Stesso DB: `queue set` con i CF già presenti in `members.db`. |
+| **Emergenza** | Solo se non sei in elenco o il token è morto: fallback “incolla link” o CSV aggiornato dal referente. |
 
-**Pin versione (store cauti):** un admin può impostare `PINNED_TAG=v1.1.0` in `install.sh` per non seguire il `main` mobile. Dettagli: `docs/SECURITY-MEMBERS.md`, `docs/CHANGELOG.md`.
+**Pin versione (store cauti):** un admin può impostare `PINNED_TAG=v1.1.0` in `install.sh`. Dettagli: `docs/SECURITY-MEMBERS.md`, `docs/CHANGELOG.md`.
 
 ---
 
@@ -72,10 +74,7 @@ Durante la prima installazione il Terminale ti chiederà alcune cose: rispondi c
 - La **password del Mac (sudo)**: una sola volta, all'inizio.
 - Eventuali conferme di **installazione/aggiornamento** (anche `y/n`) → rispondi **sempre sì**.
 - Il **login Ollama** (per il modello AI) → inserisci le credenziali.
-- **Il tuo account** — due modi (basta **uno**):
-  1. **Incolla il link di autologin** (il modo normale se non hai un elenco utenti sul Mac).
-  2. Se sul Mac c’è già un database membri (importato dal referente), cerchi per nome/CF e scegli dalla lista.
-  - **Non** ti serve un CSV in Download. Il CSV serve solo a chi gestisce l’elenco completo FNC.
+- **Chi sei?** — cerchi il tuo **nome** (o cognome/CF) nell’elenco già presente sul Mac (`members.db` arriva con l’install) e premi Invio. **Non incolli link e non serve un CSV.** L’autologin è già associato al tuo nome.
 - I **giorni lavorativi** dello store (es. lun–ven).
 - La **modalità oraria**:
   1. **Continuato** — un solo turno (es. 09:00–18:00).

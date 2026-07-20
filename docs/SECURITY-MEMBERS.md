@@ -1,33 +1,36 @@
 # Sicurezza: members.db, token, PINNED_TAG
 
-## members.db — audit
+## members.db — modello fleet (fonte di verità per i colleghi)
 
 | Voce | Dettaglio |
 |------|-----------|
 | Path | `data/members.db` (SQLite) |
-| Contenuto | `codice_fiscale`, `nome`, `cognome`, **`autologin_url`** (token di accesso), `imported_at` |
-| Git | **gitignorato** (non va in push). Se finisce in un zip “per colleghi”, lo script `prepare-package` lo esclude. |
-| Permessi | `0600` (solo utente Mac) al `initDb` |
-| Consenso | CF e link di autologin sono credenziali: non in git, non in chat pubbliche |
+| Contenuto | `codice_fiscale`, `nome`, `cognome`, **`autologin_url`**, `imported_at` |
+| Git | **Tracciato di proposito** (consenso titolare): al `curl`/clone i colleghi hanno subito l’elenco e **“Chi sei?”** funziona senza CSV e senza incollare link |
+| Permessi locali | `0600` consigliati (`initDb`) |
+| Journal/WAL | gitignorati (`members.db-journal` ecc.) |
 
-**Come entra l’account sul Mac (ordine di priorità)**
+### Flusso utente (obbligatorio da rispettare in docs/AI)
 
-1. **Collega (caso normale):** incolla **solo il proprio link autologin** in setup / “Chi sei?”. **Nessun CSV richiesto.**
-2. **Referente (opzionale):** ha l’export FNC → `import-members` una volta su quel Mac (o AirDrop del solo CSV a chi fa la coda multi-CF).  
-3. **Mai:** mettere `members.db` o CSV con token su GitHub / zip pubblici.
+1. Install scarica il repo → **include `members.db`**.
+2. Setup **“Chi sei?”**: cerca nome → seleziona → `config.json` riceve CF + autologin dal DB.
+3. **Il collega non incolla il link** e **non importa CSV**.
+4. CSV / `import-members` = **solo maintainer** quando ruota i token o aggiunge persone, poi `git add data/members.db && commit && push` così tutti lo ricevono al prossimo “Aggiorna e avvia”.
 
-**Cosa non fare**
+### Cosa non fare
 
-- Non committare `data/members.db` o dump CSV con URL autologin.
-- Non copiare `data/accounts/<CF>/storage_state.json` tra account (cookie di sessione).
-- Non loggare URL autologin interi (il logger redige token/CF).
-- Non dire ai colleghi “serve il CSV” se possono incollare il link.
+- Non dire ai colleghi “incolla il link” come percorso normale.
+- Non dire “serve il CSV sul tuo Mac”.
+- Non copiare `data/accounts/<CF>/storage_state.json` tra account.
+- Non loggare URL autologin interi (il logger redige).
+- Non mettere `members.db` in zip pubblici “anonimi” se il pacchetto esce dall’org (prepare-package **mantiene** members.db per i colleghi autorizzati).
 
-**Rotazione token (referente o chi ha l’export)**
+### Rotazione token (maintainer)
 
-1. Nuovo link dall’utente **oppure** CSV aggiornato se gestisci l’elenco.
-2. Link: aggiorna `config.json` / set-active. CSV: `node scripts/import-members.js "<csv>"` poi set-active.
-3. `./start.sh`
+1. CSV aggiornato dalla piattaforma **oppure** aggiornamento puntuale.
+2. `node scripts/import-members.js "<csv>"` (o update manuale DB).
+3. Commit + push di `data/members.db`.
+4. I colleghi: “Aggiorna e avvia”; se serve, `set-active <CF>` / ri-scelta Chi sei?.
 
 ## PINNED_TAG (install immutabile)
 
@@ -37,33 +40,18 @@ In `install.sh`:
 PINNED_TAG=""   # es. "v1.1.0"
 ```
 
-- Se valorizzato, il primo clone usa `git clone --branch "$PINNED_TAG"` (tag immutabile) invece di `main` mobile.
-- Utile per store che vogliono congelare la versione e aggiornare solo con tag esplicito.
-- Se il tag non esiste, fallback su `BRANCH` (default `main`) con warning.
-- Il curl one-liner su `main` resta mobile: ogni push cambia il prossimo install **solo se** non si pinna.
-
-**Rilascio maintainer**
-
-```bash
-# dopo commit feature su main (package.json version 1.1.0+)
-git tag v1.1.0
-git push origin v1.1.0
-# opzionale: impostare PINNED_TAG=v1.1.0 in install.sh (fork/store) per freeze
-```
-
-Tag `v1.1.0` = baseline post tier A–E (browser resiliente, course-runner, multi-CF, metrics, notify).
+- Se valorizzato, primo clone su quel tag.
+- Documentato per store che vogliono freeze di codice (il DB membri continua ad aggiornarsi se pushano `members.db` su quel tag — di solito si pinna il codice e si aggiorna main).
 
 ## Share metriche (opt-in)
 
-- `config.shareMetrics: true` abilita `node scripts/lib/metrics-cli.js share`
-- Payload: solo conteggi `phase`, ore, `storeTag` opzionale **anonimo** — **mai CF**
-- Worker: `POST /metrics` (ack only)
+- `config.shareMetrics: true` → `metrics-cli share`
+- Solo conteggi phase / storeTag — **no** CF nel payload remoto
 
 ## Coda multi-membro
 
 ```json
-"memberQueue": ["CF1", "CF2"],
-"memberQueueIndex": 0
+"memberQueue": ["CF1", "CF2"]
 ```
 
-A fine corsi di un CF, l’autoplay avanza al successivo (riscrive `config.json` da `members.db`). Richiede restart scheduler per applicare.
+CF devono esistere in `members.db` (già sul Mac). A fine corsi avanza al prossimo.

@@ -112,7 +112,7 @@ Sei stato aperto per portare avanti in autonomia il corso e-learning GSD Campus.
 
 ### Membri e stato multi-utente
 
-- `node scripts/import-members.js [csv-path]` — importa l'elenco membri da CSV nel database `data/members.db` (default `~/Downloads/elenco utenti FNC.csv`).
+- `node scripts/import-members.js [csv-path]` — **solo maintainer**: aggiorna `data/members.db` da CSV e poi commit/push. I colleghi usano «Chi sei?» sul DB già nel repo (non importano CSV).
 - `node scripts/lib/members-cli.js search <query>` — cerca membri per nome/cognome/CF (lista numerata).
 - `node scripts/lib/members-cli.js list` — elenco numerato di tutti i membri.
 - `node scripts/lib/members-cli.js active` — membro attualmente attivo (da `config.json`).
@@ -149,8 +149,8 @@ All'apertura procedi da solo (v. sezione "Autonomia"): orientati con `ai_todo.js
    - Se la sonda dice **VALIDO**: era un falso allarme / stato vecchio. Non chiedere nuovi link: basta riavviare con `./start.sh` (o `--ignore-hours`).
    - Se la sonda dice **NON valido**: allora il link autentica davvero più. NON riavviare in loop; procedi in questo ordine:
    1. Se `data/members.db` esiste, prova DA SOLO a **re-selezionare il membro** dal database (`node scripts/lib/members-cli.js set-active <CF>` col CF del membro attivo) e riavvia: il db può contenere un token aggiornato. Coinvolgi l'utente solo se anche questo token è scaduto.
-   2. **Prima il link (caso comune):** chiedi all'utente il **nuovo link di autologin** (la maggior parte dei colleghi NON ha il CSV sul Mac). Aggiorna `config.json` / `set-active` e riavvia.
-   3. **Solo se il referente ha l'export FNC** e serve rinfrescare molti account: `import-members` dal CSV, poi set-active. Non chiedere il CSV a chi non ce l'ha.
+   2. Re-seleziona il membro da **members.db** (`set-active <CF>` o menu Chi sei?): gli autologin sono nel DB che arriva col repo — **il collega non incolla link**.
+   3. Se il token nel DB è scaduto: il **referente** aggiorna `members.db` (import CSV + commit/push). Il collega fa «Aggiorna e avvia». Fallback incolla-link solo se la persona non è in elenco.
 6. **Quiz non superato / domande a bassa confidenza / corso in `need_help`**: se `logs/status.json` mostra `phase: "need_help"` o `"quiz_needs_answers"`, o il log emette `[AI_QUIZ_REQUEST] ... domande a bassa confidenza salvate in ai_quiz_request.json`, lo script ha già automaticamente:
    - catturato le domande del quiz in `data/accounts/<CF>/need_answer.json`;
    - scritto l'handoff arricchito in `data/accounts/<CF>/ai_quiz_request.json` (domanda + opzioni + guess Ollama + confidenza);

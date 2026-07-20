@@ -5,7 +5,7 @@
 | Fase | Significato | Cosa fare |
 |------|-------------|-----------|
 | `session_unstable` | Autologin **valido**, piattaforma rate-limita i re-login | Aspetta cooldown (default 30 min, `sessionUnstableCooldownMin`) e `./start.sh`. **Non** chiedere nuovo link. |
-| `autologin_invalid` | Sonda live fallita **oppure** stato vecchio | Prima `node scripts/lib/healthcheck-cli.js`. Solo se NON valido: nuovo CSV/link. |
+| `autologin_invalid` | Sonda live fallita **oppure** stato vecchio | Prima `healthcheck-cli.js`. Se NON valido: `set-active` da members.db / «Aggiorna e avvia» se il DB è stato rinfrescato; CSV solo per il maintainer che aggiorna il DB. |
 | `session_lost` | Cookie/sessione caduta mid-run | Come unstable se token già provato valido nel run. |
 | `need_help` | Quiz sospeso (domande da risolvere) | AI: WebSearch → `answers-cli resolve` (auto-share) → `resetCourse` → start. |
 
