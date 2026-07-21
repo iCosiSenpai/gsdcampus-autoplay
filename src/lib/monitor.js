@@ -117,7 +117,7 @@ class Monitor {
         const cid = courseIdFromUrl(courseUrl);
         if (phase === 'done') {
           notifyMac(this.root, 'GSD Campus', msgCourseDone(cid), 'course_done', { courseUrl });
-        } else if (phase === 'need_help' || phase === 'quiz_needs_answers') {
+        } else if ((phase === 'need_help' || phase === 'quiz_needs_answers') && courseUrl) {
           const quiz = this.status.lastQuizResult || '';
           notifyMac(
             this.root,

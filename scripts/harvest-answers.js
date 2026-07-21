@@ -294,7 +294,17 @@ async function reconcile(page, config, opt) {
       }
       const localDone = courseState.isCourseDoneOrNeedHelp(state, courseUrl);
       if (pending.length > 0) {
-        findings.push({ courseUrl: redactUrl(courseUrl), courseUrlRaw: courseUrl, pendingCount: pending.length, localDone });
+        findings.push({
+          courseUrl: redactUrl(courseUrl),
+          courseUrlRaw: courseUrl,
+          pendingCount: pending.length,
+          pendingAssessments: pending.map(url => ({
+            url: redactUrl(url),
+            assessmentId: courseState.assessmentIdFromUrl(url),
+          })),
+          localDone,
+          resetApplied: false,
+        });
         log(`  ${localDone ? '⚠ FALSO-DONE' : '· da fare'}: ${redactUrl(courseUrl)} — ${pending.length} questionario/i pendente/i (stato locale: ${localDone ? 'done/need_help' : 'in_progress/assente'})`);
       }
     } catch (e) {
@@ -306,7 +316,13 @@ async function reconcile(page, config, opt) {
   const report = {
     account: activeCf || 'attivo',
     checkedAt: new Date().toISOString(),
-    coursesWithPendingQuiz: findings.map(f => ({ course: f.courseUrl, pendingCount: f.pendingCount, localDone: f.localDone })),
+    coursesWithPendingQuiz: findings.map(f => ({
+      course: f.courseUrl,
+      pendingCount: f.pendingCount,
+      pendingAssessments: f.pendingAssessments,
+      localDone: f.localDone,
+      resetApplied: f.resetApplied === true,
+    })),
   };
   try { fs.writeFileSync(path.join(ROOT, 'logs', 'pending_questionnaires.json'), JSON.stringify(report, null, 2)); } catch (_) {}
 
@@ -315,12 +331,25 @@ async function reconcile(page, config, opt) {
   if (falseDones.length && canReset) {
     for (const f of falseDones) {
       courseState.resetCourse(ROOT, state, f.courseUrlRaw);
+      f.resetApplied = true;
       log(`  reset: ${f.courseUrl} → tornerà processabile al prossimo avvio.`);
     }
     log(`${falseDones.length} corso/i resettato/i. Riavvia con ./start.sh per rifarne i questionari.`);
   } else if (falseDones.length) {
     log(`Per resettarli automaticamente: node scripts/harvest-answers.js --reconcile --reset`);
   }
+  // Riscrive il report dopo eventuali reset, così l'inbox distingue una
+  // riconciliazione eseguita da una semplice scansione read-only.
+  try {
+    report.coursesWithPendingQuiz = findings.map(f => ({
+      course: f.courseUrl,
+      pendingCount: f.pendingCount,
+      pendingAssessments: f.pendingAssessments,
+      localDone: f.localDone,
+      resetApplied: f.resetApplied === true,
+    }));
+    fs.writeFileSync(path.join(ROOT, 'logs', 'pending_questionnaires.json'), JSON.stringify(report, null, 2));
+  } catch (_) {}
   return findings.length;
 }
 

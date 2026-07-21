@@ -223,13 +223,14 @@ async function selectOption(page, optsLoc, index) {
 // le domande in ai_quiz_request → known_answers, poi il corso viene ritentato e
 // finalizzato con tutte le risposte note. Ollama qui serve solo come SUGGERIMENTO
 // per l'AI (ollamaGuess), non per finalizzare.
-async function solveActiveQuestions(page, root, log, monitor) {
+async function solveActiveQuestions(page, root, log, monitor, context = null) {
   const sessionAnswers = {};       // risposte scelte in questo quiz (da note)
   const capturedAnswers = {};      // tutte le domande con la risposta scelta
   const aiRequests = [];           // domande incerte → handoff AI
   const knownAnswersPath = path.join(root, 'data', 'known_answers.json');
   ensureKnownBankSeeded(root);
   let uncertainCount = 0;          // domande non note (bloccano la finalizzazione)
+  let finalized = false;            // true solo dopo click Conferma controllato
   const seenQuestions = new Set(); // per non ri-contare la stessa domanda
 
   for (let i = 0; i < MAX_QUIZ_QUESTIONS; i++) {
@@ -242,7 +243,7 @@ async function solveActiveQuestions(page, root, log, monitor) {
         // GATE: non finalizzare con domande incerte → nessun tentativo consumato.
         log(`Riepilogo raggiunto ma ${uncertainCount} domanda/e NON nota/e: NON finalizzo (non consumo tentativi). Le passo all'AI e riprovo dopo.`);
         if (aiRequests.length > 0) {
-          const n = saveAiQuizRequest(root, aiRequests, `quiz sospeso: ${uncertainCount} domande da risolvere (tentativo protetto)`, null);
+          const n = saveAiQuizRequest(root, aiRequests, `quiz sospeso: ${uncertainCount} domande da risolvere (tentativo protetto)`, context);
           log(`[AI_QUIZ_REQUEST] ${n} domande salvate in ai_quiz_request.json per l'AI.`);
         }
         return { sessionAnswers, capturedAnswers, aiRequests, status: 'needs_answers_bailed', uncertainCount };
@@ -251,6 +252,7 @@ async function solveActiveQuestions(page, root, log, monitor) {
       const confirmBtn = page.locator('button:has-text("Conferma")').first();
       if (await confirmBtn.isVisible().catch(() => false)) {
         await confirmBtn.click();
+        finalized = true;
         await page.waitForTimeout(POST_CONFIRM_MS);
         if (await page.evaluate(() => document.querySelector('form h1, form h2, form h3, form h4, form h5')).catch(() => false)) continue;
         else break;
@@ -275,7 +277,7 @@ async function solveActiveQuestions(page, root, log, monitor) {
 
     if (!q || !q.text) {
       // Non c'è più domanda attiva: potremmo essere finiti o sulla pagina esito.
-      return { sessionAnswers, capturedAnswers, aiRequests, status: 'no_active_question' };
+      return { sessionAnswers, capturedAnswers, aiRequests, status: 'no_active_question', finalized };
     }
 
     log(`Domanda ${i + 1}: ${q.text.slice(0, 60)}...`);
@@ -321,20 +323,20 @@ async function solveActiveQuestions(page, root, log, monitor) {
       log('useOllamaForQuiz=false: salto Ollama, handoff diretto al supervisore AI.');
     }
     aiRequests.push({ question: q.text, options: q.opts.map(o => o.text), ollamaGuess });
-    saveNeedAnswer(root, [{ question: q.text, options: q.opts.map(o => o.text) }], 'domanda non nota (tentativo protetto)');
+    saveNeedAnswer(root, [{ question: q.text, options: q.opts.map(o => o.text) }], 'domanda non nota (tentativo protetto)', context);
     // Avanti SENZA rispondere (consentito dalla piattaforma; non finalizza).
     await clickNextButton(page, log);
   }
 
   log(`ATTENZIONE: raggiunto il tetto di ${MAX_QUIZ_QUESTIONS} domande nel quiz. Esito valutato sulla pagina.`);
-  return { sessionAnswers, capturedAnswers, aiRequests, status: 'max_iterations' };
+  return { sessionAnswers, capturedAnswers, aiRequests, status: 'max_iterations', finalized };
 }
 
 // Se solveActiveQuestions ha accumulato domande a bassa confidenza (aiRequests),
 // scrive l'handoff ai_quiz_request.json (merge) ed emette il marker di log
 // [AI_QUIZ_REQUEST] che il Monitor del supervisore cattura. Non blocca il corso:
 // l'AI risolve in autonomia (WebSearch + ragionamento) e popola la banca trusted.
-function writeAiRequestIfAny(root, solveResult, reason, courseUrl, log, monitor) {
+function writeAiRequestIfAny(root, solveResult, reason, courseUrl, context, log, monitor) {
   const items = solveResult && solveResult.aiRequests ? solveResult.aiRequests : [];
   if (items.length === 0) return;
   let courseId = null;
@@ -342,7 +344,7 @@ function writeAiRequestIfAny(root, solveResult, reason, courseUrl, log, monitor)
     const m = String(courseUrl).match(/\/corso\/show\/(\d+)/);
     if (m) courseId = m[1];
   }
-  const n = saveAiQuizRequest(root, items, reason, { courseUrl, courseId });
+  const n = saveAiQuizRequest(root, items, reason, { courseUrl, courseId, ...(context || {}) });
   log(`[AI_QUIZ_REQUEST] ${n} domande a bassa confidenza salvate in ai_quiz_request.json per verifica AI (reason: ${reason}).`);
   // phase 'quiz_needs_answers' come segnale morbido: autoplay può poi
   // sovrascriverlo con done/need_help a seconda dell'esito. Il marker di log
@@ -350,7 +352,10 @@ function writeAiRequestIfAny(root, solveResult, reason, courseUrl, log, monitor)
   try { monitor?.update({ phase: 'quiz_needs_answers' }); } catch (_) {}
 }
 
-async function solveQuiz(page, root, log, monitor, courseUrl) {
+async function solveQuiz(page, root, log, monitor, courseUrl, assessmentUrl = null) {
+  const courseId = (String(courseUrl || '').match(/\/corso\/show\/(\d+)/) || [])[1] || null;
+  const assessmentId = require('./course-state').assessmentIdFromUrl(assessmentUrl);
+  const context = { courseUrl, courseId, assessmentUrl, assessmentId };
   log('Rilevato questionario. Inizio risoluzione autonoma...');
   await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
 
@@ -409,7 +414,7 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
           captured = await extractQuestionsFromPage(page);
         }
       }
-      saveNeedAnswer(root, captured, `quiz non superato (${resultText}), nessuna possibilità di riprova`);
+      saveNeedAnswer(root, captured, `quiz non superato (${resultText}), nessuna possibilità di riprova`, context);
       if (captured.length === 0) {
         await dumpQuizDiagnostics(page, root, 'failed_noretry_nocapture', outcomeCheck.bodyText);
       }
@@ -418,7 +423,8 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
         passed: false,
         score: scoreText,
         resultText,
-        reason: 'quiz non superato, nessun bottone riprova'
+        reason: 'quiz non superato, nessun bottone riprova',
+        attemptConsumed: false,
       };
     }
     // Abbiamo cliccato "Riprova", continuiamo con le domande attive.
@@ -446,7 +452,7 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
   // mai crashare l'autoplay. Lascio un dump diagnostico e dichiaro esito ignoto.
   let solveResult;
   try {
-    solveResult = await solveActiveQuestions(page, root, log, monitor);
+    solveResult = await solveActiveQuestions(page, root, log, monitor, context);
   } catch (e) {
     log(`Errore imprevisto durante la risoluzione delle domande: ${e.message}. Salvo dump diagnostico.`);
     await dumpQuizDiagnostics(page, root, 'exception_solve', null);
@@ -466,7 +472,8 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
       passed: false,
       score: null,
       resultText,
-      reason: 'domande non note: non finalizzato per non consumare tentativi (le risolverà l\'AI)'
+      reason: 'domande non note: non finalizzato per non consumare tentativi (le risolverà l\'AI)',
+      attemptConsumed: false,
     };
   }
 
@@ -501,8 +508,8 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
     // Handoff AI per le domande a bassa confidenza: anche se il quiz è superato,
     // l'AI può verificare i guess dubbi e far crescere la banca trusted (opportuno,
     // non bloccante: il corso procede, niente reset).
-    writeAiRequestIfAny(root, solveResult, 'quiz superato con domande a bassa confidenza', courseUrl, log, monitor);
-    return { outcome: 'solved', passed: true, score: finalScoreText, resultText };
+    writeAiRequestIfAny(root, solveResult, 'quiz superato con domande a bassa confidenza', courseUrl, context, log, monitor);
+    return { outcome: 'solved', passed: true, score: finalScoreText, resultText, attemptConsumed: !!solveResult.finalized };
   }
 
   if (final.failed) {
@@ -526,13 +533,13 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
     if (captured.length === 0 && solveResult.aiRequests && solveResult.aiRequests.length > 0) {
       captured = solveResult.aiRequests.map(r => ({ question: r.question, options: r.options }));
     }
-    saveNeedAnswer(root, captured, `quiz non superato (${resultText})`);
+    saveNeedAnswer(root, captured, `quiz non superato (${resultText})`, context);
     if (captured.length === 0) {
       await dumpQuizDiagnostics(page, root, 'failed_nocapture', finalOutcome.bodyText);
     }
     // Handoff arricchito: ai_quiz_request porta anche i guess Ollama + confidenza.
-    writeAiRequestIfAny(root, solveResult, `quiz non superato (${resultText})`, courseUrl, log, monitor);
-    return { outcome: 'need_help', passed: false, score: finalScoreText, resultText, reason: 'quiz non superato' };
+    writeAiRequestIfAny(root, solveResult, `quiz non superato (${resultText})`, courseUrl, context, log, monitor);
+    return { outcome: 'need_help', passed: false, score: finalScoreText, resultText, reason: 'quiz non superato', attemptConsumed: !!solveResult.finalized };
   }
 
   log('Quiz in stato ignoto: nessun esito chiaro rilevato. Catturo le domande per sicurezza...');
@@ -542,14 +549,14 @@ async function solveQuiz(page, root, log, monitor, courseUrl) {
     captured = solveResult.aiRequests.map(r => ({ question: r.question, options: r.options }));
   }
   if (captured.length > 0) {
-    saveNeedAnswer(root, captured, 'esito quiz non chiaro');
+    saveNeedAnswer(root, captured, 'esito quiz non chiaro', context);
   } else {
     // Nessun esito chiaro E nessuna domanda catturata: lascio artefatti per diagnosi
     // (a prova di bomba: mai un fallimento silenzioso senza poter capire perché).
     await dumpQuizDiagnostics(page, root, 'ignoto_nocapture', finalOutcome.bodyText);
   }
-  writeAiRequestIfAny(root, solveResult, 'esito quiz non chiaro', courseUrl, log, monitor);
-  return { outcome: 'unknown', passed: false, score: null, resultText: 'ignoto' };
+  writeAiRequestIfAny(root, solveResult, 'esito quiz non chiaro', courseUrl, context, log, monitor);
+  return { outcome: 'unknown', passed: false, score: null, resultText: 'ignoto', attemptConsumed: !!solveResult.finalized };
 }
 
 // findKnownAnswer/normKey/similarity: pure in quiz-match.js; re-export qui

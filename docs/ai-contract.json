@@ -32,6 +32,13 @@
     "need_answer": "data/accounts/<CF>/need_answer.json",
     "storage_state": "data/accounts/<CF>/storage_state.json"
   },
+  "hardening": {
+    "course_state": "assessment ledger per questionario; quizAttempts aumenta solo dopo Conferma; protectedSuspensions conta i gate senza tentativo",
+    "handoff_schema": 2,
+    "ai_todo_schema": 2,
+    "phases": ["awaiting_ai", "complete"],
+    "notification_policy": "fingerprint per account/corso/questionario; throttle lungo per lavoro invariato"
+  },
   "commands": {
     "status": "./status.sh",
     "status_live_autologin": "./status.sh --check",
@@ -62,7 +69,7 @@
     "test": "npm test"
   },
   "exit_codes": {
-    "0": "clean exit (fine turno, all done/need_help)",
+    "0": "clean exit (fine turno, all done/need_help/awaiting_ai)",
     "1": "fatal / tentativi esauriti",
     "2": "need_help (quiz sospeso / AI request)",
     "3": "autologin_invalid",

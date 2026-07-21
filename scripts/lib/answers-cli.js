@@ -52,6 +52,7 @@ const path = require('path');
 const { writeJsonAtomic, readJsonSafe } = require(path.join(__dirname, '..', '..', 'src', 'lib', 'io'));
 const account = require(path.join(__dirname, '..', '..', 'src', 'lib', 'account'));
 const { clearResolvedFromHandoff } = require(path.join(__dirname, '..', '..', 'src', 'lib', 'quiz'));
+const { writeAiTodo } = require(path.join(__dirname, '..', '..', 'src', 'lib', 'ai-todo'));
 const { shareAnswersToRemote } = require(path.join(__dirname, 'answers-share'));
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -143,6 +144,7 @@ if (cmd === 'stats') {
   // Auto-pulizia handoff: la domanda ora è risolta, toglila da ai_quiz_request /
   // need_answer così l'inbox dell'AI non resta pieno di domande già fatte.
   const cleaned = clearResolvedFromHandoff(ROOT, [q]);
+  try { writeAiTodo(ROOT); } catch (_) {}
   console.log(`Salvata (trusted): "${q.slice(0, 70)}" → "${a.slice(0, 50)}"`);
   if (cleaned > 0) console.log(`  (rimossa da ${cleaned} voce/i dell'handoff AI)`);
 } else if (cmd === 'resolve') {
@@ -158,6 +160,7 @@ if (cmd === 'stats') {
   known[q] = a;
   writeJsonAtomic(KNOWN, known);
   const cleaned = clearResolvedFromHandoff(ROOT, [q]);
+  try { writeAiTodo(ROOT); } catch (_) {}
   const added = mergeIntoPublic({ [q]: a });
   console.log(`Risolta: "${q.slice(0, 70)}" → "${a.slice(0, 50)}"`);
   console.log(`  trusted: aggiornata · handoff: -${cleaned} · banca condivisa: ${added.length > 0 ? '+1 (nuova)' : 'già presente'}`);

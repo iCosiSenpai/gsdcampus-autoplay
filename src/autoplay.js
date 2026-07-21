@@ -66,6 +66,20 @@ const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const IGNORE_HOURS = process.argv.includes('--ignore-hours');
 const MAX_LOGIN_DROPS = 4;
 
+// La riconciliazione live puo scoprire assessment pendenti su corsi marcati
+// done da una versione precedente. Per 24h usiamo quel report come override
+// locale, cosi il runner nuovo li riprocessa senza richiedere un reset manuale.
+function recentlyReconciledPendingCourses() {
+  try {
+    const report = JSON.parse(fs.readFileSync(path.join(ROOT, 'logs', 'pending_questionnaires.json'), 'utf8'));
+    const checked = new Date(report.checkedAt || 0).getTime();
+    if (!Number.isFinite(checked) || Date.now() - checked > 24 * 60 * 60 * 1000) return new Set();
+    return new Set((report.coursesWithPendingQuiz || [])
+      .filter(c => c && c.localDone && c.resetApplied !== true && c.course)
+      .map(c => String(c.course)));
+  } catch (_) { return new Set(); }
+}
+
 // Predicati di riconoscimento pagina (login vs dashboard) centralizzati in
 // src/lib/page-detect.js, condivisi con l'health-check per evitare derive.
 const { isLoginPage, isDashboardLoaded } = require('./lib/page-detect');
@@ -331,7 +345,8 @@ async function runAutoplay() {
             const rawCards = await page.evaluate(collectCoursesFromDom);
             const discovered = enrichCourseRows(rawCards);
             const links = discovered.map(c => c.url);
-            const fresh = links.filter(url => !courseState.isCourseDoneOrNeedHelp(state, url));
+            const reconciledPending = recentlyReconciledPendingCourses();
+            const fresh = links.filter(url => !courseState.isCourseDoneOrNeedHelp(state, url) || reconciledPending.has(url));
             if (fresh.length === 0 && links.length > 0) {
               log('Tutti i corsi scoperti risultano completati o bloccati.');
             }
@@ -472,7 +487,21 @@ async function runAutoplay() {
       }
       if (e instanceof AllCoursesNeedHelpExit || e.code === 'ALL_NEED_HELP') {
         log('TUTTI I CORSI COMPLETATI O IN ATTESA DI AIUTO:', e.message);
-        monitor.update({ running: false, phase: 'need_help', lastError: e.message, courseStateSummary: courseState.summarize(state) });
+        const summary = courseState.summarize(state);
+        let todo = null;
+        try { todo = writeAiTodo(ROOT); } catch (_) {}
+        const terminalPhase = summary.needHelp > 0
+          ? (todo && todo.openQuizRequests > 0 ? 'awaiting_ai' : 'need_help')
+          : 'complete';
+        monitor.update({
+          running: false,
+          phase: terminalPhase,
+          courseUrl: null,
+          lessonUrl: null,
+          lastQuizResult: null,
+          lastError: e.message,
+          courseStateSummary: summary,
+        });
         // Coda multi-CF: se config.memberQueue ha ≥2 entry, avanza al prossimo.
         try {
           const adv = maybeAdvanceOnAllDone(ROOT, config, true, log);

@@ -39,6 +39,9 @@ if (s.phase === 'autologin_invalid') {
 if (s.phase === 'need_help') {
   lines.push(['ATTENZIONE', 'Uno o più corsi richiedono intervento: leggi data/accounts/<CF>/need_answer.json, aggiungi risposte a data/known_answers.json, poi riavvia.']);
 }
+if (s.phase === 'awaiting_ai') {
+  lines.push(['ATTENZIONE', 'Quiz in attesa dell’AI: lo scheduler resta in attesa locale e riparte quando l’inbox cambia.']);
+}
 if (s.phase === 'session_lost') {
   lines.push(['ATTENZIONE', "Sessione instabile: l'accesso cade dopo il login (riavvio in corso; se persiste, verifica il link dal vivo)."]);
 }

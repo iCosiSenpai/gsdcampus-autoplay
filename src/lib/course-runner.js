@@ -63,9 +63,9 @@ function createCourseRunner(deps) {
     saveSession,
   } = deps;
 
-  async function solveQuizWrapper(page, courseUrl) {
+  async function solveQuizWrapper(page, courseUrl, assessmentUrl = null) {
     try {
-      const result = await solveQuiz(page, ROOT, log, monitor, courseUrl);
+      const result = await solveQuiz(page, ROOT, log, monitor, courseUrl, assessmentUrl);
       // Backward compat: solveQuiz restituisce un oggetto.
       if (result && typeof result === 'object') {
         return result;
@@ -255,6 +255,7 @@ function createCourseRunner(deps) {
       await acceptUsageDeclaration(page, log);
 
       let scoredLinks = [];
+      let courseParseFailed = false;
       try {
         scoredLinks = await page.evaluate(() => {
           const allLinks = [...document.querySelectorAll('a')];
@@ -284,6 +285,7 @@ function createCourseRunner(deps) {
         log(`Trovati ${scoredLinks.length} link nel corso (${lessonCount} lezioni, ${quizCount} quiz): ${JSON.stringify(scoredLinks)}`);
         if (scoredLinks.length === 0) {
           log('ATTENZIONE: nessun link lezione/questionario trovato. Salvo dump HTML per analisi.');
+          courseParseFailed = true;
           await monitor.recordError(page, new Error('No lesson/quiz links found'), 'courseParsing');
         }
       } catch (e) {
@@ -309,6 +311,13 @@ function createCourseRunner(deps) {
         courseState.markCourseDone(ROOT, state, courseUrl);
         monitor.update({ phase: 'done', courseStateSummary: courseState.summarize(state) });
         return;
+      }
+
+      const assessmentUrls = [...new Set(scoredLinks
+        .filter(l => l.kind === 'questionario' && l.href)
+        .map(l => l.href))];
+      if (assessmentUrls.length > 0) {
+        courseState.registerAssessments(ROOT, state, courseUrl, assessmentUrls);
       }
 
       const c = courseState.getCourse(state, courseUrl);
@@ -365,6 +374,82 @@ function createCourseRunner(deps) {
         }
 
         log('Verifico quiz finale...');
+        // Gestiamo TUTTI i questionari del corso, non solo il primo link nel DOM.
+        // Un modulo puo esporre una valutazione di modulo e una di corso: il
+        // corso resta aperto finche ogni assessment e passato.
+        if (assessmentUrls.length > 0) {
+          let blocked = false;
+          for (let qi = 0; qi < assessmentUrls.length; qi++) {
+            const quizLink = assessmentUrls[qi];
+            const assessmentId = courseState.assessmentIdFromUrl(quizLink);
+            log(`Verifico questionario ${assessmentId || (qi + 1)}/${assessmentUrls.length}...`);
+            monitor.update({ phase: 'quiz_dashboard', courseUrl, quizUrl: quizLink });
+            const quizLocator = page.locator(`a[href="${quizLink}"]`).first();
+            try {
+              if (await quizLocator.count().catch(() => 0)) {
+                await quizLocator.click({ timeout: 10000 });
+              } else {
+                await page.goto(quizLink, { waitUntil: 'domcontentloaded', timeout: 60000 });
+              }
+            } catch (clickErr) {
+              log(`Click questionario non riuscito (${clickErr.message}); provo navigazione diretta.`);
+              await page.goto(quizLink, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+            }
+            await page.waitForTimeout(POST_SUBMIT_MS);
+            const quizResult = await solveQuizWrapper(page, courseUrl, quizLink);
+            if (quizResult.passed) {
+              courseState.markAssessment(ROOT, state, courseUrl, quizLink, 'passed', {
+                resultText: quizResult.resultText || 'superato',
+              });
+            } else {
+              const protectedStop = quizResult.attemptConsumed !== true;
+              if (quizResult.attemptConsumed === true) {
+                courseState.incrementQuizAttempt(ROOT, state, courseUrl, quizResult.resultText);
+              } else {
+                courseState.incrementProtectedSuspension(ROOT, state, courseUrl, quizResult.resultText);
+              }
+              courseState.markAssessment(ROOT, state, courseUrl, quizLink, protectedStop ? 'pending' : 'failed', {
+                resultText: quizResult.resultText || quizResult.reason || 'non superato',
+              });
+              courseState.markCourseNeedHelp(
+                ROOT,
+                state,
+                courseUrl,
+                quizResult.reason || 'quiz non superato',
+                protectedStop ? 'quiz_answers_pending' : 'quiz_failed'
+              );
+              blocked = true;
+            }
+
+            // Torniamo alla pagina corso prima del prossimo assessment. Non
+            // riusiamo il primo link/locator: ogni quiz ha il proprio contesto.
+            if (qi < assessmentUrls.length - 1) {
+              await page.goto(courseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+              await page.waitForTimeout(COURSE_SETTLE_MS);
+            }
+          }
+          if (blocked) {
+            monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
+            return;
+          }
+          if (courseState.allAssessmentsPassed(state, courseUrl, assessmentUrls)) {
+            log(`Tutti i ${assessmentUrls.length} questionari di ${courseUrl} superati.`);
+            courseState.markCourseDone(ROOT, state, courseUrl, true);
+            saveSession({ courseUrl, phase: 'quiz_done' });
+            monitor.update({ phase: 'done', courseStateSummary: courseState.summarize(state) });
+            return;
+          }
+          courseState.markCourseNeedHelp(ROOT, state, courseUrl, 'questionari finali non tutti verificati', 'assessment_incomplete');
+          monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
+          return;
+        }
+
+        if (courseParseFailed) {
+          log(`Corso ${courseUrl}: parsing vuoto senza prova PDF. Non marco done; richiedo riconciliazione.`);
+          courseState.markCourseNeedHelp(ROOT, state, courseUrl, 'nessun link lezione/questionario rilevato', 'course_parse_empty');
+          monitor.update({ phase: 'need_help', courseUrl, courseStateSummary: courseState.summarize(state) });
+          return;
+        }
         try {
           // Rilevazione robusta: oltre al link diretto /questionario/, guardiamo
           // anche il bottone "Avvia compilazione" e la sezione "Questionari finali".
@@ -394,10 +479,11 @@ function createCourseRunner(deps) {
               });
             }
             await page.waitForTimeout(POST_SUBMIT_MS);
-            const quizResult = await solveQuizWrapper(page, courseUrl);
+            const quizResult = await solveQuizWrapper(page, courseUrl, quizLink);
 
             if (quizResult.passed) {
               log(`Quiz finale di ${courseUrl} superato.`);
+              courseState.markAssessment(ROOT, state, courseUrl, quizLink, 'passed', { resultText: quizResult.resultText || 'superato' });
               courseState.markCourseDone(ROOT, state, courseUrl, true);
               saveSession({ courseUrl, phase: 'quiz_done' });
               monitor.update({ phase: 'done', courseStateSummary: courseState.summarize(state) });
@@ -408,8 +494,13 @@ function createCourseRunner(deps) {
             // Segnalo il corso come "need_help" e passo al prossimo corso. L'AI/utente leggerà
             // need_answer.json, aggiungerà le risposte a known_answers.json e riavvierà.
             if (quizResult.outcome === 'need_help' || quizResult.outcome === 'failed' || quizResult.outcome === 'unknown') {
-              courseState.incrementQuizAttempt(ROOT, state, courseUrl, quizResult.resultText);
-              courseState.markCourseNeedHelp(ROOT, state, courseUrl, quizResult.reason || 'quiz non superato');
+              if (quizResult.attemptConsumed === true) {
+                courseState.incrementQuizAttempt(ROOT, state, courseUrl, quizResult.resultText);
+              } else {
+                courseState.incrementProtectedSuspension(ROOT, state, courseUrl, quizResult.resultText);
+              }
+              courseState.markAssessment(ROOT, state, courseUrl, quizLink, quizResult.attemptConsumed === true ? 'failed' : 'pending', { resultText: quizResult.resultText || quizResult.reason });
+              courseState.markCourseNeedHelp(ROOT, state, courseUrl, quizResult.reason || 'quiz non superato', quizResult.attemptConsumed === true ? 'quiz_failed' : 'quiz_answers_pending');
               const needAnswerPath = _paths.needAnswer;
               const needAnswerSaved = fs.existsSync(needAnswerPath);
               if (needAnswerSaved) {
@@ -493,7 +584,7 @@ function createCourseRunner(deps) {
         if (startUrl) {
           emptyUrls.clear();
           await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-          await solveQuizWrapper(page, courseUrl);
+          await solveQuizWrapper(page, courseUrl, startUrl);
         } else {
           emptyUrls.add(nextHref);
         }
@@ -507,7 +598,7 @@ function createCourseRunner(deps) {
       if (isQuiz) {
         monitor.update({ phase: 'quiz', lessonUrl: nextHref });
         emptyUrls.clear();
-        await solveQuizWrapper(page, courseUrl);
+        await solveQuizWrapper(page, courseUrl, nextHref);
         continue;
       }
 

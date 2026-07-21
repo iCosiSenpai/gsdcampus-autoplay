@@ -38,7 +38,13 @@ source "$DIR/scripts/lib/notify.sh"
 # 0/2/3/4 del contratto scheduler↔autoplay resta intatta).
 notify_on_exit() {
   case "${1:-}" in
-    2) notify_user "GSD Campus" "Il corso ha bisogno di aiuto: apri il Terminale e rilancia il comando di avvio." need_help || true ;;
+    2)
+      local phase
+      phase=$(node -e "try{process.stdout.write(require('./logs/status.json').phase||'')}catch(e){}" 2>/dev/null || echo "")
+      if [[ "$phase" != "awaiting_ai" && "$phase" != "complete" ]]; then
+        notify_user "GSD Campus" "Il corso ha bisogno di aiuto: apri il Terminale e rilancia il comando di avvio." need_help || true
+      fi
+      ;;
     3) notify_user "GSD Campus" "Il link di accesso al corso è scaduto: serve quello nuovo dal referente." autologin_invalid || true ;;
   esac
   return 0
@@ -131,6 +137,30 @@ wait_ms() {
     sleep $((wait / 1000))
     elapsed=$((elapsed + wait))
   done
+}
+
+# In attesa di AI non riaprire Chromium in loop: l'AI/utente modifica gli
+# handoff per-account e il fingerprint cambia senza bisogno di un nuovo login.
+work_fingerprint() {
+  node -e "try{const t=require('./src/lib/ai-todo').buildAiTodo(process.cwd());process.stdout.write(t.workFingerprint||'')}catch(e){}" 2>/dev/null || echo ""
+}
+
+wait_for_work_change() {
+  local initial="$1"
+  local max_ms="${2:-21600000}" # 6h: reminder/ricontrollo massimo
+  local elapsed=0
+  while [[ "$elapsed" -lt "$max_ms" ]]; do
+    wait_ms 60000
+    elapsed=$((elapsed + 60000))
+    local current
+    current=$(work_fingerprint)
+    if [[ -n "$current" && "$current" != "$initial" ]]; then
+      log "Rilevato cambiamento nell'inbox/stato locale: riprendo autoplay."
+      return 0
+    fi
+  done
+  log "Nessun cambiamento inbox dopo 6h: eseguo un ricontrollo periodico."
+  return 0
 }
 
 # Controlla se siamo in orario lavorativo
@@ -286,6 +316,10 @@ while true; do
       if [[ "$PHASE" = "member_queue_advanced" ]]; then
         log "Autoplay: coda multi-CF avanzata. Riavvio tra 60s sul prossimo membro..."
         wait_ms 60000
+      elif [[ "$PHASE" = "awaiting_ai" || "$PHASE" = "complete" ]]; then
+        FP=$(work_fingerprint)
+        log "${PHASE}: nessun browser necessario. Attendo cambiamenti locali prima del prossimo login..."
+        wait_for_work_change "$FP"
       else
         log "Autoplay terminato con codice 0. Riavvio tra 10 minuti (evito loop a vuoto, need_help o fine turno)..."
         wait_ms 600000
@@ -316,6 +350,12 @@ while true; do
       if [[ "$PHASE" = "member_queue_advanced" ]]; then
         log "Coda multi-CF avanzata. Riavvio tra 60s sul prossimo membro..."
         wait_ms 60000
+        continue
+      fi
+      if [[ "$PHASE" = "awaiting_ai" || "$PHASE" = "complete" ]]; then
+        FP=$(work_fingerprint)
+        log "${PHASE}: attendo cambiamenti locali prima di riaprire il browser..."
+        wait_for_work_change "$FP"
         continue
       fi
       log "Autoplay terminato con codice 0 (fine turno). Calcolo prossimo turno..."

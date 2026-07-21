@@ -31,6 +31,8 @@ const TERMINAL_PHASES = new Set([
   'stopped',
   'done',
   'need_help',
+  'awaiting_ai',
+  'complete',
   'off_hours',
   'fatal',
   'idle',

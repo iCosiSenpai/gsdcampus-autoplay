@@ -40,6 +40,17 @@ function courseIdFromUrl(url) {
   return m ? m[1] : null;
 }
 
+// Identita stabile dei questionari. La piattaforma espone normalmente URL del
+// tipo /questionario/VA/dashboard/<piano>/modulo/<id> oppure .../corso/<id>.
+// Conservare entrambi evita il falso-done storico: un corso puo avere un quiz
+// di modulo e uno di corso, e superarene uno non completa automaticamente l'altro.
+function assessmentIdFromUrl(url) {
+  const m = String(url || '').match(/\/questionario\/[^?#]*\/(modulo|corso)\/(\d+)/i);
+  if (m) return `${m[1].toLowerCase()}:${m[2]}`;
+  const fallback = String(url || '').match(/\/questionario\/([^?#]+)/i);
+  return fallback ? `url:${fallback[1].replace(/\/+$/, '')}` : null;
+}
+
 function getCourse(state, url) {
   const id = courseIdFromUrl(url);
   if (!id) return { status: 'in_progress', quizAttempts: 0, completedLessons: [] };
@@ -89,13 +100,25 @@ function mergeWriteState(root, state, opts = {}) {
 // done con finalQuizPassed:false + questionario pendente sulla piattaforma è un
 // falso-done — v. harvest-answers.js --reconcile).
 function markCourseDone(root, state, url, finalQuizPassed = null) {
-  const updates = { status: 'done', quizAttempts: 0, needHelpReason: null };
+  const current = getCourse(state, url);
+  // Non azzerare la cronologia: quizAttempts deve riflettere solo Conferme
+  // realmente inviate, mentre le sospensioni protette vivono in un contatore
+  // separato. Le vite della piattaforma restano quindi auditabili.
+  const updates = { status: 'done', quizAttempts: current.quizAttempts || 0, needHelpReason: null };
   if (finalQuizPassed !== null) updates.finalQuizPassed = finalQuizPassed;
+  updates.needHelpCode = null;
+  updates.completionEvidence = finalQuizPassed === true
+    ? 'all_assessments_passed'
+    : (finalQuizPassed === false ? 'no_assessment_confirmed' : 'content_only');
   return updateCourse(root, state, url, updates);
 }
 
-function markCourseNeedHelp(root, state, url, reason) {
-  return updateCourse(root, state, url, { status: 'need_help', needHelpReason: reason || 'quiz non superato, serve risposta' });
+function markCourseNeedHelp(root, state, url, reason, code = null) {
+  return updateCourse(root, state, url, {
+    status: 'need_help',
+    needHelpReason: reason || 'quiz non superato, serve risposta',
+    needHelpCode: code || null,
+  });
 }
 
 function incrementQuizAttempt(root, state, url, result) {
@@ -103,6 +126,75 @@ function incrementQuizAttempt(root, state, url, result) {
   return updateCourse(root, state, url, {
     quizAttempts: (c.quizAttempts || 0) + 1,
     lastQuizResult: result || c.lastQuizResult
+  });
+}
+
+// Una sospensione attempt-protective non e un tentativo: la piattaforma non ha
+// ricevuto la Conferma finale. La contiamo separatamente per non mostrare vite
+// consumate inesistenti e per mantenere auditabile il gate di sicurezza.
+function incrementProtectedSuspension(root, state, url, result) {
+  const c = getCourse(state, url);
+  return updateCourse(root, state, url, {
+    protectedSuspensions: (c.protectedSuspensions || 0) + 1,
+    lastQuizResult: result || c.lastQuizResult,
+  });
+}
+
+function registerAssessments(root, state, courseUrl, assessmentUrls) {
+  const c = getCourse(state, courseUrl);
+  const assessments = { ...(c.assessments || {}) };
+  const seenAt = new Date().toISOString();
+  for (const url of assessmentUrls || []) {
+    const id = assessmentIdFromUrl(url);
+    if (!id) continue;
+    const prev = assessments[id] || {};
+    assessments[id] = {
+      ...prev,
+      id,
+      url,
+      status: prev.status || 'pending',
+      lastSeenAt: seenAt,
+    };
+  }
+  updateCourse(root, state, courseUrl, { assessments });
+  return assessments;
+}
+
+function markAssessment(root, state, courseUrl, assessmentUrl, status, details = {}) {
+  const c = getCourse(state, courseUrl);
+  const assessments = { ...(c.assessments || {}) };
+  const id = assessmentIdFromUrl(assessmentUrl);
+  if (!id) return state;
+  assessments[id] = {
+    ...(assessments[id] || {}),
+    id,
+    url: assessmentUrl,
+    status,
+    ...details,
+    updatedAt: new Date().toISOString(),
+  };
+  return updateCourse(root, state, courseUrl, { assessments });
+}
+
+function allAssessmentsPassed(state, courseUrl, assessmentUrls = null) {
+  const c = getCourse(state, courseUrl);
+  const assessments = c.assessments || {};
+  const ids = Array.isArray(assessmentUrls)
+    ? assessmentUrls.map(assessmentIdFromUrl).filter(Boolean)
+    : Object.keys(assessments);
+  return ids.length > 0 && ids.every(id => assessments[id] && assessments[id].status === 'passed');
+}
+
+// Riapre un corso mantenendo lezioni e ledger assessment. Diversamente da
+// resetCourse, e adatto allo sblocco automatico dopo la risoluzione delle
+// domande: non butta via evidenze utili e non tocca altri account.
+function reopenCourse(root, state, url) {
+  const id = courseIdFromUrl(url);
+  if (!id || !state[id]) return state;
+  return updateCourse(root, state, url, {
+    status: 'in_progress',
+    needHelpReason: null,
+    needHelpCode: null,
   });
 }
 
@@ -117,6 +209,9 @@ function addCompletedLesson(root, state, url, lessonUrl) {
 
 function isCourseDoneOrNeedHelp(state, url) {
   const c = getCourse(state, url);
+  // I done legacy senza prova di quiz/no-assessment vanno ricontrollati una
+  // volta. I record nuovi portano completionEvidence e restano terminali.
+  if (c.status === 'done' && c.finalQuizPassed === false && !c.completionEvidence) return false;
   return c.status === 'done' || c.status === 'need_help';
 }
 
@@ -163,7 +258,13 @@ module.exports = {
   markCourseDone,
   markCourseNeedHelp,
   incrementQuizAttempt,
+  incrementProtectedSuspension,
   addCompletedLesson,
+  assessmentIdFromUrl,
+  registerAssessments,
+  markAssessment,
+  allAssessmentsPassed,
+  reopenCourse,
   isCourseDoneOrNeedHelp,
   summarize,
   allDoneOrNeedHelp,

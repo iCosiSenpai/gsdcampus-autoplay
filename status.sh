@@ -229,7 +229,7 @@ if [ -f logs/ai_todo.json ]; then
       const t = require('./logs/ai_todo.json');
       if (t.statusAgeMin != null) console.log('  Stato aggiornato ' + t.statusAgeMin + ' min fa' + (t.statusStale ? ' (VECCHIO)' : ''));
       if (t.openQuizRequests) console.log('  • ' + t.openQuizRequests + ' domanda/e quiz da risolvere (ai_quiz_request.json)');
-      if (t.falseDones) console.log('  • ' + t.falseDones + ' corso/i con questionario pendente (già rimessi in coda)');
+      if (t.falseDones) console.log('  • ' + t.falseDones + ' corso/i con questionario pendente (da riconciliare)');
       (t.actions||[]).forEach(a => console.log('  → ' + a));
       if (!t.openQuizRequests && !t.falseDones) console.log('  Nessuna azione urgente in sospeso.');
     } catch(e) { console.log('  (inbox non leggibile)'); }
