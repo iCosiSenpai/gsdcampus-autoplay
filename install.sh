@@ -78,16 +78,89 @@ if { : < /dev/tty; } 2>/dev/null; then
   TTY_REDIR="/dev/tty"
 fi
 
-# Banner a box arrotondato (allineato allo stile di scripts/lib/ui.sh; qui
-# inline perché pre-clone). Larghezza fissa 44; padding calcolato in caratteri.
+# Diamo respiro all'interfaccia solo quando il Terminale è davvero troppo
+# piccolo. CSI 8 è gestito direttamente da Terminal.app/iTerm2, quindi non
+# richiede AppleScript né permessi Accessibilità. Le dimensioni nuove sono il
+# massimo tra quelle correnti e il minimo consigliato: una finestra già grande
+# (tipicamente anche quella a schermo intero) non viene mai ridotta. In modalità
+# full screen macOS può ignorare la richiesta, senza uscirne.
+UI_WINDOW_RESIZED=false
+ui_prepare_terminal() {
+  [ -t 1 ] || return 0
+
+  # Imposta anche un titolo riconoscibile alla finestra/scheda corrente.
+  printf '\033]0;GSD Campus Autopilot\007'
+
+  case "${TERM_PROGRAM:-}" in
+    Apple_Terminal|iTerm.app) ;;
+    *) return 0 ;;
+  esac
+  command -v tput >/dev/null 2>&1 || return 0
+
+  local cols lines new_cols new_lines
+  cols=$(tput cols 2>/dev/null || printf '0')
+  lines=$(tput lines 2>/dev/null || printf '0')
+  case "$cols:$lines" in
+    *[!0-9:]*|0:*|*:0) return 0 ;;
+  esac
+
+  new_cols=$cols
+  new_lines=$lines
+  [ "$new_cols" -lt 108 ] && new_cols=108
+  [ "$new_lines" -lt 40 ] && new_lines=40
+  if [ "$new_cols" -ne "$cols" ] || [ "$new_lines" -ne "$lines" ]; then
+    printf '\033[8;%s;%st' "$new_lines" "$new_cols"
+    sleep 0.15
+    UI_WINDOW_RESIZED=true
+  fi
+}
+
+# Hero e pannelli a box arrotondato. Sono inline perché install.sh gira prima
+# del clone; la larghezza lascia spazio anche alle voci più lunghe del menu.
+UI_BOX_INNER=60
+ui_repeat() {
+  local char="$1" count="$2" out=""
+  while [ "$count" -gt 0 ]; do
+    out="${out}${char}"
+    count=$((count - 1))
+  done
+  printf '%s' "$out"
+}
+ui_box_top() {
+  printf ' %b╭%s╮%b\n' "$ACCENT" "$(ui_repeat '─' "$UI_BOX_INNER")" "$NC"
+}
+ui_box_bottom() {
+  printf ' %b╰%s╯%b\n' "$ACCENT" "$(ui_repeat '─' "$UI_BOX_INNER")" "$NC"
+}
 ui_box_line() {
   # $1 = testo, $2 = codice stile (es. $BOLD o $DIM)
-  local len pad spaces
-  len=$(printf '%s' "$1" | wc -m | tr -d ' ')
-  pad=$((40 - len)); [ "$pad" -lt 0 ] && pad=0
+  local text="$1" style="$2" len pad spaces max_text
+  max_text=$((UI_BOX_INNER - 2))
+  len=$(printf '%s' "$text" | wc -m | tr -d ' ')
+  if [ "$len" -gt "$max_text" ]; then
+    text="$(printf '%s' "$text" | cut -c "1-$((max_text - 1))")…"
+    len=$max_text
+  fi
+  pad=$((max_text - len)); [ "$pad" -lt 0 ] && pad=0
   spaces=$(printf '%*s' "$pad" "")
-  printf ' %b│%b  %b%s%b%s%b│%b\n' "$ACCENT" "$NC" "$2" "$1" "$NC" "$spaces" "$ACCENT" "$NC"
+  printf ' %b│%b  %b%s%b%s%b│%b\n' "$ACCENT" "$NC" "$style" "$text" "$NC" "$spaces" "$ACCENT" "$NC"
 }
+ui_mascot() {
+  if [ "${UI_OK}" = '✓' ]; then
+    printf ' %b                    ╭──────────────────╮%b\n' "$ACCENT" "$NC"
+    printf ' %b                    │%b %bCiao collega!%b    %b│%b\n' "$ACCENT" "$NC" "$BOLD" "$NC" "$ACCENT" "$NC"
+    printf ' %b                    ╰────────┬─────────╯%b\n' "$ACCENT" "$NC"
+  else
+    printf '                     +------------------+\n'
+    printf '                     | Ciao collega!    |\n'
+    printf '                     +--------+---------+\n'
+  fi
+  printf ' %b%s%b\n' "$ACCENT" '                          /\_/\' "$NC"
+  printf ' %b%s%b\n' "$ACCENT" '                         ( o.o )' "$NC"
+  printf ' %b%s%b\n' "$ACCENT$BOLD" '                          > ^ <' "$NC"
+}
+
+ui_prepare_terminal
 echo ""
 # Versione dell'installazione locale (se esiste già): aiuta a capire da quale
 # versione si sta aggiornando. Alla prima installazione non c'è ancora nulla.
@@ -97,14 +170,21 @@ if [ -d "$HOME/gsdcampus-autoplay/.git" ]; then
   INST_DATE=$(git -C "$HOME/gsdcampus-autoplay" log -1 --format=%cd --date=format:'%d/%m/%Y' 2>/dev/null || echo "")
 fi
 if [ "${UI_OK}" = '✓' ]; then
-  printf ' %b╭──────────────────────────────────────────╮%b\n' "$ACCENT" "$NC"
-  ui_box_line "⚡ GSD Campus Autopilot — Installer" "$BOLD"
+  ui_mascot
+  echo ""
+  ui_box_top
+  ui_box_line "GSD Campus Autopilot" "$BOLD"
+  ui_box_line "Aggiorna · configura · avvia" "$DIM"
   [ -n "$INST_VER" ] && ui_box_line "versione $INST_VER${INST_DATE:+ · $INST_DATE}" "$DIM" || true
-  printf ' %b╰──────────────────────────────────────────╯%b\n' "$ACCENT" "$NC"
+  ui_box_bottom
 else
-  printf '%b  GSD Campus Autopilot — Installer%b\n' "$BOLD" "$NC"
+  ui_mascot
+  echo ""
+  printf '%b  GSD Campus Autopilot%b\n' "$BOLD" "$NC"
+  printf '  Aggiorna - configura - avvia\n'
   [ -n "$INST_VER" ] && printf "  versione installata: %s%s\n" "$INST_VER" "${INST_DATE:+ del $INST_DATE}" || true
 fi
+[ "$UI_WINDOW_RESIZED" = true ] && info "Finestra adattata per mostrare comodamente tutti i passaggi." || true
 echo ""
 
 # Preflight di rete (INLINE: pre-clone scripts/doctor.sh non esiste ancora;
@@ -298,9 +378,9 @@ case "$MODE" in
           | sed 's/^+//' | { grep -v '^\s*$' || true; } | { grep -v '^#' || true; } | head -10)
         if [ -n "${NOVITA:-}" ] && [ "${UI_OK}" = '✓' ]; then
           echo ""
-          printf ' %b╭──────────────────────────────────────────╮%b\n' "$ACCENT" "$NC"
+          ui_box_top
           ui_box_line "Novità di questo aggiornamento" "$BOLD"
-          printf ' %b╰──────────────────────────────────────────╯%b\n' "$ACCENT" "$NC"
+          ui_box_bottom
           printf '%s\n' "$NOVITA" | while IFS= read -r nl; do
             printf '  %b·%b %s\n' "$ACCENT" "$NC" "${nl#- }"
           done
@@ -416,7 +496,7 @@ case "$MODE" in
   *)       FINAL_ACTION="pronto" ;;
 esac
 if [ "${UI_OK}" = '✓' ]; then
-  printf ' %b╭──────────────────────────────────────────╮%b\n' "$ACCENT" "$NC"
+  ui_box_top
   ui_box_line "Tutto pronto" "$BOLD"
   [ -n "$FINAL_VER" ] && ui_box_line "versione $FINAL_VER · $FINAL_ACTION" "$DIM" || true
   if [ "${DOCTOR_STATUS:-}" = "ok" ]; then
@@ -424,7 +504,7 @@ if [ "${UI_OK}" = '✓' ]; then
   elif [ "${DOCTOR_STATUS:-}" = "problemi" ]; then
     ui_box_line "checkup sistema: vedi avvisi sopra" "$DIM"
   fi
-  printf ' %b╰──────────────────────────────────────────╯%b\n' "$ACCENT" "$NC"
+  ui_box_bottom
   echo ""
 fi
 ok "Avvio il supervisore AI..."

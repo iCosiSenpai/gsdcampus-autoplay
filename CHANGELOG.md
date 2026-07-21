@@ -7,6 +7,7 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-21
 
+- Il comando curl accoglie i colleghi con una piccola mascotte, pannelli più leggibili e adatta automaticamente Terminal.app/iTerm2 quando la finestra è troppo piccola, senza ridurre quelle già grandi.
 - Lo scheduler mostra `off_hours` con heartbeat e prossimo turno, senza lasciare vecchi errori come se fossero ancora attivi.
 - Prima di ogni browser viene verificato il contratto dei selettori: se il controllo fallisce, nessun corso o quiz viene aperto.
 - Il lock anti-doppio-avvio verifica PID, comando e token casuale: un PID riciclato non può più essere scambiato per l'autoplay.
