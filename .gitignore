@@ -34,6 +34,9 @@ data/members.db-wal
 data/members.db-shm
 # stato aggregato cross-utente (rigenerato)
 data/dashboard.json
+# Contatore locale delle richieste AI: niente prompt, chiavi o risposte, solo
+# timestamp/status per il budget settimanale del proxy.
+data/ai_usage.json
 # domande dei quiz raccolte da harvest-answers.js (file di lavoro per-account)
 data/harvested_questions.json
 # stato personale per-account (cookie compresi)
@@ -45,6 +48,7 @@ config.json
 config.json.bak
 PROMPT-per-altra-AI.md
 .autoplay_pid
+.ai_proxy_pid
 .autoplay_lock/
 .ollama_pid
 .scheduler_stop
@@ -53,3 +57,5 @@ PROMPT-per-altra-AI.md
 .package_hash
 .claude/
 .claude/plan.md
+# Configurazione OpenCode generata localmente (può contenere endpoint personali).
+.opencode/

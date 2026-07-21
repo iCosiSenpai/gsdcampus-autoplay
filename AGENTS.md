@@ -27,7 +27,7 @@ Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `con
 
 **Giro di scoperta prima di cominciare**: ad **ogni run**, prima di processare qualsiasi corso, `autoplay.js` fa un passaggio di scoperta (`discoverCourses`) che legge dalla dashboard l'elenco fresco dei corsi dell'utente e li filtra per stato (salta `done`/`need_help`). Lo script **non persiste né "impara" gli ID dei corsi**: la scoperta è sempre da zero, perché gli ID sono personali e possono cambiare. Non inserire mai ID corso hardcoded nello script o in `config.json`.
 
-**AI sempre attiva insieme allo script**: l'autoplay gira **sempre insieme a un supervisore AI + Ollama**. Il launcher distribuito (`launch-ai-supervisor.sh`) usa Claude Code; quando il progetto viene aperto direttamente in Codex, queste istruzioni in `AGENTS.md` mantengono lo stesso contratto operativo. L'AI può intervenire su `need_help`/`ignoto`, arricchire `known_answers.json`, gestire domande sconosciute e diagnosi. I dump diagnostici (`debug/quiz/`, `dumpQuizDiagnostics` in `src/lib/quiz.js`) servono proprio a dare all'AI qualcosa da leggere quando l'esito non è chiaro: l'autopilot non fallisce mai in silenzio, lascia artefatti per l'AI.
+**AI sempre attiva insieme allo script**: l'autoplay gira **sempre insieme a un supervisore AI + Ollama Cloud**. Il launcher distribuito (`launch-ai-supervisor.sh`) usa OpenCode attraverso un proxy locale con budget; quando il progetto viene aperto direttamente in Codex, queste istruzioni in `AGENTS.md` mantengono lo stesso contratto operativo. L'AI può intervenire su `need_help`/`ignoto`, arricchire `known_answers.json`, gestire domande sconosciute e diagnosi. I dump diagnostici (`debug/quiz/`, `dumpQuizDiagnostics` in `src/lib/quiz.js`) servono proprio a dare all'AI qualcosa da leggere quando l'esito non è chiaro: l'autopilot non fallisce mai in silenzio, lascia artefatti per l'AI.
 
 ---
 
@@ -100,8 +100,7 @@ Sei stato aperto per portare avanti in autonomia il corso e-learning GSD Campus.
 - `./scripts/check-requirements.sh` — verifica requisiti.
 - `./scripts/setup.sh` — installa requisiti mancanti e configura `config.json` (autologin + orari). La configurazione degli orari è interattiva e offre scelte rapide (continuato, solo mattina, solo pomeriggio, classico, personalizzato).
 - **Nota importante:** `./launch-ai-supervisor.sh` ferma automaticamente eventuali istanze precedenti di autoplay/scheduler all'avvio, quindi non è necessario eseguire `./stop.sh` prima. Se un collega ha ancora un processo vecchio in esecuzione, il supervisore lo pulisce da solo.
-- `./scripts/ollama-daemon.sh start` — avvia Ollama in modalità headless (se serve al supervisore stesso).
-- `./scripts/ollama-daemon.sh stop` — ferma Ollama.
+- `./scripts/lib/ai-budget-cli.js` — mostra il budget rolling locale, senza prompt o risposte.
 - `./status.sh --check` — come `status.sh` ma esegue anche la **verifica LIVE** del link autologin (apre un browser headless, ~30s) e ti dice se il link funziona davvero ADESSO. La verifica live parte da sola anche senza `--check` quando lo stato salvato segnala `autologin_invalid`/`session_lost`.
 - `node scripts/lib/healthcheck-cli.js` — sonda LIVE dell'autologin (umana). `--json` per output JSON. Exit 0 = link valido, 1 = non valido. **È la fonte di verità su "il link funziona?"**, da preferire SEMPRE a `logs/status.json` (che può essere vecchio).
 - `./scripts/monitor-course.sh [secondi]` — monitor live del corso che si aggiorna da solo (default 30s); `--once` per una sola stampa.
@@ -266,11 +265,11 @@ Sii conciso. Riporta:
 
 ## Permessi del supervisore AI
 
-`./launch-ai-supervisor.sh` avvia Claude Code con `--dangerously-skip-permissions`. Lo script chiede la password di sudo una sola volta (`sudo -v`) in foreground, **prima** dei prompt interattivi, e la rinfresca in foreground al passo Ollama. **Non usa un keepalive in background**: un `sudo -v` in background legge la password da `/dev/tty` e ruba i tasti al menu "Chi sei?" (caratteri non visibili + "Sorry, try again. Password:"). Durante il setup l'utente deve solo confermare eventuali richieste di installazione/aggiornamento da Homebrew/npm (sempre `y`). Le sessioni Codex aperte direttamente usano invece il proprio sistema di permessi.
+`./launch-ai-supervisor.sh` avvia OpenCode con `--auto` e un provider OpenAI-compatible puntato al proxy locale. Il proxy inoltra solo a `https://ollama.com/v1`, legge la chiave esclusivamente dal Portachiavi macOS, limita a 400 richieste/7 giorni (80/24h, 8/minuto, una alla volta) e non persiste contenuti. Edit e subagent sono negati nella configurazione generata; i comandi CLI per risposte verificate restano disponibili.
 
 ## Requisito login Ollama
 
-Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)** — `launch-ai-supervisor.sh`, `setup.sh` e `check-requirements.sh` lo leggono tutti da lì, così non c'è rischio di scaricare/cercare modelli diversi tra loro. Se è un modello **cloud Ollama**, richiede l'autenticazione: `./launch-ai-supervisor.sh` e `./scripts/setup.sh` gestiscono automaticamente il login (aprono `ollama login` in modo interattivo, aspettano le credenziali, poi scaricano il modello e avviano il supervisore). Per cambiare modello basta modificare `ollamaModel` in `config.json`. Non devi fare altro.
+Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)**. Il suffisso `-cloud` viene tolto solo per la chiamata diretta API (es. `gemma4:31b-cloud` → `gemma4:31b`). Non viene scaricato alcun modello sul Mac e non viene avviato il daemon locale: la chiave API viene richiesta una volta e conservata nel Portachiavi. Il contatore locale è una cintura di sicurezza per il tier gratuito, non una garanzia della quota Ollama (che dipende anche dal tempo GPU).
 
 ## Configurazione iniziale
 

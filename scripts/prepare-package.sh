@@ -76,6 +76,7 @@ cp "$DIR/launch-ai-supervisor.sh" "$OUTPUT_DIR/"
 cp "$DIR/start.sh" "$OUTPUT_DIR/"
 cp "$DIR/stop.sh" "$OUTPUT_DIR/"
 cp "$DIR/status.sh" "$OUTPUT_DIR/"
+cp "$DIR/AGENTS.md" "$OUTPUT_DIR/"
 cp "$DIR/CLAUDE.md" "$OUTPUT_DIR/"
 cp "$DIR/README.md" "$OUTPUT_DIR/"
 cp "$DIR/README-COLLEGHI.md" "$OUTPUT_DIR/"
@@ -109,10 +110,13 @@ find "$OUTPUT_DIR/debug/dumps" -type f -delete 2>/dev/null || true
 rm -rf "$OUTPUT_DIR/debug/exploration"   # dump esplorazione: contengono dati personali dei colleghi
 rm -rf "$OUTPUT_DIR/scripts/logs"
 rm -f "$OUTPUT_DIR/.autoplay_pid"
+rm -f "$OUTPUT_DIR/.ai_proxy_pid"
 rm -f "$OUTPUT_DIR/.ollama_pid"
 rm -f "$OUTPUT_DIR/.scheduler_stop"
 rm -f "$OUTPUT_DIR/.supervisor_prompt.txt"
 rm -rf "$OUTPUT_DIR/.claude" 2>/dev/null || true
+rm -rf "$OUTPUT_DIR/.opencode" 2>/dev/null || true
+rm -f "$OUTPUT_DIR/data/ai_usage.json" 2>/dev/null || true
 rm -rf "$OUTPUT_DIR/.git" 2>/dev/null || true
 ok "Pulizia completata."
 

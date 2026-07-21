@@ -9,7 +9,10 @@
     "stop": "stop.sh",
     "status": "status.sh",
     "setup": "scripts/setup.sh",
-    "install": "install.sh"
+    "install": "install.sh",
+    "ai_budget": "src/lib/ai-budget.js",
+    "ai_proxy": "scripts/lib/ollama-cloud-proxy.js",
+    "opencode_config": "scripts/lib/opencode-config.js"
   },
   "paths": {
     "config": "config.json",
@@ -25,6 +28,16 @@
     "roadmap": "docs/ROADMAP-V2.md",
     "security": "docs/SECURITY-MEMBERS.md",
     "runbook_keys": "docs/RUNBOOK-KEYS.md"
+  },
+  "ai_supervisor": {
+    "client": "opencode",
+    "provider": "ollama-cloud",
+    "endpoint": "https://ollama.com/v1",
+    "key_storage": "macOS Keychain only; never config/log/git",
+    "local_proxy": "127.0.0.1:11435",
+    "budget_file": "data/ai_usage.json (metadata only, gitignored)",
+    "limits": { "weekly": 400, "daily": 80, "perMinute": 8, "minIntervalMs": 1500, "maxConcurrent": 1 },
+    "quiz_default": "useOllamaForQuiz=false; AI is used only for supervisor handoff"
   },
   "account_files": {
     "course_state": "data/accounts/<CF>/course_state.json",
@@ -66,6 +79,7 @@
     "answers_lag": "node scripts/lib/answers-cli.js lag",
     "answers_audit": "node scripts/lib/answers-cli.js audit [--fix]",
     "answers_verify": "node scripts/lib/answers-cli.js verify [--remote]",
+    "ai_budget": "node scripts/lib/ai-budget-cli.js [--json]",
     "course_state_backup_list": "node scripts/lib/course-state-backup-cli.js list",
     "course_state_backup_restore": "node scripts/lib/course-state-backup-cli.js restore <name> --yes",
     "members_queue_list": "node scripts/lib/members-cli.js queue list",
@@ -88,6 +102,14 @@
     "codice_fiscale": "preferred",
     "workSchedule": "days + shifts",
     "ollamaModel": "string",
+    "aiSupervisorClient": "opencode",
+    "aiCloudEndpoint": "https://ollama.com/v1",
+    "aiCloudProxyPort": "number 1024-65535",
+    "aiWeeklyRequestLimit": "number capped at 500",
+    "aiDailyRequestLimit": "number capped at 100",
+    "aiPerMinuteRequestLimit": "number capped at 10",
+    "aiMinRequestIntervalMs": "number milliseconds",
+    "aiMaxConcurrentRequests": "1",
     "memberQueue": "string[] CF optional",
     "memberQueueIndex": "number optional",
     "shareMetrics": "boolean opt-in",

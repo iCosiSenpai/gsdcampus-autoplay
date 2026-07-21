@@ -4,9 +4,9 @@
 # versione >= di questa, lo script NON reinstalla e NON si blocca: va avanti.
 # Se la versione è più vecchia, tenta un aggiornamento NON bloccante (se fallisce,
 # prosegue con la versione presente piuttosto che abortire). Così chi ha già
-# Ollama o Claude installati non viene fermato.
+# Ollama o OpenCode installati non viene fermato.
 MIN_OLLAMA="0.3.0"   # serve `ollama launch` + modelli cloud
-MIN_CLAUDE="1.0.0"   # Claude Code CLI moderno
+MIN_OPENCODE="1.0.0" # OpenCode CLI moderno
 
 # Confronto versione: restituisce 0 se $1 >= $2 (componenti numeriche separate da punto).
 version_ge() {

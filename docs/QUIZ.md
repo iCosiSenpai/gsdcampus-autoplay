@@ -1,5 +1,7 @@
 # Quiz e domande sconosciute
 
+> Configurazione distribuita 07/2026: `useOllamaForQuiz:false`. L'autoplay non consuma chiamate Cloud domanda-per-domanda; crea l'handoff protetto e il supervisore OpenCode usa Ollama Cloud soltanto quando serve risolvere lavoro aperto. Le sezioni sui guess Ollama descrivono il percorso opzionale/legacy se il flag viene riattivato.
+
 **Modello trust-by-location (revisione 07/2026):**
 - `data/known_answers.json` = banca **TRUSTED** locale (gitignorata). Ci vivono SOLO risposte verificate: dalla piattaforma (scrape post-quiz dei blocchi `.risposta-corretta`) o dall'**AI supervisore** (WebSearch + ragionamento, via `answers-cli set`/`resolve`). Il matching usa solo questa banca (similarità Jaccard ≥0.75 + match esatto; la sottostringa è gate-ata al ≥80% dei token per evitare falsi match). Per distribuire a **tutti** i colleghi (anche senza push git): `./scripts/publish-answers.sh` → Worker `POST /answers` (merge additivo, mai overwrite) → commit su main; i colleghi le ricevono al prossimo "Aggiorna e avvia".
 - `data/accounts/<CF>/pending_quiz_answers.json` = guess Ollama, per-account, **mai promossi automaticamente**. Usati solo per riprovare lo stesso quiz e consultabili dall'AI. (Prima del redesign, un quiz superato al 24/30 = 80% promuoveva ~6 risposte **sbagliate** nella banca condivisa per tutti i colleghi: bug capitale, ora chiuso.)

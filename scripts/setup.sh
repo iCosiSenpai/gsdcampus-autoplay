@@ -13,11 +13,13 @@ cd "$DIR"
 . "$DIR/scripts/setup/versions.sh"
 # shellcheck source=scripts/setup/ollama.sh
 . "$DIR/scripts/setup/ollama.sh"
+# shellcheck source=scripts/lib/keychain-secret.sh
+. "$DIR/scripts/lib/keychain-secret.sh"
 
-# Claude Code CLI installa il binario in ~/.local/bin; assicuriamo che sia
+# OpenCode installa il binario in ~/.local/bin o ~/.opencode/bin; assicuriamo che sia
 # subito disponibile nel PATH di questo script, anche negli shell non interattivi
 # che non caricano .zshrc.
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 MEMBERS_CLI="$DIR/scripts/lib/members-cli.js"
@@ -56,18 +58,18 @@ source "$DIR/scripts/lib/read-timer.sh"
 
 # Legge il modello Ollama da config.json (campo `ollamaModel`).
 # Fallback a costante letterale (NON a ${OLLAMA_MODEL}: circolare — vedi check-requirements.sh).
-MODEL_FALLBACK="gemma4:cloud"
+MODEL_FALLBACK="gemma4:31b-cloud"
 get_ollama_model() {
   node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${MODEL_FALLBACK}'); } catch(e){ console.log('${MODEL_FALLBACK}'); }" 2>/dev/null || echo "${MODEL_FALLBACK}"
 }
 OLLAMA_MODEL="$(get_ollama_model)"
 
-# Claude Code CLI installa in ~/.local/bin. Negli shell non interattivi .zshrc
+# OpenCode installa in ~/.local/bin o ~/.opencode/bin. Negli shell non interattivi .zshrc
 # non viene letto, quindi assicuriamo il PATH sia attivo qui e persistito nei
 # principali file di configurazione dello shell (zsh e bash).
 ensure_local_bin_in_path() {
-  export PATH="$HOME/.local/bin:$PATH"
-  local line='export PATH="$HOME/.local/bin:$PATH"'
+  export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
+  local line='export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"'
   local f human
   for f in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
     if [ -f "$f" ] && ! grep -qF "$line" "$f" 2>/dev/null; then
@@ -126,7 +128,7 @@ print_header() {
   echo -e "  ${BOLD}2)${NC} Quando lavorare — giorni e orari in cui il corso deve andare avanti"
   echo ""
   echo "Al resto (programmi necessari, browser, modello AI) penso io in automatico:"
-  echo -e "  ${DIM}Homebrew · Node.js · Playwright · Chrome · Ollama (${OLLAMA_MODEL}) · Claude Code · gh${NC}"
+  echo -e "  ${DIM}Homebrew · Node.js · Playwright · Chrome · Ollama CLI · OpenCode · gh${NC}"
   echo "Quello che è già installato e aggiornato viene saltato."
   echo ""
   warn "Se il Terminale chiede di installare/aggiornare qualcosa (anche 'y/n'), rispondi SEMPRE sì."
@@ -741,7 +743,7 @@ while true; do
     ui_kv "Autologin" "$(mask_url "$AUTOLOGIN")"
     ui_kv "Giorni" "$(days_human "$DAYS_JSON")"
     ui_kv "Turni" "$shifts_summary"
-    ui_kv "Modello" "${OLLAMA_MODEL:-gemma4:cloud}"
+    ui_kv "Modello Cloud" "${OLLAMA_MODEL:-gemma4:31b-cloud}"
     ui_kv "Issue" "${DIM}segnalazione bug al maintainer attiva${NC}"
     ui_hr
     echo ""
@@ -794,6 +796,14 @@ while true; do
   "autologinUrl": "$AUTOLOGIN",
   "baseUrl": "https://tecsial.gsdcampus.it/",
   "ollamaModel": "${OLLAMA_MODEL}",
+  "aiSupervisorClient": "opencode",
+  "aiCloudEndpoint": "https://ollama.com/v1",
+  "aiCloudProxyPort": 11435,
+  "aiWeeklyRequestLimit": 400,
+  "aiDailyRequestLimit": 80,
+  "aiPerMinuteRequestLimit": 8,
+  "aiMinRequestIntervalMs": 1500,
+  "aiMaxConcurrentRequests": 1,
   "courseUrls": [],
   "reportIssues": true,
   "workSchedule": {
@@ -880,113 +890,45 @@ if [ "$FORCE_UPDATE" = true ] || [ "$NEEDS_NPM" = true ] || [ ! -f "$DIR/.packag
   save_package_hash
 fi
 
-# 5. Ollama
-step "5/7 - Ollama"
-# install_ollama_official: scripts/setup/ollama.sh
-
+# 5. Ollama CLI (nessun daemon locale e nessun modello da scaricare)
+step "5/7 - Ollama Cloud"
 if ! command -v ollama &>/dev/null; then
-  info "Ollama non trovato. Installazione in corso..."
+  info "Ollama CLI non trovato. Installazione in corso..."
   install_ollama_official
-  if ! command -v ollama &>/dev/null && [ ! -x "/Applications/Ollama.app/Contents/MacOS/Ollama" ]; then
-    err "Installazione Ollama non riuscita (CLI non disponibile)."
-    info "Prova a eseguire manualmente: curl -fsSL https://ollama.com/install.sh | sh"
-    exit 1
-  fi
-  ok "Ollama installato."
-elif [ "$FORCE_UPDATE" = true ]; then
-  info "Reinstallazione/aggiornamento Ollama (richiesto --force-update)..."
-  install_ollama_official
-  ok "Ollama aggiornato."
+fi
+if command -v ollama &>/dev/null; then
+  ok "Ollama CLI pronto: $(ollama --version 2>/dev/null | head -1)"
 else
-  OLLAMA_VER=$(ollama --version 2>/dev/null | extract_version)
-  if [ -z "$OLLAMA_VER" ]; then
-    ok "Ollama già installato: $(ollama --version 2>/dev/null | head -1). Salto."
-  elif version_ge "$OLLAMA_VER" "$MIN_OLLAMA"; then
-    ok "Ollama già installato (v$OLLAMA_VER ≥ min $MIN_OLLAMA). Salto."
+  warn "Ollama CLI non disponibile: continuo, perché l'accesso Cloud usa direttamente l'API."
+fi
+
+# 6. Chiave Ollama Cloud nel Portachiavi macOS
+step "6/7 - Chiave Ollama Cloud"
+if ollama_api_key_present; then
+  ok "Chiave Ollama Cloud già presente nel Portachiavi."
+else
+  info "Inserisci la chiave API nel Portachiavi macOS (input nascosto, mai in config o log)."
+  if ollama_api_key_store_prompt; then
+    ok "Chiave salvata nel Portachiavi."
   else
-    warn "Ollama presente ma versione vecchia (v$OLLAMA_VER < $MIN_OLLAMA). Provo ad aggiornare..."
-    install_ollama_official
-    if command -v ollama &>/dev/null; then
-      ok "Ollama aggiornato: $(ollama --version 2>/dev/null | head -1)."
-    else
-      warn "Aggiornamento Ollama non riuscito: continuo con la versione presente (v$OLLAMA_VER)."
-    fi
+    warn "Chiave non salvata: l'autoplay funzionerà comunque senza supervisore AI."
   fi
 fi
 
-# Prima di interrogare i modelli, assicurati che il server Ollama sia attivo.
-# Non bloccante: se non parte, OLLAMA_AVAILABLE=false e saltiamo il pull del modello.
-ensure_ollama_server || true
-
-# 6. Modello ${OLLAMA_MODEL} (cloud, richiede login Ollama)
-step "6/7 - Modello Ollama ${OLLAMA_MODEL}"
-if [ "$OLLAMA_AVAILABLE" = false ]; then
-  warn "Salto il download del modello ${OLLAMA_MODEL}: server Ollama non disponibile."
-  warn "L'AI supervisore (launch-ai-supervisor.sh) riproverà ad avviare Ollama e scaricare il modello."
-else
-  # model_present_setup: grep -c >/dev/null (non -q) per evitare SIGPIPE se in
-  # futuro questo script passasse a pipefail (bug già visto nel launcher).
-  model_present_setup() {
-    ollama list 2>/dev/null | grep -c "${OLLAMA_MODEL}" >/dev/null
-  }
-  if model_present_setup; then
-    ok "Modello ${OLLAMA_MODEL} già presente. Salto."
-  else
-    # PULL-FIRST: se l'utente è già loggato su ollama.com il pull riesce subito,
-    # senza mai mostrare istruzioni browser/login. Il login (ollama signin, che
-    # stampa da solo l'URL reale) parte SOLO se il pull fallisce davvero.
-    info "Download modello ${OLLAMA_MODEL} (la prima volta può richiedere qualche minuto)..."
-    if ! ollama pull "${OLLAMA_MODEL}"; then
-      echo ""
-      warn "Per usare ${OLLAMA_MODEL} serve il login GRATUITO su ollama.com (basta registrarsi, niente da pagare)."
-      info "Ora si apre il browser; se non si apre da solo, copia nel browser l'URL che Ollama stampa qui sotto."
-      echo ""
-      read_with_timer 5 "${BOLD}Tra 5s parte il login (Invio per saltare l'attesa).${NC}"
-      ollama signin || true
-      info "Riprovo il download di ${OLLAMA_MODEL}..."
-      ollama pull "${OLLAMA_MODEL}" || true
-    fi
-    if model_present_setup; then
-      ok "Modello ${OLLAMA_MODEL} pronto."
-    else
-      err "Download del modello ${OLLAMA_MODEL} non riuscito."
-      warn "Completa il login su ollama.com e rilancia:  cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh"
-      warn "Nel frattempo l'autoplay può girare senza AI con:  ./start.sh"
-      exit 1
-    fi
-  fi
-fi
-
-# 7. Claude Code CLI
-step "7/7 - Claude Code CLI"
+# 7. OpenCode CLI
+step "7/7 - OpenCode CLI"
 ensure_local_bin_in_path
-if ! command -v claude &>/dev/null; then
-  info "Claude Code CLI non trovato. Installazione in corso..."
-  # Non bloccante: se l'install fallisce (rete), warn e prosegui — il check finale
-  # sotto rileverà claude mancante e darà un messaggio chiaro invece di abortire opaco.
-  curl -fsSL https://claude.ai/install.sh | bash || warn "Installazione Claude Code non riuscita (rete?). Il check finale segnalerà se manca."
+export PATH="$HOME/.opencode/bin:$PATH"
+if ! command -v opencode &>/dev/null; then
+  info "OpenCode non trovato. Installazione dal canale ufficiale..."
+  curl -fsSL https://opencode.ai/install | bash || warn "Installazione OpenCode non riuscita (rete?). Il check finale segnalerà se manca."
   ensure_local_bin_in_path
-else
-  CLAUDE_VER=$(claude --version 2>/dev/null | extract_version)
-  if [ -z "$CLAUDE_VER" ]; then
-    ok "Claude Code CLI già installato: $(claude --version 2>/dev/null | head -1). Salto."
-  elif version_ge "$CLAUDE_VER" "$MIN_CLAUDE"; then
-    ok "Claude Code CLI già installato (v$CLAUDE_VER ≥ min $MIN_CLAUDE). Salto."
-  else
-    warn "Claude presente ma versione vecchia (v$CLAUDE_VER < $MIN_CLAUDE). Provo ad aggiornare..."
-    if curl -fsSL https://claude.ai/install.sh | bash; then
-      ensure_local_bin_in_path
-      ok "Claude aggiornato: $(claude --version 2>/dev/null | head -1)."
-    else
-      warn "Aggiornamento Claude non riuscito: continuo con la versione presente (v$CLAUDE_VER)."
-    fi
-  fi
+  export PATH="$HOME/.opencode/bin:$PATH"
 fi
-
-if command -v claude &>/dev/null; then
-  ok "Claude Code CLI pronto: $(claude --version 2>/dev/null | head -1)."
+if command -v opencode &>/dev/null; then
+  ok "OpenCode CLI pronto: $(opencode --version 2>/dev/null | head -1)"
 else
-  err "Claude Code CLI non trovato neanche dopo l'installazione. Prova a chiudere e riaprire il Terminale, poi riesegui ./launch-ai-supervisor.sh."
+  err "OpenCode CLI non trovato. Rilancia il comando curl quando la rete è disponibile."
   exit 1
 fi
 

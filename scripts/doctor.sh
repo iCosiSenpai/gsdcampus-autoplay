@@ -3,7 +3,7 @@
 # doctor.sh — checkup del sistema a semaforo, pensato per colleghi non tecnici.
 #
 # Esegue in ~5 secondi i controlli che spiegano il 90% dei "non funziona":
-# rete, GitHub, piattaforma GSD, Ollama+modello, spazio disco, requisiti,
+# rete, GitHub, piattaforma GSD, Ollama Cloud+OpenCode, spazio disco, requisiti,
 # configurazione. Ogni problema ha il suo rimedio scritto sotto.
 #
 # Uso:
@@ -69,18 +69,19 @@ else
   chk_err "Piattaforma GSD Campus non raggiungibile" "il sito del corso è giù o la rete lo blocca; riprova più tardi"
 fi
 
-# 4. Ollama: server su 11434 + modello configurato presente.
-# Modello: unica fonte di verità config.json (pattern read_ollama_model).
-MODEL=$(node -e "try{const c=require('$DIR/config.json');process.stdout.write(c.ollamaModel||'gemma4:cloud')}catch(e){process.stdout.write('gemma4:cloud')}" 2>/dev/null || echo "gemma4:cloud")
-if curl -m 3 -s -o /dev/null http://127.0.0.1:11434 2>/dev/null; then
-  # grep -c >/dev/null (non -q): niente SIGPIPE in pipeline (v. dev-check.sh).
-  if ollama list 2>/dev/null | grep -c "$MODEL" >/dev/null; then
-    chk_ok "Ollama attivo, modello $MODEL presente"
+# 4. Ollama Cloud: API key nel Portachiavi + budget locale (nessuna generazione).
+if [ -f "$DIR/scripts/lib/keychain-secret.sh" ]; then
+  . "$DIR/scripts/lib/keychain-secret.sh"
+  if ollama_api_key_present; then
+    chk_ok "Chiave Ollama Cloud presente nel Portachiavi"
   else
-    chk_warn "Ollama attivo ma modello $MODEL non scaricato" "si scarica da solo al prossimo avvio (comando curl)"
+    chk_warn "Chiave Ollama Cloud assente" "rilancia il comando curl per inserirla in modo sicuro"
   fi
+fi
+if node "$DIR/scripts/lib/ai-budget-cli.js" --json >/dev/null 2>&1; then
+  chk_ok "Budget AI locale leggibile (nessun prompt salvato)"
 else
-  chk_warn "Ollama non attivo" "parte da solo al prossimo avvio; l'autoplay funziona anche senza AI (./start.sh)"
+  chk_warn "Budget AI locale non inizializzato" "verrà creato alla prima chiamata"
 fi
 
 # 5. Spazio disco nella home (GB liberi).

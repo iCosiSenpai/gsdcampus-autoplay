@@ -4,7 +4,7 @@ set -eu -o pipefail
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
-# Neutralizza FORCE_COLOR: alcuni ambienti (es. il supervisore AI / Claude Code)
+# Neutralizza FORCE_COLOR: alcuni ambienti (es. il supervisore AI / OpenCode)
 # esportano FORCE_COLOR=3, che fa colorizzare a `node` anche su pipe. Uno snippet
 # `node -e "console.log(42)"` emetterebbe allora \x1b[33m42\x1b[39m, e l'aritmetica
 # shell `$((NEXT_MS / 60000))` crasherebbe sotto set -e uccidendo lo scheduler

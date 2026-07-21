@@ -9,6 +9,7 @@ cd "$DIR"
 # shellcheck source=scripts/setup/package-hash.sh
 . "$DIR/scripts/setup/package-hash.sh"
 . "$DIR/scripts/setup/browser-check.sh"
+. "$DIR/scripts/lib/keychain-secret.sh"
 
 missing=0
 
@@ -20,16 +21,6 @@ log_missing() {
 log_ok() {
   echo "✅ OK: $1"
 }
-
-# Legge il modello Ollama da config.json (campo `ollamaModel`).
-# Fallback a costante letterale (NON a ${OLLAMA_MODEL}: sarebbe circolare, perché
-# OLLAMA_MODEL viene valorizzato proprio da questa funzione → restituirebbe la
-# stringa vuota se config.json manca/corrotto). Stessa costante di launch-ai-supervisor.sh.
-MODEL_FALLBACK="gemma4:cloud"
-get_ollama_model() {
-  node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${MODEL_FALLBACK}'); } catch(e){ console.log('${MODEL_FALLBACK}'); }" 2>/dev/null || echo "${MODEL_FALLBACK}"
-}
-OLLAMA_MODEL="$(get_ollama_model)"
 
 # package_hash_ok da scripts/setup/package-hash.sh
 
@@ -72,22 +63,19 @@ else
   log_missing "Ollama"
 fi
 
-# 6. Ollama modello ${OLLAMA_MODEL} (richiede login cloud)
-if command -v ollama &>/dev/null; then
-  if ! curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
-    log_missing "Server Ollama attivo su 127.0.0.1:11434 (esegui: ollama serve oppure ./scripts/ollama-daemon.sh start)"
-  elif ollama list 2>/dev/null | grep -c "${OLLAMA_MODEL}" >/dev/null; then
-    log_ok "Modello Ollama ${OLLAMA_MODEL}"
-  else
-    log_missing "Modello Ollama ${OLLAMA_MODEL} (modello cloud; esegui ./launch-ai-supervisor.sh oppure ollama signin + ollama pull ${OLLAMA_MODEL})"
-  fi
+# 6. Chiave Ollama Cloud nel Portachiavi (nessun segreto stampato)
+if ollama_api_key_present; then
+  log_ok "Chiave Ollama Cloud nel Portachiavi macOS"
+else
+  log_missing "Chiave Ollama Cloud (viene richiesta da ./launch-ai-supervisor.sh)"
 fi
 
-# 7. Claude Code CLI
-if command -v claude &>/dev/null; then
-  log_ok "Claude Code ($(claude --version 2>/dev/null | head -1))"
+# 7. OpenCode CLI
+export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
+if command -v opencode &>/dev/null; then
+  log_ok "OpenCode ($(opencode --version 2>/dev/null | head -1))"
 else
-  log_missing "Claude Code CLI"
+  log_missing "OpenCode CLI"
 fi
 
 # 8. expect / osascript (macOS)

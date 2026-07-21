@@ -28,7 +28,7 @@ Rilanciandolo su un'installazione esistente compare un menu:
 2. **Cambia link autologin/orari** — reinserisci accesso e orari, poi avvia.
 3. **Reinstallazione pulita** — riallinea il codice e reinstalla tutte le dipendenze.
 4. **Solo avvia** — apre l'AI senza modificare nulla.
-5. **Disinstalla** — rimuove dipendenze, browser Playwright, Ollama, Claude Code, log e (opzionale) la cartella del progetto; ripulisce anche la riga `PATH` che lo script aveva aggiunto a `.zshrc`/`.bash_profile`.
+5. **Disinstalla** — rimuove dipendenze, browser Playwright, Ollama, OpenCode, log e (opzionale) la cartella del progetto; la chiave Ollama Cloud viene rimossa solo con una conferma separata.
 6. **Annulla**.
 
 In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e orari resta al suo posto.
@@ -38,14 +38,16 @@ In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e ora
 
 > **Nota sull'aggiornamento:** lo script confronta `package.json` e `package-lock.json` con lo stato di `node_modules`. Se sono cambiati (per esempio dopo un aggiornamento di Playwright), esegue automaticamente `npm install` e, se serve, reinstalla il browser Chromium. Se invece sono già allineati, salta tutto e parte subito.
 
-> 🔒 **Modello di fiducia (curl | bash).** Il comando qui sopra scarica ed esegue codice da Internet: è lo stesso livello di fiducia di qualsiasi `curl | bash`. Il sorgente vive su `github.com/iCosiSenpai/gsdcampus-autoplay` (branch `main`, **mobile**: ogni push su `main` cambia ciò che il comando esegue al prossimo lancio). Non c'è firma crittografica né verifica di checksum: ti fidi del proprietario del repository. Lo script scarica anche Ollama e Claude Code dai rispettivi canali ufficiali (senza checksum pubblicato da quei progetti), quindi la fiducia si estende anche a quegli installer. Per bloccare il codice a una versione verificata e immutabile, il manutentore può taggare una release (`git tag v0.1.0`) e impostare `PINNED_TAG` in `install.sh`: in quel caso la prima installazione clona esattamente quel tag invece del `main` mobile. Il vero signing/verifica dei binari resta un follow-up.
+> 🔒 **Modello di fiducia (curl | bash).** Il comando qui sopra scarica ed esegue codice da Internet: è lo stesso livello di fiducia di qualsiasi `curl | bash`. Il sorgente vive su `github.com/iCosiSenpai/gsdcampus-autoplay` (branch `main`, **mobile**: ogni push su `main` cambia ciò che il comando esegue al prossimo lancio). Non c'è firma crittografica né verifica di checksum: ti fidi del proprietario del repository. Lo script scarica Ollama CLI e OpenCode dai rispettivi canali ufficiali (senza checksum pubblicato da quei progetti), quindi la fiducia si estende anche a quegli installer. Per bloccare il codice a una versione verificata e immutabile, il manutentore può taggare una release (`git tag v0.1.0`) e impostare `PINNED_TAG` in `install.sh`.
 
 ## Prima installazione
 
 La prima volta il Terminale ti chiede alcune cose: rispondi con calma.
 - la **password del Mac (sudo)** — una sola volta, all'inizio; se il setup dura a lungo può richiederla di nuovo (niente keepalive in background: ruberebbe i tasti al menu "Chi sei?");
 - conferme di **installazione/aggiornamento/verifica dipendenze** (anche `y/n`) → rispondi **sempre sì**;
-- il **login Ollama** (modello AI configurabile in `config.json`, default `gemma4:cloud`) → inserisci le credenziali;
+- la **chiave Ollama Cloud** → viene inserita una volta nel Portachiavi macOS, senza finire in config o log;
+- sui Mac aggiornati da una versione precedente, una domanda **una-tantum** permette di conservare Claude ripulendo solo gli override GSD/Ollama oppure disinstallare il client; poi viene configurato OpenCode;
+- il proxy locale limita il supervisore a **400 richieste rolling/7 giorni**, 80/24 ore, 8/minuto e una sola richiesta contemporanea; il limite Ollama reale resta basato anche sul tempo GPU;
 - la **selezione del tuo account** con la schermata interattiva **"Chi sei?"**: nel terminale appare un menu navigabile con le frecce ↑/↓ e Invio; puoi cercare per nome, cognome o codice fiscale, vedere la lista completa, importare il CSV dei membri, incollare manualmente l'autologin o mantenere l'account attuale;
 - i **giorni lavorativi** (default lun–ven);
 - la **modalità oraria** preferita:
@@ -155,15 +157,15 @@ node scripts/lib/schedule-cli.js next-end      # prossima fine turno (ISO)
 ## Struttura
 
 - `launch-ai-supervisor.sh` — unico comando per l'utente
-- `CLAUDE.md` — istruzioni per il supervisore avviato dal launcher Claude Code
+- `AGENTS.md` — istruzioni per il supervisore OpenCode (CLAUDE.md resta compatibile per installazioni legacy)
 - `AGENTS.md` — istruzioni equivalenti per sessioni Codex aperte sul repository
 - `docs/QUIZ.md`, `docs/ISSUES.md`, `docs/SETUP.md`, `docs/TECH.md` — runbook tematici condivisi dai supervisori
 - `src/autoplay.js` — main
 - `src/lib/` — logger, monitor, quiz, video, schedule
 - `scripts/lib/schedule-cli.js` — helper orari per gli script shell
-- `scripts/` — setup, check requisiti, daemon Ollama
+- `scripts/` — setup, check requisiti, proxy Ollama Cloud e budget AI
 - `data/` — risposte conosciute, risposte in attesa di verifica, mappa corsi, stato sessione
-- `logs/` — log, heartbeat, status.json, supervisor.log, ollama.log
+- `logs/` — log, heartbeat, status.json, supervisor.log e ai-cloud-proxy.log (mai prompt o chiavi)
 - `debug/` — screenshot e dump HTML in caso di errore
 - `backups/accounts/<CF>/course-state/` — snapshot con checksum dello stato corsi prima di riaperture/reset; mai cookie o database membri
 - `README-COLLEGHI.md` — guida semplificata per i colleghi
@@ -209,7 +211,7 @@ I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i tu
 ## Quiz e banca risposte condivisa
 
 - La **banca risposte condivisa** vive su due livelli: `data/known_answers.json` è la banca **TRUSTED locale** (per-Mac, non committata — cresce con le risposte verificate che l'autoplay scopre su quella macchina); `data/known_answers_public.json` è la banca **condivisa committata** nel repo, uguale per tutti i colleghi, da cui i nuovi install si seedano e che l'aggiornamento scarica e mergia nel file locale. Cresce solo con risposte verificate — dalla piattaforma (scrape post-quiz delle risposte corrette) o dall'AI supervisore (ricerca online + ragionamento). I tentativi di Ollama **non** vengono mai promossi automaticamente (restano per-account in `pending_quiz_answers.json`): così un quiz superato al 24/30 = 80% non inserisce più risposte sbagliate nella banca condivisa di tutta la classe. La distribuzione ai colleghi **non richiede git push**: `./scripts/publish-answers.sh` invia le risposte al Cloudflare Worker del manutentore, che le unisce (solo aggiunte, mai sovrascritture) e le committà su `main`.
-- Se una domanda non è in banca, lo script chiede a Ollama (modello configurabile in `config.json` tramite `ollamaModel`) con **few-shot** (esempi verificati) + **self-consistency** (3 campionamenti + voto a maggioranza). Per monitor/autoplay il modello cloud più economico e sufficiente per quiz in italiano è `gemma4:cloud`.
+- Se una domanda non è in banca, lo script può usare Ollama (modello configurabile in `config.json` tramite `ollamaModel`) con **few-shot** + **self-consistency**. Nel flusso predefinito `useOllamaForQuiz:false`, quindi il quiz non consuma richieste AI: l'AI supervisore OpenCode interviene solo sulle domande in handoff.
 - Le domande sconosciute o a bassa confidenza finiscono in `data/accounts/<CF>/ai_quiz_request.json` (con i tentativi di Ollama e la confidenza): l'AI supervisore le risolve e scrive la risposta verificata nella banca TRUSTED. L'esito (superato/non superato + punteggio) finisce in `logs/status.json` (`lastQuizResult`) ed è mostrato da `./status.sh`.
 - Se Ollama non sa rispondere, il quiz si ferma e salva la domanda in `data/accounts/<CF>/need_answer.json` + `ai_quiz_request.json`.
 - Manutenzione banca: `answers-cli audit --fix` rimuove solo duplicati Unicode con risposta equivalente; risposte discordanti vengono bloccate. `answers-cli verify --remote` confronta hash e contenuto canonico con `main`.

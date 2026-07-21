@@ -13,11 +13,11 @@
 #        - Cambia account e/o orari
 #        - Reinstallazione pulita (riallinea codice + reinstalla dipendenze)
 #        - Solo avvia
-#        - Cambia account Ollama (aggiorna il codice + logout/login Ollama)
+#        - Migrazione AI (aggiorna il codice + configura Ollama Cloud/OpenCode)
 #        - Disinstalla
 #        - Annulla
-#   3. Avvia ./launch-ai-supervisor.sh, che installa il resto (Node, Playwright, Ollama, Claude)
-#      e apre l'AI. La parte Ollama/Claude non viene modificata da questo script.
+#   3. Avvia ./launch-ai-supervisor.sh, che installa il resto (Node, Playwright, Ollama, OpenCode)
+#      e apre l'AI.
 #
 # L'aggiornamento NON tocca config.json (è in .gitignore): autologin e orari restano.
 
@@ -70,7 +70,7 @@ warn() { printf ' %b%s%b %s\n' "$YELLOW$BOLD" "$UI_WARN" "$NC" "$1"; }
 err()  { printf ' %b%s%b %s\n' "$RED$BOLD" "$UI_ERR" "$NC" "$1"; }
 
 # Quando lo script arriva da "curl | bash", lo stdin è la pipe, non il Terminale: i comandi
-# interattivi (read dell'autologin/orari, sudo, ollama login) leggerebbero il testo dello script
+# interattivi (read dell'autologin/orari, sudo, Portachiavi) leggerebbero il testo dello script
 # invece dell'input dell'utente. Riconnettiamo l'input alla tastiera tramite /dev/tty.
 # Verifichiamo che /dev/tty sia davvero APRIBILE in lettura (non basta che esista).
 TTY_REDIR=""
@@ -169,7 +169,7 @@ update_repo() {
 
 # 2. Prima installazione oppure gestione di un'installazione esistente
 MODE="install"   # install | update | reconfig | clean | launch | uninstall | cancel
-RELOGIN_OLLAMA=false   # true = dopo l'update, esci da Ollama e rientra con un altro login
+RELOGIN_OLLAMA=false   # compatibilità con vecchie installazioni: non usato dal flusso Cloud
 
 if [ -d "$TARGET/.git" ]; then
   if [ -n "$TTY_REDIR" ]; then
@@ -190,7 +190,7 @@ if [ -d "$TARGET/.git" ]; then
       "Cambia account/orari — riconfigura account e orari, poi avvia" \
       "Reinstallazione pulita — riallinea il codice e reinstalla le dipendenze" \
       "Solo avvia — apre l'AI senza modificare nulla" \
-      "Cambia account Ollama — esci e rientra con un altro login" \
+      "Migrazione AI — configura Ollama Cloud + OpenCode" \
       "Disinstalla — rimuove dipendenze, modello, CLI (con conferma)" \
       "Annulla" < "$TTY_REDIR" 2>/dev/null || echo 1)
     case "$CHOICE" in
@@ -198,7 +198,7 @@ if [ -d "$TARGET/.git" ]; then
       2) MODE="reconfig" ;;
       3) MODE="clean" ;;
       4) MODE="launch" ;;
-      5) MODE="update"; RELOGIN_OLLAMA=true ;;   # aggiorna il codice E ri-logga Ollama
+      5) MODE="update" ;;   # aggiornamento + migrazione una-tantum
       6) MODE="uninstall" ;;
       0|7) MODE="cancel" ;;
       *) MODE="update" ;;   # node failure / EOF → safest default
@@ -232,6 +232,51 @@ cd "$TARGET"
 chmod +x ./launch-ai-supervisor.sh ./start.sh ./stop.sh ./status.sh 2>/dev/null || true
 chmod +x ./scripts/*.sh 2>/dev/null || true
 
+# Migrazione una sola volta per Mac. Il marker vive fuori dal repository, quindi
+# non si ripete dopo un pull/reset e non viene distribuito ai colleghi.
+migrate_claude_once() {
+  local marker_dir="$HOME/Library/Application Support/gsdcampus-autoplay"
+  local marker="$marker_dir/client-opencode-v1.done"
+  [ -f "$marker" ] && return 0
+  [ -n "$TTY_REDIR" ] || return 0
+  [ -f "$TARGET/scripts/lib/migrate-claude-settings.js" ] || return 0
+  if ! command -v claude >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/claude" ] && [ ! -d "$HOME/.claude" ]; then
+    return 0
+  fi
+
+  echo ""
+  info "Ho aggiornato il client AI da Claude a OpenCode. Claude ti serve ancora?"
+  local choice
+  choice=$(node "$TARGET/scripts/lib/prompt-cli.js" select \
+    --title "Migrazione Claude → OpenCode" --default 1 -- \
+    "Mi serve Claude — mantienilo e ripristina solo le impostazioni GSD/Ollama" \
+    "Non mi serve Claude — disinstallalo (dati e conversazioni restano)" \
+    "Non toccare Claude per ora" < "$TTY_REDIR" 2>/dev/null || echo 1)
+
+  case "$choice" in
+    1)
+      node "$TARGET/scripts/lib/migrate-claude-settings.js" 2>/dev/null || warn "Non ho potuto ripristinare gli override Ollama di Claude."
+      ok "Claude conservato; rimossi soltanto eventuali override GSD/Ollama riconoscibili."
+      ;;
+    2)
+      rm -f "$HOME/.local/bin/claude" 2>/dev/null || true
+      if command -v brew >/dev/null 2>&1; then
+        brew uninstall --cask claude-code 2>/dev/null || true
+        brew uninstall --cask claude 2>/dev/null || true
+      fi
+      if command -v npm >/dev/null 2>&1; then
+        npm uninstall -g @anthropic-ai/claude-code 2>/dev/null || true
+      fi
+      ok "Claude disinstallato; configurazioni e conversazioni personali non sono state cancellate."
+      ;;
+    *)
+      info "Claude lasciato invariato. Potrai disinstallarlo manualmente in seguito."
+      ;;
+  esac
+  mkdir -p "$marker_dir"
+  printf 'client=opencode\ncompletedAt=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+}
+
 # 3. Esegui l'azione scelta
 case "$MODE" in
   update)
@@ -242,6 +287,7 @@ case "$MODE" in
     else
       OLD_HEAD=$(git -C "$TARGET" rev-parse HEAD 2>/dev/null || echo "")
       update_repo
+      migrate_claude_once
       # Box "Novità": righe aggiunte a CHANGELOG.md tra la versione di prima e
       # quella appena scaricata, in linguaggio semplice. Ogni grep con || true:
       # sotto pipefail un no-match (exit 1) abortirebbe l'installer.
@@ -272,7 +318,11 @@ case "$MODE" in
       if [ -f "$TARGET/scripts/check-requirements.sh" ] && ! "$TARGET/scripts/check-requirements.sh" >/dev/null 2>&1; then
         info "Dipendenze da aggiornare dopo il pull. Avvio setup condizionale..."
         sudo -v
-        "$TARGET/scripts/setup.sh" --yes
+        if [ -n "$TTY_REDIR" ]; then
+          "$TARGET/scripts/setup.sh" --yes < "$TTY_REDIR"
+        else
+          "$TARGET/scripts/setup.sh" --yes
+        fi
       else
         ok "Codice e dipendenze già allineati."
       fi
@@ -304,6 +354,7 @@ case "$MODE" in
     else
       update_repo
     fi
+    migrate_claude_once
     warn "Riconfigurazione: ti verrà richiesto di selezionare l'account dall'elenco membri e di configurare gli orari."
     # NON cancelliamo subito la config: la mettiamo da parte come backup, così se
     # la riconfigurazione viene annullata setup.sh può ripristinarla (niente perdita
@@ -332,6 +383,7 @@ case "$MODE" in
       mv -f "$ka_clean_keep" data/known_answers.json 2>/dev/null || rm -f "$ka_clean_keep" 2>/dev/null
     fi
     if [ -n "$TTY_REDIR" ] && [ -f config.json ]; then
+      migrate_claude_once
       info "Reinstallo/aggiorno tutte le dipendenze (può richiedere qualche minuto)..."
       ./scripts/setup.sh --yes --force-update < "$TTY_REDIR" || warn "Force-update dipendenze non completato; proseguo."
     fi
@@ -346,26 +398,18 @@ case "$MODE" in
     fi
     ;;
   launch|install)
-    : # nessuna azione preliminare
+    migrate_claude_once
     ;;
 esac
 
-# Cambio account Ollama (voce menu 5): esce dall'account attuale e RIMUOVE il
-# modello locale, così il launcher lo vede assente e fa UN SOLO signin col nuovo
-# account (flusso pull-first di launch-ai-supervisor.sh). NON facciamo signin
-# qui: due signin in cascata (qui + launcher) erano il bug del "doppio login".
-if [ "$RELOGIN_OLLAMA" = true ] && command -v ollama >/dev/null 2>&1; then
-  OLLAMA_MODEL=$(node -e "try{const c=require('$TARGET/config.json');process.stdout.write(c.ollamaModel||'gemma4:cloud')}catch(e){process.stdout.write('gemma4:cloud')}" 2>/dev/null || echo "gemma4:cloud")
-  info "Esco dall'account Ollama attuale (il nuovo login parte tra poco, una volta sola)..."
-  [ -n "$TTY_REDIR" ] && ollama signout < "$TTY_REDIR" >/dev/null 2>&1 || ollama signout >/dev/null 2>&1 || true
-  ollama rm "$OLLAMA_MODEL" >/dev/null 2>&1 || true
-fi
+# Il vecchio flusso di logout/pull locale Ollama è intenzionalmente rimosso:
+# questa versione usa la chiave nel Portachiavi e Ollama Cloud via proxy.
 
 echo ""
 # Schermata finale "Tutto pronto" prima di passare al supervisore.
 FINAL_VER=$(git -C "$TARGET" describe --tags --always 2>/dev/null || echo "")
 case "$MODE" in
-  update)  FINAL_ACTION=$([ "$RELOGIN_OLLAMA" = true ] && echo "aggiornato · nuovo login Ollama" || echo "aggiornato e pronto") ;;
+  update)  FINAL_ACTION="aggiornato · Ollama Cloud + OpenCode" ;;
   reconfig) FINAL_ACTION="riconfigurazione in arrivo" ;;
   clean)   FINAL_ACTION="reinstallato da zero" ;;
   install) FINAL_ACTION="prima installazione" ;;
@@ -392,7 +436,7 @@ echo ""
 #    fd1 (<&1 2>&1) così stdin/stdout/stderr condividono tutti lo stesso pty reale: è esattamente
 #    ciò che fa la shell interattiva nel lancio manuale.
 #
-#    NON usare /dev/tty (device major 2) per i fd del TUI: il claude CLI è compilato con Bun,
+#    NON usare /dev/tty (device major 2) per i fd del TUI: il client TUI può richiedere un pty,
 #    che crea il WriteStream del TTY tramite kqueue; kqueue su macOS non supporta /dev/tty e
 #    fallisce con EINVAL (crash "invalid argument, kqueue" in internal:util/colors).
 #    Inoltre, redirigere solo fd0 su /dev/tty lascia stdout/stderr sul pty reale: il TUI entra

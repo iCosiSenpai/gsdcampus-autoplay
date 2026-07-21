@@ -4,9 +4,10 @@ set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
-# Legge il modello Ollama da config.json (campo `ollamaModel`).
+# Legge il modello Ollama da config.json (campo `ollamaModel`) per eventuali
+# installazioni locali legacy; il flusso attuale usa Ollama Cloud.
 # Fallback a costante letterale (NON a ${OLLAMA_MODEL}: circolare — vedi check-requirements.sh).
-MODEL_FALLBACK="gemma4:cloud"
+MODEL_FALLBACK="gemma4:31b-cloud"
 get_ollama_model() {
   node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${MODEL_FALLBACK}'); } catch(e){ console.log('${MODEL_FALLBACK}'); }" 2>/dev/null || echo "${MODEL_FALLBACK}"
 }
@@ -20,7 +21,7 @@ err()  { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
 # ask_yes "prompt" "default(y|n)" -> ritorna 0 se l'utente sceglie sì.
 # Default = comportamento di "disinstallazione completa": se il collega preme solo
 # Invio, viene applicato il default. Le conferme per-item servono proprio a lasciar
-# fuori ciò che gli serve ancora (es. Claude Code o Ollama usati per altro).
+# fuori ciò che gli serve ancora (es. OpenCode o Ollama usati per altro).
 ask_yes() {
   local prompt="$1" def="$2"
   local REPLY=""
@@ -47,7 +48,7 @@ echo "Posso rimuovere:"
 echo "  - browser di Playwright + cache (~500 MB)"
 echo "  - dipendenze npm (node_modules)"
 echo "  - Ollama: app/binario, modelli scaricati e ~/.ollama (anche diversi GB)"
-echo "  - Claude Code CLI"
+echo "  - OpenCode CLI"
 echo "  - log, dump, screenshot, backup e file temporanei"
 echo "  - riga PATH aggiunta da setup.sh nei file dello shell"
 echo "  - la cartella del progetto $DIR"
@@ -120,20 +121,36 @@ if [ "$HAS_OLLAMA" = true ]; then
   fi
 fi
 
-# 4. Claude Code CLI
+# 4. OpenCode CLI
 echo ""
-if command -v claude &>/dev/null || [ -x "$HOME/.local/bin/claude" ]; then
-  if ask_yes "Rimuovere Claude Code CLI?" "y"; then
-    echo "-> Rimozione Claude Code CLI..."
-    rm -f "$HOME/.local/bin/claude" 2>/dev/null || true
-    brew uninstall --cask claude 2>/dev/null || true
-    ok "Claude Code CLI rimosso."
+if command -v opencode &>/dev/null || [ -x "$HOME/.opencode/bin/opencode" ]; then
+  if ask_yes "Rimuovere OpenCode CLI?" "y"; then
+    echo "-> Rimozione OpenCode CLI..."
+    if command -v opencode >/dev/null 2>&1; then
+      opencode uninstall --force --keep-data --keep-config >/dev/null 2>&1 || true
+    fi
+    rm -f "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode" 2>/dev/null || true
+    ok "OpenCode CLI rimosso."
   else
-    warn "Claude Code CLI conservato (lo usi anche per altro, lo lascio stare)."
+    warn "OpenCode CLI conservato (lo usi anche per altro, lo lascio stare)."
   fi
 fi
 
-# 5. Log, dump, screenshot, backup, pid (roba interna al progetto)
+# 5. Chiave Ollama Cloud (mai rimossa senza una conferma separata)
+echo ""
+if [ -f "$DIR/scripts/lib/keychain-secret.sh" ]; then
+  . "$DIR/scripts/lib/keychain-secret.sh"
+  if ollama_api_key_present; then
+    if ask_yes "Rimuovere la chiave Ollama Cloud dal Portachiavi macOS?" "n"; then
+      ollama_api_key_delete || true
+      ok "Chiave Ollama Cloud rimossa dal Portachiavi."
+    else
+      warn "Chiave Ollama Cloud conservata nel Portachiavi."
+    fi
+  fi
+fi
+
+# 6. Log, dump, screenshot, backup, pid (roba interna al progetto)
 echo ""
 # LaunchAgent dell'auto-update notturno: va sempre rimosso (altrimenti launchd
 # continuerebbe a lanciare uno script che non esiste più).
@@ -154,16 +171,17 @@ else
   warn "Log e file temporanei conservati."
 fi
 
-# 6. Riga PATH aggiunta da setup.sh nei file di shell
+# 7. Riga PATH aggiunta da setup.sh nei file di shell
 echo ""
-if ask_yes "Rimuovere la riga PATH (~/.local/bin) aggiunta da setup.sh nei file di shell?" "y"; then
+if ask_yes "Rimuovere le righe PATH OpenCode aggiunte da setup.sh nei file di shell?" "y"; then
   echo "-> Rimozione riga PATH..."
   local_path_line='export PATH="$HOME/.local/bin:$PATH"'
+  opencode_path_line='export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"'
   for f in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
-    if [ -f "$f" ] && grep -qF "$local_path_line" "$f" 2>/dev/null; then
+    if [ -f "$f" ] && { grep -qF "$local_path_line" "$f" 2>/dev/null || grep -qF "$opencode_path_line" "$f" 2>/dev/null; }; then
       human="${f/#$HOME/~}"
       echo "   Rimuovo da $human"
-      grep -vF "$local_path_line" "$f" > "$f.tmp"
+      { grep -vF "$local_path_line" "$f" | grep -vF "$opencode_path_line" || true; } > "$f.tmp"
       mv "$f.tmp" "$f"
     fi
   done
@@ -172,7 +190,7 @@ else
   warn "Riga PATH conservata (utile se hai altri tool in ~/.local/bin)."
 fi
 
-# 7. Cartella del progetto (la cosa più distruttiva: la chiedo per ultima)
+# 8. Cartella del progetto (la cosa più distruttiva: la chiedo per ultima)
 echo ""
 if ask_yes "Rimuovere ANCHE la cartella del progetto $DIR (tutto il codice e config.json)?" "y"; then
   echo "-> Rimozione cartella progetto..."

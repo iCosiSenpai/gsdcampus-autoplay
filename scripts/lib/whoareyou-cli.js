@@ -116,7 +116,15 @@ function updateConfigForAccount(result) {
   cfg.memberName = result.memberName;
   if (!cfg.baseUrl) cfg.baseUrl = 'https://tecsial.gsdcampus.it/';
   if (!Array.isArray(cfg.courseUrls)) cfg.courseUrls = [];
-  if (!cfg.ollamaModel) cfg.ollamaModel = 'gemma4:cloud';
+  if (!cfg.ollamaModel) cfg.ollamaModel = 'gemma4:31b-cloud';
+  if (!cfg.aiSupervisorClient) cfg.aiSupervisorClient = 'opencode';
+  if (!cfg.aiCloudEndpoint) cfg.aiCloudEndpoint = 'https://ollama.com/v1';
+  if (!cfg.aiCloudProxyPort) cfg.aiCloudProxyPort = 11435;
+  if (!cfg.aiWeeklyRequestLimit) cfg.aiWeeklyRequestLimit = 400;
+  if (!cfg.aiDailyRequestLimit) cfg.aiDailyRequestLimit = 80;
+  if (!cfg.aiPerMinuteRequestLimit) cfg.aiPerMinuteRequestLimit = 8;
+  if (!cfg.aiMinRequestIntervalMs) cfg.aiMinRequestIntervalMs = 1500;
+  if (!cfg.aiMaxConcurrentRequests) cfg.aiMaxConcurrentRequests = 1;
   return writeConfig(cfg);
 }
 
