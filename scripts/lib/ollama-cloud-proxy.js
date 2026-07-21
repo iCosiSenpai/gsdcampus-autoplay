@@ -89,9 +89,53 @@ function responseHeaders(upstream) {
   return headers;
 }
 
+function normalizeNativeToolCalls(message) {
+  if (!message || typeof message !== 'object' || !Array.isArray(message.tool_calls)) return message;
+  return {
+    ...message,
+    tool_calls: message.tool_calls.map((call) => {
+      if (!call || typeof call !== 'object' || !call.function || typeof call.function !== 'object') return call;
+      const fn = { ...call.function };
+      if (typeof fn.arguments === 'string') {
+        const raw = fn.arguments.trim();
+        if (!raw) {
+          fn.arguments = {};
+        } else {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) fn.arguments = parsed;
+          } catch (_) { /* lascia l'errore al daemon se gli argomenti sono davvero malformati */ }
+        }
+      }
+      return { ...call, function: fn };
+    }),
+  };
+}
+
+function createGenerationQueue(minIntervalMs) {
+  let lastStartedAt = 0;
+  let tail = Promise.resolve();
+  return async () => {
+    let releaseTail;
+    const previous = tail;
+    tail = new Promise((resolve) => { releaseTail = resolve; });
+    await previous;
+    const intervalLeft = minIntervalMs - (Date.now() - lastStartedAt);
+    if (intervalLeft > 0) await new Promise((resolve) => setTimeout(resolve, intervalLeft));
+    lastStartedAt = Date.now();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      releaseTail();
+    };
+  };
+}
+
 function nativeChatBody(input) {
   const source = input && typeof input === 'object' ? input : {};
   const body = { ...source };
+  if (Array.isArray(source.messages)) body.messages = source.messages.map(normalizeNativeToolCalls);
   const options = { ...(source.options && typeof source.options === 'object' ? source.options : {}) };
   const optionMap = {
     max_tokens: 'num_predict',
@@ -235,8 +279,12 @@ async function main() {
 
   const limits = readLimits(args.root);
   const cache = new Map();
-  let inFlight = 0;
-  let lastStartedAt = 0;
+
+  // OpenCode può avviare in parallelo il turno principale e attività ausiliarie
+  // (per esempio il titolo sessione). Il budget consente una sola generazione:
+  // accodiamo le richieste transitorie invece di mostrare un 429 che OpenCode
+  // ritenterebbe immediatamente.
+  const acquireGenerationTurn = createGenerationQueue(limits.minIntervalMs);
 
   const server = http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
@@ -281,17 +329,13 @@ async function main() {
     }
 
     let reservation = null;
+    let releaseGeneration = null;
     if (generation) {
-      if (inFlight >= limits.maxConcurrent) {
-        return json(res, 429, { error: 'ai_concurrency_limit', retryAfterSeconds: 2 }, { 'retry-after': '2' });
-      }
-      const intervalLeft = limits.minIntervalMs - (Date.now() - lastStartedAt);
-      if (intervalLeft > 0) {
-        const seconds = Math.max(1, Math.ceil(intervalLeft / 1000));
-        return json(res, 429, { error: 'ai_rate_limit', retryAfterSeconds: seconds }, { 'retry-after': String(seconds) });
-      }
+      releaseGeneration = await acquireGenerationTurn();
       reservation = reserveRequest(args.root, { path: requestUrl.pathname, model });
       if (!reservation.ok) {
+        releaseGeneration();
+        releaseGeneration = null;
         const seconds = Math.max(1, Math.ceil(reservation.retryAfterMs / 1000));
         return json(res, 429, {
           error: 'ai_budget_exhausted',
@@ -300,8 +344,6 @@ async function main() {
           usage: reservation.summary,
         }, { 'retry-after': String(seconds) });
       }
-      inFlight += 1;
-      lastStartedAt = Date.now();
     }
 
     const abort = new AbortController();
@@ -364,7 +406,7 @@ async function main() {
       if (reservation && reservation.id) completeRequest(args.root, reservation.id, 502, { error: true });
       process.stderr.write('[ai-proxy] daemon Ollama locale non raggiungibile\n');
     } finally {
-      if (generation) inFlight = Math.max(0, inFlight - 1);
+      if (releaseGeneration) releaseGeneration();
     }
   });
 
@@ -387,6 +429,7 @@ if (require.main === module) {
 module.exports = {
   ALLOWED,
   authorized,
+  createGenerationQueue,
   nativeChatBody,
   nativeToOpenAiChunk,
   nativeToOpenAiResponse,
