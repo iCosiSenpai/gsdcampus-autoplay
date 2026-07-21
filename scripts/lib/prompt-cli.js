@@ -14,6 +14,7 @@
 
 const readline = require('readline');
 const fs = require('fs');
+const { spawnSync } = require('child_process');
 
 function clearScreen() {
   // Usa ANSI clear; se non supportato, stampa solo a capo.
@@ -25,10 +26,176 @@ function clearScreen() {
 // poveri; il menu gira sempre su /dev/tty (TTY reale), quindi niente guard.
 const UI = {
   accent: '\x1b[38;5;45m',
+  accentSoft: '\x1b[38;5;117m',
+  green: '\x1b[38;5;84m',
+  red: '\x1b[38;5;203m',
   bold: '\x1b[1m',
   dim: '\x1b[2m',
   reset: '\x1b[0m',
 };
+
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+function visibleLength(value) {
+  return [...String(value).replace(ANSI_RE, '')].length;
+}
+
+function getTerminalSize() {
+  const fallback = {
+    columns: Number(process.stdout.columns) || Number(process.env.COLUMNS) || 100,
+    rows: Number(process.stdout.rows) || Number(process.env.LINES) || 40,
+  };
+  let ttyFd = null;
+  try {
+    ttyFd = fs.openSync('/dev/tty', 'r');
+    const result = spawnSync('stty', ['size'], {
+      encoding: 'utf8',
+      stdio: [ttyFd, 'pipe', 'ignore'],
+    });
+    const [rows, columns] = String(result.stdout || '').trim().split(/\s+/).map(Number);
+    if (Number.isInteger(columns) && columns >= 40) fallback.columns = columns;
+    if (Number.isInteger(rows) && rows >= 15) fallback.rows = rows;
+  } catch (_) {
+    // Un contesto senza /dev/tty usa semplicemente le dimensioni di fallback.
+  } finally {
+    if (ttyFd !== null) {
+      try { fs.closeSync(ttyFd); } catch (_) { /* già chiuso */ }
+    }
+  }
+  return fallback;
+}
+
+function wrapText(value, width) {
+  const lines = [];
+  String(value || '').split('\n').forEach((paragraph) => {
+    const words = paragraph.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      lines.push('');
+      return;
+    }
+    let line = '';
+    words.forEach((word) => {
+      if (!line) {
+        line = word;
+      } else if ([...`${line} ${word}`].length <= width) {
+        line += ` ${word}`;
+      } else {
+        lines.push(line);
+        line = word;
+      }
+    });
+    if (line) lines.push(line);
+  });
+  return lines;
+}
+
+function menuLayout(itemCount = 0, branded = false) {
+  const size = getTerminalSize();
+  const inner = Math.min(72, Math.max(50, size.columns - 6));
+  const indent = ' '.repeat(Math.max(1, Math.floor((size.columns - inner - 2) / 2)));
+  const estimatedRows = (branded ? 9 : 5) + (itemCount * 2) + 4;
+  const top = Math.max(0, Math.min(3, Math.floor((size.rows - estimatedRows) / 4)));
+  return { ...size, inner, indent, top };
+}
+
+function framedLine(layout, content = '') {
+  const pad = ' '.repeat(Math.max(0, layout.inner - visibleLength(content)));
+  console.log(`${layout.indent}${UI.accent}│${UI.reset}${content}${pad}${UI.accent}│${UI.reset}`);
+}
+
+function panelTop(layout) {
+  console.log(`${layout.indent}${UI.accent}╭${'─'.repeat(layout.inner)}╮${UI.reset}`);
+}
+
+function panelBottom(layout) {
+  console.log(`${layout.indent}${UI.accent}╰${'─'.repeat(layout.inner)}╯${UI.reset}`);
+}
+
+function printBrandHero(layout) {
+  panelTop(layout);
+  framedLine(layout);
+  if (layout.inner >= 62) {
+    framedLine(layout, `     ${UI.accentSoft}/\\_/\\${UI.reset}      ${UI.bold}GSD CAMPUS AUTOPILOT${UI.reset}`);
+    framedLine(layout, `    ${UI.accentSoft}( o.o )${UI.reset}     ${UI.bold}Ciao collega!${UI.reset}`);
+    framedLine(layout, `     ${UI.accentSoft}> ^ <${UI.reset}      ${UI.dim}Aggiorna · configura · avvia${UI.reset}`);
+  } else {
+    framedLine(layout, `   ${UI.accentSoft}/\\_/\\${UI.reset}   ${UI.bold}GSD CAMPUS${UI.reset}`);
+    framedLine(layout, `  ${UI.accentSoft}( o.o )${UI.reset}  ${UI.bold}Ciao collega!${UI.reset}`);
+    framedLine(layout, `   ${UI.accentSoft}> ^ <${UI.reset}   ${UI.dim}Autopilot${UI.reset}`);
+  }
+  framedLine(layout);
+  panelBottom(layout);
+}
+
+function printMenuHeading(layout, title, subtitle, branded) {
+  if (!branded) {
+    panelTop(layout);
+    framedLine(layout, `  ${UI.bold}${title}${UI.reset}`);
+    wrapText(subtitle, layout.inner - 4).forEach((line) => {
+      if (line) framedLine(layout, `  ${UI.dim}${line}${UI.reset}`);
+    });
+    panelBottom(layout);
+    return;
+  }
+
+  console.log(`${layout.indent}${UI.accent}${UI.bold}${String(title || 'Cosa vuoi fare?').toUpperCase()}${UI.reset}`);
+  wrapText(subtitle, layout.inner).forEach((line) => {
+    if (line) console.log(`${layout.indent}${UI.dim}${line}${UI.reset}`);
+  });
+  console.log(`${layout.indent}${UI.dim}${'─'.repeat(layout.inner)}${UI.reset}`);
+}
+
+function describeItem(item) {
+  const raw = typeof item === 'string' ? item : String(item.label || '');
+  const separator = raw.indexOf(' — ');
+  const label = separator >= 0 ? raw.slice(0, separator) : raw;
+  let description = separator >= 0 ? raw.slice(separator + 3) : '';
+  const recommended = /\(consigliato\)/i.test(description);
+  description = description.replace(/\s*\(consigliato\)\s*/i, '').trim();
+  return { label, description, recommended };
+}
+
+function printMenuItems(layout, items, selected) {
+  const descriptionWidth = Math.max(28, layout.inner - 9);
+  items.forEach((item, index) => {
+    const { label, description, recommended } = describeItem(item);
+    const number = String(index + 1).padStart(2, '0');
+    const active = index === selected;
+    const marker = active ? `${UI.accent}▌${UI.reset}` : ' ';
+    const labelColor = /^Disinstalla/i.test(label) ? UI.red : (active ? UI.bold : '');
+    const badge = recommended ? `  ${UI.green}${UI.bold}CONSIGLIATO${UI.reset}` : '';
+    console.log(`${layout.indent}${marker}  ${UI.dim}${number}${UI.reset}  ${labelColor}${label}${UI.reset}${badge}`);
+
+    const descriptionLines = wrapText(description, descriptionWidth);
+    if (descriptionLines.length > 0) {
+      descriptionLines.forEach((line) => {
+        const style = active ? UI.accentSoft : UI.dim;
+        console.log(`${layout.indent}      ${style}${line}${UI.reset}`);
+      });
+    }
+  });
+}
+
+function printMenuFooter(layout) {
+  console.log(`${layout.indent}${UI.dim}${'─'.repeat(layout.inner)}${UI.reset}`);
+  console.log(`${layout.indent}${UI.accent}↑↓${UI.reset} ${UI.dim}naviga${UI.reset}   ${UI.accent}INVIO${UI.reset} ${UI.dim}conferma${UI.reset}   ${UI.accent}Q${UI.reset} ${UI.dim}esci senza modifiche${UI.reset}`);
+}
+
+function drawMenuScreen(items, title, subtitle, selected, options = {}) {
+  const branded = Boolean(options.brand);
+  const layout = menuLayout(items.length, branded);
+  clearScreen();
+  for (let i = 0; i < layout.top; i++) console.log('');
+  if (branded) {
+    printBrandHero(layout);
+    console.log('');
+  }
+  printMenuHeading(layout, title, subtitle, branded);
+  console.log('');
+  printMenuItems(layout, items, selected);
+  console.log('');
+  printMenuFooter(layout);
+}
 
 function printBox(title, lines) {
   const width = 42;
@@ -56,7 +223,7 @@ function drainPendingStdin() {
 
 // Menu a frecce basato SOLO su keypress in raw mode (niente readline.Interface).
 // startIdx (0-based) posiziona il cursore iniziale (es. per --default N).
-function ttyMenu(items, title, subtitle, startIdx = 0) {
+function ttyMenu(items, title, subtitle, startIdx = 0, options = {}) {
   return new Promise((resolve) => {
     let selected = (Number.isInteger(startIdx) && startIdx >= 0 && startIdx < items.length) ? startIdx : 0;
     // Doppia protezione contro l'input fantasma: drain del buffer node +
@@ -68,20 +235,7 @@ function ttyMenu(items, title, subtitle, startIdx = 0) {
     drainPendingStdin();
 
     function draw() {
-      clearScreen();
-      printBox(title, []);
-      if (subtitle) console.log(subtitle);
-      console.log('');
-      items.forEach((it, i) => {
-        const label = typeof it === 'string' ? it : it.label;
-        if (i === selected) {
-          console.log(` ${UI.accent}▸${UI.reset} ${UI.bold}${label}${UI.reset}`);
-        } else {
-          console.log(`   ${UI.dim}${label}${UI.reset}`);
-        }
-      });
-      console.log('');
-      console.log(`${UI.dim}↑/↓ muovi · Invio seleziona · q annulla${UI.reset}`);
+      drawMenuScreen(items, title, subtitle, selected, options);
     }
 
     readline.emitKeypressEvents(process.stdin);
@@ -285,7 +439,7 @@ module.exports = {
 };
 
 // ────────────────────────────────────────────────────────────────
-// Wrapper CLI: `node prompt-cli.js select --title T [--subtitle S] [--default N] -- A B C`
+// Wrapper CLI: `node prompt-cli.js select --brand --title T [--subtitle S] [--default N] -- A B C`
 // Stampa su stdout l'indice 1-based della voce scelta (0 = annulla/EOF).
 // Exit code SEMPRE 0: i top script girano in set -e e catturano l'indice con $();
 // un exit non-zero abortirebbe setup/install. Il menu è renderizzato su /dev/tty
@@ -297,6 +451,7 @@ function parseArgs(argv) {
   let title = '';
   let subtitle = '';
   let defaultN = 1;
+  let brand = false;
   let items = [];
   let collectingItems = false;
   for (let i = 0; i < args.length; i++) {
@@ -306,9 +461,10 @@ function parseArgs(argv) {
     if (a === '--title') { title = args[++i]; continue; }
     if (a === '--subtitle') { subtitle = args[++i]; continue; }
     if (a === '--default') { defaultN = parseInt(args[++i], 10); continue; }
+    if (a === '--brand') { brand = true; continue; }
   }
   if (Number.isNaN(defaultN) || defaultN < 1) defaultN = 1;
-  return { title, subtitle, defaultN, items };
+  return { title, subtitle, defaultN, brand, items };
 }
 
 async function cliMain() {
@@ -340,7 +496,7 @@ async function cliMain() {
     process.exit(0);
   });
 
-  const { title, subtitle, defaultN, items } = parseArgs(process.argv);
+  const { title, subtitle, defaultN, brand, items } = parseArgs(process.argv);
   if (!items || items.length === 0) {
     realStdoutWrite('0\n');
     process.exit(0);
@@ -349,7 +505,7 @@ async function cliMain() {
   let chosen = null;
   try {
     if (process.stdin.isTTY) {
-      chosen = await ttyMenu(items, title, subtitle, (defaultN - 1));
+      chosen = await ttyMenu(items, title, subtitle, (defaultN - 1), { brand });
     } else {
       // numericMenu ritorna l'item o null; mappa a indice.
       chosen = await numericMenu(items, title, subtitle);

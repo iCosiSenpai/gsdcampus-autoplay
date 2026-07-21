@@ -7,6 +7,7 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-21
 
+- Il menu del curl è stato ridisegnato da zero: mascotte persistente, layout centrato, descrizioni separate e voce consigliata evidenziata. Il renderer viene aggiornato prima del primo menu, così il nuovo aspetto si vede già al primo rilancio.
 - Il comando curl accoglie i colleghi con una piccola mascotte, pannelli più leggibili e adatta automaticamente Terminal.app/iTerm2 quando la finestra è troppo piccola, senza ridurre quelle già grandi.
 - Lo scheduler mostra `off_hours` con heartbeat e prossimo turno, senza lasciare vecchi errori come se fossero ancora attivi.
 - Prima di ogni browser viene verificato il contratto dei selettori: se il controllo fallisce, nessun corso o quiz viene aperto.

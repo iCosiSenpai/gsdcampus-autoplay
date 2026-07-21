@@ -252,6 +252,19 @@ MODE="install"   # install | update | reconfig | clean | launch | uninstall | ca
 RELOGIN_OLLAMA=false   # compatibilità con vecchie installazioni: non usato dal flusso Cloud
 
 if [ -d "$TARGET/.git" ]; then
+  # Il menu viene mostrato prima di chiedere l'azione. Se la copia locale ha il
+  # renderer precedente, aggiorniamolo prima di disegnarlo: altrimenti il primo
+  # rilancio del curl mostrerebbe ancora la vecchia schermata e la nuova UI si
+  # vedrebbe soltanto dal rilancio successivo.
+  if [ -f "$TARGET/scripts/lib/prompt-cli.js" ] \
+     && ! grep -q "drawMenuScreen" "$TARGET/scripts/lib/prompt-cli.js" 2>/dev/null; then
+    if net_preflight; then
+      info "Preparo il nuovo menu di benvenuto..."
+      (cd "$TARGET" && update_repo)
+    else
+      warn "Niente rete: uso temporaneamente il menu già installato."
+    fi
+  fi
   if [ -n "$TTY_REDIR" ]; then
     echo ""
     info "Trovata un'installazione esistente in $TARGET."
@@ -260,19 +273,20 @@ if [ -d "$TARGET/.git" ]; then
       ACCT_DESC=$(node -e "try{const c=require('$TARGET/config.json');const s=c.workSchedule&&c.workSchedule.days?(c.workSchedule.days.length+' giorni'):'orari default';process.stdout.write((c.memberName||c.codice_fiscale||'account sconosciuto')+'  ·  '+s)}catch(e){process.stdout.write('')}" 2>/dev/null)
       [ -n "$ACCT_DESC" ] && info "Account attuale: $ACCT_DESC"
     fi
+    ACCT_DESC="${ACCT_DESC:-Account non ancora configurato}"
     echo ""
     printf '%bPerché stai rilanciando l'"'"'installer?%b\n' "$BOLD" "$NC"
     echo "  Usa le frecce ↑/↓ e Invio per scegliere."
     echo ""
     CHOICE=$(node "$TARGET/scripts/lib/prompt-cli.js" select \
-      --title "Perché stai rilanciando l'installer?" --default 1 -- \
-      "Aggiorna e avvia — scarica fix e risposte quiz, poi apre l'AI (consigliato)" \
-      "Cambia account/orari — riconfigura account e orari, poi avvia" \
-      "Reinstallazione pulita — riallinea il codice e reinstalla le dipendenze" \
-      "Solo avvia — apre l'AI senza modificare nulla" \
-      "Migrazione AI — configura Ollama Cloud + OpenCode" \
-      "Disinstalla — rimuove dipendenze, modello, CLI (con conferma)" \
-      "Annulla" < "$TTY_REDIR" 2>/dev/null || echo 1)
+      --brand --title "Cosa vuoi fare?" --subtitle "$ACCT_DESC" --default 1 -- \
+      "Aggiorna e avvia — Scarica fix e risposte quiz, poi apre l'AI (consigliato)" \
+      "Cambia collega o orari — Seleziona l'account e modifica i turni di lavoro" \
+      "Ripara l'installazione — Riallinea il codice e reinstalla le dipendenze" \
+      "Apri soltanto l'AI — Avvia senza cambiare configurazione o file" \
+      "Configura la nuova AI — Imposta Ollama Cloud e OpenCode" \
+      "Disinstalla — Rimuove programmi e componenti, dopo una conferma" \
+      "Esci — Non modifica nulla" < "$TTY_REDIR" 2>/dev/null || echo 1)
     case "$CHOICE" in
       1) MODE="update" ;;
       2) MODE="reconfig" ;;
@@ -328,10 +342,10 @@ migrate_claude_once() {
   info "Ho aggiornato il client AI da Claude a OpenCode. Claude ti serve ancora?"
   local choice
   choice=$(node "$TARGET/scripts/lib/prompt-cli.js" select \
-    --title "Migrazione Claude → OpenCode" --default 1 -- \
-    "Mi serve Claude — mantienilo e ripristina solo le impostazioni GSD/Ollama" \
-    "Non mi serve Claude — disinstallalo (dati e conversazioni restano)" \
-    "Non toccare Claude per ora" < "$TTY_REDIR" 2>/dev/null || echo 1)
+    --brand --title "Claude → OpenCode" --subtitle "Scegli come trattare il vecchio client" --default 1 -- \
+    "Tieni Claude — Ripristina soltanto le impostazioni GSD/Ollama" \
+    "Rimuovi Claude — Conserva dati e conversazioni personali" \
+    "Lascia tutto com'è — Decidi in un secondo momento" < "$TTY_REDIR" 2>/dev/null || echo 1)
 
   case "$choice" in
     1)
