@@ -43,9 +43,10 @@ function readConfig(root) {
 }
 
 function validatedEndpoint(value) {
-  const endpoint = new URL(value || 'https://ollama.com/v1');
-  if (endpoint.protocol !== 'https:' || endpoint.hostname !== 'ollama.com' || endpoint.pathname !== '/v1') {
-    throw new Error('aiCloudEndpoint deve essere https://ollama.com/v1');
+  const endpoint = new URL(value || 'https://ollama.com');
+  const pathname = endpoint.pathname.replace(/\/+$/, '');
+  if (endpoint.protocol !== 'https:' || endpoint.hostname !== 'ollama.com' || (pathname !== '' && pathname !== '/v1')) {
+    throw new Error('aiCloudEndpoint deve essere https://ollama.com');
   }
   return endpoint;
 }
@@ -85,6 +86,126 @@ function responseHeaders(upstream) {
     if (!skipped.has(name.toLowerCase())) headers[name] = value;
   });
   return headers;
+}
+
+function nativeChatBody(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  const body = { ...source };
+  const options = { ...(source.options && typeof source.options === 'object' ? source.options : {}) };
+  const optionMap = {
+    max_tokens: 'num_predict',
+    max_completion_tokens: 'num_predict',
+    temperature: 'temperature',
+    top_p: 'top_p',
+    top_k: 'top_k',
+    stop: 'stop',
+    seed: 'seed',
+    repeat_penalty: 'repeat_penalty',
+  };
+  for (const [from, to] of Object.entries(optionMap)) {
+    if (source[from] !== undefined && options[to] === undefined) options[to] = source[from];
+    delete body[from];
+  }
+  delete body.tool_choice;
+  delete body.parallel_tool_calls;
+  delete body.stream_options;
+  delete body.response_format;
+  if (Object.keys(options).length) body.options = options;
+  return body;
+}
+
+function openAiId() {
+  return `chatcmpl-gsd-${crypto.randomBytes(8).toString('hex')}`;
+}
+
+function nativeToOpenAiChunk(item, id, model) {
+  const message = item && item.message && typeof item.message === 'object' ? item.message : {};
+  const delta = {};
+  if (message.role) delta.role = message.role;
+  if (message.content) delta.content = message.content;
+  if (Array.isArray(message.tool_calls)) {
+    delta.tool_calls = message.tool_calls.map((call, index) => ({
+      index,
+      id: call.id || `call_${index}`,
+      type: 'function',
+      function: {
+        name: call.function && call.function.name ? call.function.name : '',
+        arguments: typeof (call.function && call.function.arguments) === 'string'
+          ? call.function.arguments
+          : JSON.stringify((call.function && call.function.arguments) || {}),
+      },
+    }));
+  }
+  const finishReason = item && item.done ? (item.done_reason || 'stop') : null;
+  return `data: ${JSON.stringify({
+    id,
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{ index: 0, delta, finish_reason: finishReason }],
+  })}\n\n`;
+}
+
+function nativeToOpenAiResponse(item, model) {
+  const message = item && item.message && typeof item.message === 'object' ? item.message : { role: 'assistant', content: '' };
+  const finishReason = item && item.done_reason ? item.done_reason : 'stop';
+  const usage = item && (item.prompt_eval_count !== undefined || item.eval_count !== undefined)
+    ? {
+      prompt_tokens: Number(item.prompt_eval_count || 0),
+      completion_tokens: Number(item.eval_count || 0),
+      total_tokens: Number(item.prompt_eval_count || 0) + Number(item.eval_count || 0),
+    }
+    : undefined;
+  return {
+    id: openAiId(),
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{ index: 0, message, finish_reason: finishReason }],
+    ...(usage ? { usage } : {}),
+  };
+}
+
+async function writeNativeChat(upstream, res, model, stream, headerBag) {
+  if (!stream) {
+    const raw = Buffer.from(await upstream.arrayBuffer()).toString('utf8');
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (_) { parsed = { message: { role: 'assistant', content: raw } }; }
+    const body = Buffer.from(JSON.stringify(nativeToOpenAiResponse(parsed, model)));
+    res.writeHead(upstream.status, { ...headerBag, 'content-type': 'application/json; charset=utf-8', 'content-length': body.length });
+    res.end(body);
+    return { body, cacheable: body.length <= CACHE_MAX_BYTES };
+  }
+
+  const id = openAiId();
+  const captured = [];
+  let capturedBytes = 0;
+  let pending = '';
+  res.writeHead(upstream.status, { ...headerBag, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache' });
+  const emit = (value) => {
+    const bytes = Buffer.from(value);
+    res.write(bytes);
+    capturedBytes += bytes.length;
+    if (capturedBytes <= CACHE_MAX_BYTES) captured.push(bytes);
+  };
+  if (upstream.body) {
+    for await (const chunk of upstream.body) {
+      pending += Buffer.from(chunk).toString('utf8');
+      const lines = pending.split('\n');
+      pending = lines.pop() || '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try { emit(nativeToOpenAiChunk(JSON.parse(trimmed), id, model)); } catch (_) { /* ignora righe non JSON */ }
+      }
+    }
+  }
+  if (pending.trim()) {
+    try { emit(nativeToOpenAiChunk(JSON.parse(pending.trim()), id, model)); } catch (_) { /* ignora riga parziale */ }
+  }
+  emit('data: [DONE]\n\n');
+  res.end();
+  return { body: Buffer.concat(captured), cacheable: capturedBytes <= CACHE_MAX_BYTES };
 }
 
 function pruneCache(cache, now = Date.now()) {
@@ -138,8 +259,12 @@ async function main() {
     }
 
     let model = '';
+    let parsedBody = null;
     if (body.length) {
-      try { model = String(JSON.parse(body.toString('utf8')).model || ''); } catch (_) {
+      try {
+        parsedBody = JSON.parse(body.toString('utf8'));
+        model = String(parsedBody.model || '');
+      } catch (_) {
         return json(res, 400, { error: 'invalid_json' });
       }
     }
@@ -181,7 +306,10 @@ async function main() {
     const abort = new AbortController();
     req.on('aborted', () => abort.abort());
     try {
-      const target = new URL(requestUrl.pathname + requestUrl.search, endpoint.origin);
+      const nativeChat = route === 'POST /v1/chat/completions';
+      const targetPath = nativeChat ? '/api/chat' : requestUrl.pathname;
+      const bodyForUpstream = nativeChat ? Buffer.from(JSON.stringify(nativeChatBody(parsedBody))) : body;
+      const target = new URL(targetPath + requestUrl.search, endpoint.origin);
       const upstream = await fetch(target, {
         method: req.method,
         headers: {
@@ -190,32 +318,40 @@ async function main() {
           authorization: `Bearer ${apiKey}`,
           'user-agent': 'gsdcampus-autoplay-budget-proxy/1',
         },
-        body: req.method === 'POST' ? body : undefined,
+        body: req.method === 'POST' ? bodyForUpstream : undefined,
         signal: abort.signal,
       });
 
       const headers = responseHeaders(upstream);
-      res.writeHead(upstream.status, { ...headers, 'x-gsdcampus-ai-cache': 'miss' });
-      const captured = [];
-      let capturedBytes = 0;
+      let captured = null;
       let cacheable = generation && upstream.ok;
-      if (upstream.body) {
-        for await (const chunk of upstream.body) {
-          const bytes = Buffer.from(chunk);
-          res.write(bytes);
-          if (cacheable) {
-            capturedBytes += bytes.length;
-            if (capturedBytes <= CACHE_MAX_BYTES) captured.push(bytes);
-            else cacheable = false;
+      if (nativeChat && upstream.ok) {
+        const transformed = await writeNativeChat(upstream, res, model, parsedBody.stream !== false, { ...headers, 'x-gsdcampus-ai-cache': 'miss' });
+        captured = transformed.body;
+        if (!transformed.cacheable) cacheable = false;
+      } else {
+        res.writeHead(upstream.status, { ...headers, 'x-gsdcampus-ai-cache': 'miss' });
+        const chunks = [];
+        let capturedBytes = 0;
+        if (upstream.body) {
+          for await (const chunk of upstream.body) {
+            const bytes = Buffer.from(chunk);
+            res.write(bytes);
+            if (cacheable) {
+              capturedBytes += bytes.length;
+              if (capturedBytes <= CACHE_MAX_BYTES) chunks.push(bytes);
+              else cacheable = false;
+            }
           }
         }
+        res.end();
+        captured = Buffer.concat(chunks);
       }
-      res.end();
       if (cacheKey && cacheable) {
         cache.set(cacheKey, {
           status: upstream.status,
-          headers,
-          body: Buffer.concat(captured),
+          headers: nativeChat ? { ...headers, 'content-type': parsedBody.stream === false ? 'application/json; charset=utf-8' : 'text/event-stream; charset=utf-8', 'x-gsdcampus-ai-cache': 'miss' } : { ...headers, 'x-gsdcampus-ai-cache': 'miss' },
+          body: captured,
           expiresAt: Date.now() + CACHE_TTL_MS,
         });
         pruneCache(cache);
@@ -248,4 +384,12 @@ if (require.main === module) {
   });
 }
 
-module.exports = { ALLOWED, authorized, parseArgs, validatedEndpoint };
+module.exports = {
+  ALLOWED,
+  authorized,
+  nativeChatBody,
+  nativeToOpenAiChunk,
+  nativeToOpenAiResponse,
+  parseArgs,
+  validatedEndpoint,
+};

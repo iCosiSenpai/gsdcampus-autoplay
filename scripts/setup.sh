@@ -797,7 +797,7 @@ while true; do
   "baseUrl": "https://tecsial.gsdcampus.it/",
   "ollamaModel": "${OLLAMA_MODEL}",
   "aiSupervisorClient": "opencode",
-  "aiCloudEndpoint": "https://ollama.com/v1",
+  "aiCloudEndpoint": "https://ollama.com",
   "aiCloudProxyPort": 11435,
   "aiWeeklyRequestLimit": 400,
   "aiDailyRequestLimit": 80,

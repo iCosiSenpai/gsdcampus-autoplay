@@ -11,7 +11,13 @@ const {
 } = require('../src/lib/ai-budget');
 const { directCloudModel, createOpenCodeConfig } = require('../scripts/lib/opencode-config');
 const { migrate } = require('../scripts/lib/migrate-claude-settings');
-const { authorized, validatedEndpoint } = require('../scripts/lib/ollama-cloud-proxy');
+const {
+  authorized,
+  nativeChatBody,
+  nativeToOpenAiChunk,
+  nativeToOpenAiResponse,
+  validatedEndpoint,
+} = require('../scripts/lib/ollama-cloud-proxy');
 
 function fixtureRoot(config = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-ai-budget-'));
@@ -70,10 +76,28 @@ test('OpenCode usa il nome diretto senza suffisso cloud', () => {
 });
 
 test('proxy accetta solo endpoint Ollama e token locale esatto', () => {
-  assert.equal(validatedEndpoint('https://ollama.com/v1').href, 'https://ollama.com/v1');
+  assert.equal(validatedEndpoint('https://ollama.com').origin, 'https://ollama.com');
   assert.throws(() => validatedEndpoint('https://example.com/v1'));
   assert.equal(authorized({ headers: { authorization: 'Bearer abc123' } }, 'abc123'), true);
   assert.equal(authorized({ headers: { authorization: 'Bearer wrong' } }, 'abc123'), false);
+});
+
+test('proxy traduce OpenAI chat nel formato nativo Ollama Cloud', () => {
+  const body = nativeChatBody({
+    model: 'gemma4:31b',
+    messages: [{ role: 'user', content: 'ciao' }],
+    max_tokens: 123,
+    temperature: 0.2,
+    stream: true,
+  });
+  assert.equal(body.options.num_predict, 123);
+  assert.equal(body.options.temperature, 0.2);
+  assert.equal(body.max_tokens, undefined);
+  assert.equal(body.messages[0].content, 'ciao');
+  const chunk = JSON.parse(nativeToOpenAiChunk({ message: { role: 'assistant', content: 'ok' } }, 'id', body.model).slice(6).trim());
+  assert.equal(chunk.choices[0].delta.content, 'ok');
+  const response = nativeToOpenAiResponse({ message: { role: 'assistant', content: 'ok' }, done_reason: 'stop' }, body.model);
+  assert.equal(response.choices[0].message.content, 'ok');
 });
 
 test('migrazione Claude rimuove solo override Ollama riconoscibili', () => {

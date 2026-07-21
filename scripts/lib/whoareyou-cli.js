@@ -118,7 +118,7 @@ function updateConfigForAccount(result) {
   if (!Array.isArray(cfg.courseUrls)) cfg.courseUrls = [];
   if (!cfg.ollamaModel) cfg.ollamaModel = 'gemma4:31b-cloud';
   if (!cfg.aiSupervisorClient) cfg.aiSupervisorClient = 'opencode';
-  if (!cfg.aiCloudEndpoint) cfg.aiCloudEndpoint = 'https://ollama.com/v1';
+  if (!cfg.aiCloudEndpoint) cfg.aiCloudEndpoint = 'https://ollama.com';
   if (!cfg.aiCloudProxyPort) cfg.aiCloudProxyPort = 11435;
   if (!cfg.aiWeeklyRequestLimit) cfg.aiWeeklyRequestLimit = 400;
   if (!cfg.aiDailyRequestLimit) cfg.aiDailyRequestLimit = 80;

@@ -12,7 +12,7 @@
 
 ## Permessi del supervisore AI
 
-`./launch-ai-supervisor.sh` avvia OpenCode con `--auto` e il provider custom `ollama-cloud`. Il provider punta a un proxy solo-loopback (`127.0.0.1:11435`) che inoltra a Ollama Cloud, applica 400 richieste/7 giorni, 80/24 ore, 8/minuto, una richiesta alla volta e una cache RAM breve per retry identici. Prompt e risposte non vengono persistiti.
+`./launch-ai-supervisor.sh` avvia OpenCode con `--auto` e il provider custom `ollama-cloud`. Il provider punta a un proxy solo-loopback (`127.0.0.1:11435`) che traduce il formato OpenAI nel percorso ufficiale Ollama Cloud `/api/chat`, applica 400 richieste/7 giorni, 80/24 ore, 8/minuto, una richiesta alla volta e una cache RAM breve per retry identici. Prompt e risposte non vengono persistiti.
 
 Quando il repository viene aperto direttamente con Codex, `AGENTS.md` espone lo stesso contratto operativo; i permessi sono quelli della sessione Codex e non vengono configurati da `launch-ai-supervisor.sh`.
 

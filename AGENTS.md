@@ -265,7 +265,7 @@ Sii conciso. Riporta:
 
 ## Permessi del supervisore AI
 
-`./launch-ai-supervisor.sh` avvia OpenCode con `--auto` e un provider OpenAI-compatible puntato al proxy locale. Il proxy inoltra solo a `https://ollama.com/v1`, legge la chiave esclusivamente dal Portachiavi macOS, limita a 400 richieste/7 giorni (80/24h, 8/minuto, una alla volta) e non persiste contenuti. Edit e subagent sono negati nella configurazione generata; i comandi CLI per risposte verificate restano disponibili.
+`./launch-ai-supervisor.sh` avvia OpenCode con `--auto` e un provider OpenAI-compatible puntato al proxy locale. Il proxy traduce le chat nel percorso nativo `https://ollama.com/api/chat`, legge la chiave esclusivamente dal Portachiavi macOS, limita a 400 richieste/7 giorni (80/24h, 8/minuto, una alla volta) e non persiste contenuti. Edit e subagent sono negati nella configurazione generata; i comandi CLI per risposte verificate restano disponibili.
 
 ## Requisito login Ollama
 
