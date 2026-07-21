@@ -7,6 +7,7 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-21
 
+- Il supervisore ripulisce i proxy Ollama rimasti bloccati, verifica l'autenticazione sul solo catalogo modelli prima di aprire OpenCode e conserva il token locale nella sessione per evitare falsi `Unauthorized`.
 - Il menu del curl è stato ridisegnato da zero: mascotte persistente, layout centrato, descrizioni separate e voce consigliata evidenziata. Il renderer viene aggiornato prima del primo menu, così il nuovo aspetto si vede già al primo rilancio.
 - Il benvenuto è stato semplificato a una sola mascotte, senza fumetti duplicati; il ridimensionamento usa ora i bounds nativi macOS quando il Terminale non applica il comando ANSI.
 - Il comando curl accoglie i colleghi con una piccola mascotte, pannelli più leggibili e adatta automaticamente Terminal.app/iTerm2 quando la finestra è troppo piccola, senza ridurre quelle già grandi.
