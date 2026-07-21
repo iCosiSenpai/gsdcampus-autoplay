@@ -73,7 +73,7 @@ Durante la prima installazione il Terminale ti chiederà alcune cose: rispondi c
 
 - La **password del Mac (sudo)**: una sola volta, all'inizio.
 - Eventuali conferme di **installazione/aggiornamento** (anche `y/n`) → rispondi **sempre sì**.
-- Il **login Ollama** (per il modello AI) → inserisci le credenziali.
+- Il **login Ollama** (solo se necessario) → si apre il browser: accedi al tuo account e torna al Terminale. Non devi creare o incollare API key.
 - **Chi sei?** — cerchi il tuo **nome** (o cognome/CF) nell’elenco già presente sul Mac (`members.db` arriva con l’install) e premi Invio. **Non incolli link e non serve un CSV.** L’autologin è già associato al tuo nome.
 - I **giorni lavorativi** dello store (es. lun–ven).
 - La **modalità oraria**:
@@ -92,7 +92,7 @@ Non avere paura di confermare: serve tutto per far funzionare l'automazione.
 ## ⭐ 2. Usare l'automazione con l'AI
 
 **Cosa succede appena finita l'installazione:** parte da sola una sessione dell'**AI** — è
-**Claude che gira in locale tramite Ollama** con il modello cloud `gemma4:cloud`. Non devi
+**OpenCode collegato a Ollama** con il modello Cloud configurato nel progetto. Se l'account non è già autenticato, Ollama apre il browser una volta e poi prosegue da solo. Non devi
 lanciare nessun altro comando: la finestra dell'AI si apre da sé, con le istruzioni già caricate.
 
 Da lì in poi **non devi ricordare comandi tecnici: parli con l'AI in italiano.** È l'AI che avvia,
@@ -237,7 +237,7 @@ Se preferisci un comando diretto (manutentore):
 cd ~/gsdcampus-autoplay && ./scripts/setup.sh --uninstall
 ```
 
-Rimuove dipendenze, modello Ollama, Claude Code CLI, log e (se vuoi) la cartella del progetto.
+Rimuove dipendenze, Ollama, OpenCode, log e (se vuoi) la cartella del progetto. Ogni componente viene confermato separatamente, così puoi conservare ciò che usi anche per altro.
 Homebrew e Node.js restano, per non compromettere altri software.
 
 ---

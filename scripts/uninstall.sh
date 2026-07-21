@@ -4,8 +4,8 @@ set -e
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
-# Legge il modello Ollama da config.json (campo `ollamaModel`) per eventuali
-# installazioni locali legacy; il flusso attuale usa Ollama Cloud.
+# Legge il modello Ollama da config.json (campo `ollamaModel`) per rimuoverne
+# il manifest locale se l'utente sceglie di disinstallare Ollama.
 # Fallback a costante letterale (NON a ${OLLAMA_MODEL}: circolare — vedi check-requirements.sh).
 MODEL_FALLBACK="gemma4:31b-cloud"
 get_ollama_model() {
@@ -136,16 +136,16 @@ if command -v opencode &>/dev/null || [ -x "$HOME/.opencode/bin/opencode" ]; the
   fi
 fi
 
-# 5. Chiave Ollama Cloud (mai rimossa senza una conferma separata)
+# 5. Eventuale chiave Ollama Cloud legacy (mai rimossa senza conferma separata)
 echo ""
 if [ -f "$DIR/scripts/lib/keychain-secret.sh" ]; then
   . "$DIR/scripts/lib/keychain-secret.sh"
   if ollama_api_key_present; then
-    if ask_yes "Rimuovere la chiave Ollama Cloud dal Portachiavi macOS?" "n"; then
+    if ask_yes "Rimuovere la vecchia chiave API Ollama dal Portachiavi macOS (non più usata)?" "n"; then
       ollama_api_key_delete || true
-      ok "Chiave Ollama Cloud rimossa dal Portachiavi."
+      ok "Vecchia chiave API Ollama rimossa dal Portachiavi."
     else
-      warn "Chiave Ollama Cloud conservata nel Portachiavi."
+      warn "Vecchia chiave API Ollama conservata nel Portachiavi."
     fi
   fi
 fi

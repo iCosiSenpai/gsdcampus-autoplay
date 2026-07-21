@@ -2,8 +2,8 @@
 
 ## Unreleased (2026-07-21)
 
-- Supervisore migrato da Claude Code a OpenCode con Ollama Cloud diretto: nessun modello locale richiesto.
-- Chiave API solo nel Portachiavi macOS; proxy loopback autenticato, allowlist endpoint e nessun contenuto nei log/contatori.
+- Supervisore migrato da Claude Code a OpenCode mantenendo il login browser Ollama: `ollama signin`, daemon locale e modelli Cloud.
+- Proxy loopback autenticato e con allowlist: applica il budget, inoltra al daemon Ollama locale e non salva contenuti nei log/contatori. Nessuna API key manuale richiesta.
 - Budget conservativo: 400 richieste rolling/7 giorni, 80/24 ore, 8/minuto, una richiesta alla volta e cache RAM per retry identici.
 - Il curl propone una sola volta per Mac se conservare Claude (pulendo solo override GSD/Ollama) o disinstallare il client lasciando i dati personali.
 - `useOllamaForQuiz:false` resta il default: nessun consumo AI domanda-per-domanda durante l'autoplay.

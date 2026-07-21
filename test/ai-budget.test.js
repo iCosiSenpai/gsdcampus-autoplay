@@ -9,7 +9,7 @@ const {
   reserveRequest,
   usageSummary,
 } = require('../src/lib/ai-budget');
-const { directCloudModel, createOpenCodeConfig } = require('../scripts/lib/opencode-config');
+const { normalizeOllamaModel, createOpenCodeConfig } = require('../scripts/lib/opencode-config');
 const { migrate } = require('../scripts/lib/migrate-claude-settings');
 const {
   authorized,
@@ -37,12 +37,12 @@ function fixtureRoot(config = {}) {
 test('budget rolling conta richieste senza salvare payload', () => {
   const root = fixtureRoot();
   const now = Date.parse('2026-07-21T10:00:00.000Z');
-  const first = reserveRequest(root, { path: '/v1/chat/completions', model: 'gemma4:31b', prompt: 'NON SALVARE' }, now);
+  const first = reserveRequest(root, { path: '/v1/chat/completions', model: 'gemma4:31b-cloud', prompt: 'NON SALVARE' }, now);
   assert.equal(first.ok, true);
   completeRequest(root, first.id, 200);
-  const second = reserveRequest(root, { path: '/v1/chat/completions', model: 'gemma4:31b' }, now + 2_000);
+  const second = reserveRequest(root, { path: '/v1/chat/completions', model: 'gemma4:31b-cloud' }, now + 2_000);
   assert.equal(second.ok, true);
-  const blocked = reserveRequest(root, { path: '/v1/chat/completions', model: 'gemma4:31b' }, now + 4_000);
+  const blocked = reserveRequest(root, { path: '/v1/chat/completions', model: 'gemma4:31b-cloud' }, now + 4_000);
   assert.equal(blocked.ok, false);
   assert.equal(blocked.reason, 'daily');
 
@@ -64,27 +64,28 @@ test('budget elimina eventi oltre la finestra rolling', () => {
   assert.equal(usageSummary(root, now).used.weekly, 1);
 });
 
-test('OpenCode usa il nome diretto senza suffisso cloud', () => {
-  assert.equal(directCloudModel('gemma4:31b-cloud'), 'gemma4:31b');
-  assert.equal(directCloudModel('gpt-oss:120b'), 'gpt-oss:120b');
+test('OpenCode conserva il nome cloud per il daemon Ollama locale', () => {
+  assert.equal(normalizeOllamaModel('gemma4:31b-cloud'), 'gemma4:31b-cloud');
+  assert.equal(normalizeOllamaModel('gpt-oss:120b'), 'gpt-oss:120b');
   const root = fixtureRoot();
   const cfg = createOpenCodeConfig(root);
-  assert.equal(cfg.model, 'ollama-cloud/gemma4:31b');
-  assert.equal(cfg.provider['ollama-cloud'].options.baseURL, 'http://127.0.0.1:11435/v1');
+  assert.equal(cfg.model, 'ollama-budget/gemma4:31b-cloud');
+  assert.equal(cfg.provider['ollama-budget'].options.baseURL, 'http://127.0.0.1:11435/v1');
   assert.equal(cfg.permission.edit, 'deny');
   assert.equal(cfg.permission.task, 'deny');
 });
 
-test('proxy accetta solo endpoint Ollama e token locale esatto', () => {
-  assert.equal(validatedEndpoint('https://ollama.com').origin, 'https://ollama.com');
-  assert.throws(() => validatedEndpoint('https://example.com/v1'));
+test('proxy accetta solo endpoint Ollama loopback e token locale esatto', () => {
+  assert.equal(validatedEndpoint('http://127.0.0.1:11434').origin, 'http://127.0.0.1:11434');
+  assert.throws(() => validatedEndpoint('https://ollama.com'));
+  assert.throws(() => validatedEndpoint('http://example.com:11434'));
   assert.equal(authorized({ headers: { authorization: 'Bearer abc123' } }, 'abc123'), true);
   assert.equal(authorized({ headers: { authorization: 'Bearer wrong' } }, 'abc123'), false);
 });
 
-test('proxy traduce OpenAI chat nel formato nativo Ollama Cloud', () => {
+test('proxy traduce OpenAI chat nel formato nativo Ollama locale/Cloud', () => {
   const body = nativeChatBody({
-    model: 'gemma4:31b',
+    model: 'gemma4:31b-cloud',
     messages: [{ role: 'user', content: 'ciao' }],
     max_tokens: 123,
     temperature: 0.2,

@@ -5,10 +5,10 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 CHECK_REQ="$DIR/scripts/check-requirements.sh"
-KEYCHAIN_HELPER="$DIR/scripts/lib/keychain-secret.sh"
 PROXY="$DIR/scripts/lib/ollama-cloud-proxy.js"
 
 source "$DIR/scripts/lib/ui.sh"
+source "$DIR/scripts/lib/read-timer.sh"
 source "$DIR/scripts/lib/pid-utils.sh"
 export PATH="$HOME/.local/bin:$HOME/.opencode/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 [ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc" >/dev/null 2>&1 || true
@@ -19,7 +19,7 @@ read_ollama_model() {
 }
 requirements_satisfied() { [ -x "$CHECK_REQ" ] && "$CHECK_REQ" >/dev/null 2>&1; }
 
-ui_header "GSD Campus — AI Supervisor" "Ollama Cloud + OpenCode" "⚡"
+ui_header "GSD Campus — AI Supervisor" "Ollama + OpenCode" "⚡"
 echo ""
 
 info "Controllo e arresto eventuali istanze precedenti..."
@@ -48,7 +48,7 @@ fi
 
 MODEL="$(read_ollama_model)"
 [ -n "$MODEL" ] || MODEL="$MODEL_FALLBACK"
-DIRECT_MODEL="$(node "$DIR/scripts/lib/opencode-config.js" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).model.split('/').slice(1).join('/'))}catch(e){process.exit(1)}})" 2>/dev/null || echo "gemma4:31b")"
+OPENCODE_MODEL="$(node "$DIR/scripts/lib/opencode-config.js" 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).model.split('/').slice(1).join('/'))}catch(e){process.exit(1)}})" 2>/dev/null || echo "$MODEL")"
 
 step "2/5" "Manutenzione pre-avvio"
 if [ -x "$DIR/scripts/maintenance.sh" ]; then "$DIR/scripts/maintenance.sh" >/dev/null 2>&1 || true; fi
@@ -56,32 +56,56 @@ ok "Manutenzione completata."
 
 step "3/5" "Verifica requisiti"
 if requirements_satisfied; then
-  ok "OpenCode, Ollama Cloud e budget locale sono pronti."
+  ok "OpenCode, Ollama e budget locale sono pronti."
 else
   warn "Requisiti mancanti o da verificare. Avvio setup..."
   sudo -v
   "$DIR/scripts/setup.sh" --yes
 fi
 
-step "4/5" "Portachiavi e proxy Ollama Cloud"
-source "$KEYCHAIN_HELPER"
-if ! ollama_api_key_present; then
-  echo ""
-  info "Inserisci la chiave API Ollama Cloud nel Portachiavi macOS. Non verrà mostrata né salvata nel progetto."
-  ollama_api_key_store_prompt
-fi
-if ! ollama_api_key_present; then
-  err "Chiave Ollama Cloud non disponibile: l'autoplay può comunque funzionare senza AI con ./start.sh."
+step "4/5" "Login Ollama e proxy budget"
+if ! command -v ollama >/dev/null 2>&1; then
+  err "Ollama CLI non trovato. Rilancia il comando curl per completare il setup."
   exit 1
 fi
+
+if [ -x "$DIR/scripts/ollama-daemon.sh" ]; then
+  "$DIR/scripts/ollama-daemon.sh" start || true
+fi
+if ! curl -fsS "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
+  err "Server Ollama non raggiungibile su 127.0.0.1:11434."
+  info "Rilancia il comando curl: il setup riproverà installazione e avvio."
+  exit 1
+fi
+ok "Server Ollama locale attivo."
+
+model_present() {
+  ollama list 2>/dev/null | grep -F -c "$MODEL" >/dev/null
+}
+
+info "Verifico modello Cloud e sessione Ollama..."
+if ! ollama pull "$MODEL"; then
+  echo ""
+  warn "La sessione Ollama richiede il login. Si aprirà il browser: accedi e torna qui."
+  info "Non devi creare o incollare API key."
+  read_with_timer 3 "${BOLD}Tra 3s parte il login (Invio per saltare l'attesa).${NC}"
+  ollama signin || true
+  info "Login completato: riprovo il modello $MODEL..."
+  if ! ollama pull "$MODEL"; then
+    err "Modello $MODEL non disponibile dopo il login."
+    info "Rilancia il comando curl per riprovare il login Ollama guidato."
+    exit 1
+  fi
+fi
+if ! model_present; then
+  err "Il pull è terminato ma $MODEL non compare nel catalogo locale."
+  exit 1
+fi
+ok "Sessione Ollama e modello $MODEL pronti."
 
 PROXY_PORT="$(node -e "try{const c=require('./config.json');process.stdout.write(String(c.aiCloudProxyPort||11435))}catch(e){process.stdout.write('11435')}" 2>/dev/null)"
 PROXY_PID_FILE="$DIR/.ai_proxy_pid"
 
-# Il proxy può sopravvivere a un terminale chiuso lasciando la porta occupata.
-# Prima del nuovo avvio fermiamo il PID noto e, se necessario, il processo che
-# ascolta proprio sulla porta configurata. Non tocchiamo mai un processo che non
-# contiene il nostro entrypoint: in quel caso falliamo con un messaggio chiaro.
 stop_proxy_pid() {
   local pid="$1"
   [ -n "$pid" ] || return 0
@@ -113,14 +137,11 @@ if command -v lsof >/dev/null 2>&1; then
 fi
 
 mkdir -p "$DIR/logs"
-OLLAMA_API_KEY="$(ollama_api_key_read)"
-export OLLAMA_API_KEY
 GSD_AI_PROXY_TOKEN="$(node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex'))")"
 export GSD_AI_PROXY_TOKEN
 node "$PROXY" --root "$DIR" --port "$PROXY_PORT" >"$DIR/logs/ai-cloud-proxy.log" 2>&1 &
 AI_PROXY_PID=$!
 printf '%s\n' "$AI_PROXY_PID" > "$PROXY_PID_FILE"
-unset OLLAMA_API_KEY
 
 cleanup_proxy() {
   stop_proxy_pid "${AI_PROXY_PID:-}"
@@ -137,27 +158,24 @@ for _ in {1..30}; do
   sleep 0.2
 done
 if [ "$READY" = false ]; then
-  err "Proxy Ollama Cloud non avviato. Controlla logs/ai-cloud-proxy.log."
+  err "Proxy budget non avviato. Controlla logs/ai-cloud-proxy.log."
   exit 1
 fi
-ok "Proxy locale attivo su 127.0.0.1:${PROXY_PORT}."
+ok "Proxy budget attivo su 127.0.0.1:${PROXY_PORT}."
 
-# Verifica solo il catalogo modelli: nessuna generazione e nessun consumo del
-# budget. Distingue una chiave Ollama Cloud rifiutata da un errore OpenCode e
-# impedisce di aprire una TUI che mostrerebbe soltanto "Unauthorized".
-UPSTREAM_AUTH_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
+BRIDGE_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
   -H "Authorization: Bearer ${GSD_AI_PROXY_TOKEN}" \
   "http://127.0.0.1:${PROXY_PORT}/v1/models" 2>/dev/null || echo 000)"
-case "$UPSTREAM_AUTH_STATUS" in
-  200) ok "Autenticazione Ollama Cloud verificata (catalogo modelli)." ;;
+case "$BRIDGE_STATUS" in
+  200) ok "Collegamento OpenCode → proxy → Ollama verificato." ;;
   401|403)
-    err "Ollama Cloud ha rifiutato la chiave nel Portachiavi (HTTP ${UPSTREAM_AUTH_STATUS})."
-    info "Rilancia il comando curl e reinserisci la chiave API quando viene richiesta."
+    err "Il proxy locale ha rifiutato il token di sessione (HTTP ${BRIDGE_STATUS})."
+    info "Rilancia il comando curl per rigenerare la sessione locale."
     exit 1
     ;;
   *)
-    err "Verifica Ollama Cloud non riuscita (HTTP ${UPSTREAM_AUTH_STATUS})."
-    info "Controlla la connessione e rilancia il comando curl."
+    err "Collegamento al daemon Ollama non riuscito (HTTP ${BRIDGE_STATUS})."
+    info "Controlla logs/ai-cloud-proxy.log e rilancia il comando curl."
     exit 1
     ;;
 esac
@@ -182,18 +200,14 @@ echo -e " ${GREEN}${BOLD}${UI_OK} AI Supervisor pronto${NC}"
 ui_hr
 ui_kv "Account" "${BOLD}${MEMBER_LINE}${NC}"
 ui_kv "Orari" "${SCHEDULE_LINE}"
-ui_kv "Client" "OpenCode → Ollama Cloud (${DIRECT_MODEL})"
+ui_kv "Client" "OpenCode → Ollama (${OPENCODE_MODEL})"
 ui_kv "Budget" "400 richieste/7g · 80/24h · 8/min · 1 alla volta"
 ui_hr
 echo ""
 
 info "Avvio OpenCode con il supervisore autonomo..."
-INITIAL_PROMPT="Sei il supervisore AUTONOMO di gsdcampus-autoplay. Leggi AGENTS.md e config.json, mostra membro attivo e orari in una riga, poi lavora senza aspettare istruzioni: leggi logs/ai_todo.json (oppure node scripts/harvest-answers.js --all se vecchio), risolvi le domande aperte con ricerca e ragionamento, usa node scripts/lib/answers-cli.js resolve per le risposte verificate, pubblica con ./scripts/publish-answers.sh, recupera i corsi need_help quando possibile, avvia ./start.sh in modalità normale e monitora gli eventi. Non usare Claude, non avviare un daemon Ollama locale, non leggere o stampare segreti, non modificare src/ o scripts/ salvo esplicita richiesta del proprietario. Il database utenti e gli stati per-account sono intoccabili. Interrompi il proprietario solo per autologin morto confermato dalla sonda o bug infrastrutturale."
+INITIAL_PROMPT="Sei il supervisore AUTONOMO di gsdcampus-autoplay. Leggi AGENTS.md e config.json, mostra membro attivo e orari in una riga, poi lavora senza aspettare istruzioni: leggi logs/ai_todo.json (oppure node scripts/harvest-answers.js --all se vecchio), risolvi le domande aperte con ricerca e ragionamento, usa node scripts/lib/answers-cli.js resolve per le risposte verificate, pubblica con ./scripts/publish-answers.sh, recupera i corsi need_help quando possibile, avvia ./start.sh in modalità normale e monitora gli eventi. Non usare Claude, non leggere o stampare segreti, non modificare src/ o scripts/ salvo esplicita richiesta del proprietario. Il daemon Ollama e il proxy budget sono gestiti dal launcher. Il database utenti e gli stati per-account sono intoccabili. Interrompi il proprietario solo per autologin morto confermato dalla sonda o bug infrastrutturale."
 export OPENCODE_CONFIG_CONTENT="$(node "$DIR/scripts/lib/opencode-config.js")"
-# Lasciamo il token locale nell'ambiente del processo OpenCode oltre che nella
-# configurazione inline: alcuni backend OpenAI-compatible preferiscono leggere
-# l'autorizzazione dall'ambiente. È un token casuale per questa sessione, non la
-# chiave Ollama Cloud, e viene terminato insieme al proxy.
 export OPENCODE_DISABLE_AUTOUPDATE=1
 export OPENCODE_DISABLE_CLAUDE_CODE=1
-opencode --auto --prompt "$INITIAL_PROMPT" --model "ollama-cloud/${DIRECT_MODEL}"
+opencode --auto --prompt "$INITIAL_PROMPT" --model "ollama-budget/${OPENCODE_MODEL}"

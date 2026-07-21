@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Proxy loopback per Ollama Cloud.
- * - la API key arriva solo dall'ambiente del processo;
+ * Proxy loopback con budget per Ollama locale/Cloud.
+ * - OpenCode usa un token casuale valido solo per questa sessione;
+ * - il daemon Ollama locale gestisce il login Cloud effettuato con `ollama signin`;
  * - limite rolling 7 giorni/24 ore/minuto e una richiesta alla volta;
  * - cache RAM breve per retry byte-identici, mai persistita;
  * - nessun log di prompt, risposta o credenziale.
@@ -43,10 +44,10 @@ function readConfig(root) {
 }
 
 function validatedEndpoint(value) {
-  const endpoint = new URL(value || 'https://ollama.com');
+  const endpoint = new URL(value || 'http://127.0.0.1:11434');
   const pathname = endpoint.pathname.replace(/\/+$/, '');
-  if (endpoint.protocol !== 'https:' || endpoint.hostname !== 'ollama.com' || (pathname !== '' && pathname !== '/v1')) {
-    throw new Error('aiCloudEndpoint deve essere https://ollama.com');
+  if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || pathname !== '') {
+    throw new Error('ollamaLocalEndpoint deve essere http://127.0.0.1:<porta>');
   }
   return endpoint;
 }
@@ -188,9 +189,10 @@ async function writeNativeChat(upstream, res, model, stream, headerBag) {
     capturedBytes += bytes.length;
     if (capturedBytes <= CACHE_MAX_BYTES) captured.push(bytes);
   };
+  const decoder = new TextDecoder();
   if (upstream.body) {
     for await (const chunk of upstream.body) {
-      pending += Buffer.from(chunk).toString('utf8');
+      pending += decoder.decode(chunk, { stream: true });
       const lines = pending.split('\n');
       pending = lines.pop() || '';
       for (const line of lines) {
@@ -200,6 +202,7 @@ async function writeNativeChat(upstream, res, model, stream, headerBag) {
       }
     }
   }
+  pending += decoder.decode();
   if (pending.trim()) {
     try { emit(nativeToOpenAiChunk(JSON.parse(pending.trim()), id, model)); } catch (_) { /* ignora riga parziale */ }
   }
@@ -226,9 +229,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cfg = readConfig(args.root);
   const port = Math.max(1024, Math.min(65535, args.port || Number(cfg.aiCloudProxyPort) || 11435));
-  const endpoint = validatedEndpoint(cfg.aiCloudEndpoint);
-  const apiKey = process.env.OLLAMA_API_KEY;
-  if (!apiKey) throw new Error('OLLAMA_API_KEY non presente nell’ambiente');
+  const endpoint = validatedEndpoint(cfg.ollamaLocalEndpoint);
   const localToken = process.env.GSD_AI_PROXY_TOKEN;
   if (!localToken) throw new Error('GSD_AI_PROXY_TOKEN non presente nell’ambiente');
 
@@ -315,7 +316,6 @@ async function main() {
         headers: {
           accept: req.headers.accept || 'application/json',
           'content-type': req.headers['content-type'] || 'application/json',
-          authorization: `Bearer ${apiKey}`,
           'user-agent': 'gsdcampus-autoplay-budget-proxy/1',
         },
         body: req.method === 'POST' ? bodyForUpstream : undefined,
@@ -359,10 +359,10 @@ async function main() {
       if (reservation && reservation.id) completeRequest(args.root, reservation.id, upstream.status);
       process.stdout.write(`[ai-proxy] ${requestUrl.pathname} -> ${upstream.status}\n`);
     } catch (_) {
-      if (!res.headersSent) json(res, 502, { error: 'ollama_cloud_unreachable' });
+      if (!res.headersSent) json(res, 502, { error: 'ollama_local_unreachable' });
       else res.end();
       if (reservation && reservation.id) completeRequest(args.root, reservation.id, 502, { error: true });
-      process.stderr.write('[ai-proxy] upstream non raggiungibile\n');
+      process.stderr.write('[ai-proxy] daemon Ollama locale non raggiungibile\n');
     } finally {
       if (generation) inFlight = Math.max(0, inFlight - 1);
     }

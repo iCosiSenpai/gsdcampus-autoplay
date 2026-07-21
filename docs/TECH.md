@@ -12,13 +12,15 @@
 
 ## Permessi del supervisore AI
 
-`./launch-ai-supervisor.sh` avvia OpenCode con `--auto` e il provider custom `ollama-cloud`. Il provider punta a un proxy solo-loopback (`127.0.0.1:11435`) che traduce il formato OpenAI nel percorso ufficiale Ollama Cloud `/api/chat`, applica 400 richieste/7 giorni, 80/24 ore, 8/minuto, una richiesta alla volta e una cache RAM breve per retry identici. Prima di aprire OpenCode viene verificato il solo catalogo modelli (`/v1/models`), senza generazione: così una chiave rifiutata o un proxy stale producono un messaggio operativo chiaro invece di un generico `Unauthorized`. Prompt e risposte non vengono persistiti.
+`./launch-ai-supervisor.sh` avvia OpenCode con `--auto` e il provider custom `ollama-budget`. Il provider punta a un proxy solo-loopback (`127.0.0.1:11435`) che traduce il formato OpenAI-compatible in `/api/chat`, inoltra al daemon Ollama locale (`127.0.0.1:11434`) e applica 400 richieste/7 giorni, 80/24 ore, 8/minuto, una richiesta alla volta e una cache RAM breve per retry identici. Prima di aprire OpenCode viene verificato il ponte locale tramite `/v1/models`; il login Cloud è gestito dalla CLI Ollama. Prompt e risposte non vengono persistiti.
 
 Quando il repository viene aperto direttamente con Codex, `AGENTS.md` espone lo stesso contratto operativo; i permessi sono quelli della sessione Codex e non vengono configurati da `launch-ai-supervisor.sh`.
 
 ## Requisito login Ollama
 
-Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)**. Per il percorso API il launcher trasforma, ad esempio, `gemma4:31b-cloud` in `gemma4:31b`; non scarica pesi sul Mac e non avvia il daemon locale. La chiave API viene letta dal Portachiavi macOS e passata solo all'ambiente del proxy. Il conteggio locale è prudenziale: Ollama misura il tier gratuito anche in tempo GPU e può applicare limiti propri.
+Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)**. Il percorso standard installa Ollama CLI e OpenCode, avvia il daemon su `127.0.0.1:11434` e tenta il `pull` del modello Cloud. Se la sessione non è autenticata, `ollama signin` apre il browser; dopo il login la CLI autentica automaticamente le richieste Cloud ricevute dalla API locale. Non vengono richieste o salvate API key.
+
+OpenCode usa il proxy budget su `127.0.0.1:11435`; il proxy traduce il formato OpenAI-compatible in `/api/chat` e inoltra al daemon Ollama locale, mantenendo il nome Cloud completo (per esempio `gemma4:31b-cloud`). Il conteggio locale è prudenziale: Ollama misura il tier gratuito anche in tempo GPU e può applicare limiti propri.
 
 ### Migrazione una-tantum Claude → OpenCode
 

@@ -3,7 +3,7 @@
 # doctor.sh — checkup del sistema a semaforo, pensato per colleghi non tecnici.
 #
 # Esegue in ~5 secondi i controlli che spiegano il 90% dei "non funziona":
-# rete, GitHub, piattaforma GSD, Ollama Cloud+OpenCode, spazio disco, requisiti,
+# rete, GitHub, piattaforma GSD, Ollama+OpenCode, spazio disco, requisiti,
 # configurazione. Ogni problema ha il suo rimedio scritto sotto.
 #
 # Uso:
@@ -69,14 +69,16 @@ else
   chk_err "Piattaforma GSD Campus non raggiungibile" "il sito del corso è giù o la rete lo blocca; riprova più tardi"
 fi
 
-# 4. Ollama Cloud: API key nel Portachiavi + budget locale (nessuna generazione).
-if [ -f "$DIR/scripts/lib/keychain-secret.sh" ]; then
-  . "$DIR/scripts/lib/keychain-secret.sh"
-  if ollama_api_key_present; then
-    chk_ok "Chiave Ollama Cloud presente nel Portachiavi"
-  else
-    chk_warn "Chiave Ollama Cloud assente" "rilancia il comando curl per inserirla in modo sicuro"
-  fi
+# 4. Ollama: login gestito dalla CLI, daemon locale e budget proxy.
+OLLAMA_MODEL=$(node -e "try{const c=require('./config.json');process.stdout.write(c.ollamaModel||'gemma4:31b-cloud')}catch(e){process.stdout.write('gemma4:31b-cloud')}" 2>/dev/null)
+if ! command -v ollama >/dev/null 2>&1; then
+  chk_warn "Ollama CLI assente" "rilancia il comando curl: verrà installato automaticamente"
+elif ! curl -fsS "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
+  chk_warn "Daemon Ollama non attivo" "il launcher lo avvierà automaticamente"
+elif ollama list 2>/dev/null | grep -F -c "$OLLAMA_MODEL" >/dev/null; then
+  chk_ok "Ollama pronto con $OLLAMA_MODEL"
+else
+  chk_warn "Modello Ollama $OLLAMA_MODEL non ancora pronto" "il launcher eseguirà il pull e aprirà il login browser se necessario"
 fi
 if node "$DIR/scripts/lib/ai-budget-cli.js" --json >/dev/null 2>&1; then
   chk_ok "Budget AI locale leggibile (nessun prompt salvato)"

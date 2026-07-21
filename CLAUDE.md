@@ -8,7 +8,7 @@ Tutti i comandi elencati usano percorsi relativi a questa cartella: non inserire
 - **[docs/QUIZ.md](docs/QUIZ.md)** — Quiz, banche risposte, intervento supervisore
 - **[docs/ISSUES.md](docs/ISSUES.md)** — Segnalazione bug e issue GitHub
 - **[docs/SETUP.md](docs/SETUP.md)** — Setup iniziale e configurazione
-- **[docs/TECH.md](docs/TECH.md)** — Permessi, Ollama, note tecniche
+- **[docs/TECH.md](docs/TECH.md)** — Permessi, Ollama Cloud, note tecniche
 
 ## Conferma iniziale (da mostrare all'utente)
 
@@ -160,12 +160,12 @@ All'apertura procedi da solo (v. sezione "Autonomia"): orientati con `ai_todo.js
    3. Se il token nel DB è scaduto: il **referente** aggiorna `members.db` (import CSV + commit/push). Il collega fa «Aggiorna e avvia». Fallback incolla-link solo se la persona non è in elenco.
 6. **Quiz non superato / domande a bassa confidenza / corso in `need_help`**: se `logs/status.json` mostra `phase: "need_help"` o `"quiz_needs_answers"`, o il log emette `[AI_QUIZ_REQUEST] ... domande a bassa confidenza salvate in ai_quiz_request.json`, lo script ha già automaticamente:
    - catturato le domande del quiz in `data/accounts/<CF>/need_answer.json`;
-   - scritto l'handoff arricchito in `data/accounts/<CF>/ai_quiz_request.json` (domanda + opzioni + guess Ollama + confidenza);
+   - scritto l'handoff arricchito in `data/accounts/<CF>/ai_quiz_request.json` (domanda + opzioni + eventuale guess legacy + confidenza);
    - segnato il corso come `need_help` in `data/accounts/<CF>/course_state.json` (solo se il quiz non è superato);
    - passato al prossimo corso (se ce n'è uno).
    Non serve fermare con `./stop.sh` a meno che l'utente non voglia intervenire subito. Devi invece (dettagli e tool nella sezione **Quiz e domande sconosciute**):
    1. Leggere `data/accounts/<CF>/ai_quiz_request.json` (CF = `config.codice_fiscale`, o derivato dall'URL di autologin). Se assente, leggi `need_answer.json`.
-   2. Risolvere ogni domanda con `WebSearch`/`WebFetch` + ragionamento (il guess Ollama + confidenza è un suggerimento, non la verità).
+   2. Risolvere ogni domanda con `WebSearch`/`WebFetch` + ragionamento (un eventuale guess locale + confidenza è un suggerimento, non la verità).
    3. Scrivere la risposta verificata nella banca **TRUSTED** `data/known_answers.json` con `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
    4. Se il quiz era **non superato** (`need_help`), `answers-cli resolve` riapre il corso senza perdere lo stato; usa `course-state-backup-cli.js` solo per un ripristino diagnostico. Se era **superato con domande a bassa confidenza** (`quiz_needs_answers`), non serve riaprire il corso.
    5. Riavviare con `./start.sh` o `./start.sh --ignore-hours`.
@@ -233,7 +233,7 @@ L'orario di lavoro è configurato in `config.json` nella chiave `workSchedule`.
 
 ## Quiz e domande sconosciute
 
-Vedi **[docs/QUIZ.md](docs/QUIZ.md)** per il modello trust-by-location, risoluzione Ollama, intervento supervisore e raccolta proattiva domande.
+Vedi **[docs/QUIZ.md](docs/QUIZ.md)** per il modello trust-by-location, eventuale fallback locale legacy, intervento supervisore e raccolta proattiva domande.
 
 ## Segnalazione problemi al maintainer (issue GitHub, attiva per tutti)
 
@@ -265,11 +265,11 @@ Sii conciso. Riporta:
 
 ## Permessi del supervisore OpenCode
 
-`./launch-ai-supervisor.sh` avvia OpenCode con `--auto` e il proxy Ollama Cloud a budget. La chiave è soltanto nel Portachiavi macOS; prompt e risposte non vengono scritti nel contatore.
+`./launch-ai-supervisor.sh` avvia OpenCode con `--auto` attraverso il proxy locale a budget. Il proxy inoltra al daemon Ollama autenticato tramite `ollama signin`; prompt e risposte non vengono scritti nel contatore.
 
 ## Requisito login Ollama
 
-Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)**. Per Ollama Cloud il suffisso `-cloud` viene rimosso solo nel nome API; non si scaricano modelli e non si avvia il daemon locale. La chiave viene richiesta una volta e salvata nel Portachiavi.
+Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)**. Il setup installa Ollama e OpenCode, avvia il daemon locale e tenta il modello Cloud. Se serve autenticazione esegue `ollama signin`, apre il browser e riprende dopo il login; non richiede API key. Il proxy conserva il budget locale e inoltra le richieste al daemon su `127.0.0.1:11434`.
 
 ## Configurazione iniziale
 

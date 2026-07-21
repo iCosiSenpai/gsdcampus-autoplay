@@ -13,8 +13,6 @@ cd "$DIR"
 . "$DIR/scripts/setup/versions.sh"
 # shellcheck source=scripts/setup/ollama.sh
 . "$DIR/scripts/setup/ollama.sh"
-# shellcheck source=scripts/lib/keychain-secret.sh
-. "$DIR/scripts/lib/keychain-secret.sh"
 
 # OpenCode installa il binario in ~/.local/bin o ~/.opencode/bin; assicuriamo che sia
 # subito disponibile nel PATH di questo script, anche negli shell non interattivi
@@ -772,6 +770,9 @@ while true; do
         if (!cfg.baseUrl) cfg.baseUrl = 'https://tecsial.gsdcampus.it/';
         if (!Array.isArray(cfg.courseUrls)) cfg.courseUrls = [];
         if (!cfg.ollamaModel) cfg.ollamaModel = '${OLLAMA_MODEL}';
+        if (!cfg.aiSupervisorClient) cfg.aiSupervisorClient = 'opencode';
+        if (!cfg.ollamaLocalEndpoint) cfg.ollamaLocalEndpoint = 'http://127.0.0.1:11434';
+        if (!cfg.aiCloudProxyPort) cfg.aiCloudProxyPort = 11435;
         cfg.workSchedule = {
           days: process.env.DAYS_JSON.split(',').map(Number).filter(Boolean),
           shifts: JSON.parse('[' + process.env.SHIFTS_JSON + ']')
@@ -797,7 +798,7 @@ while true; do
   "baseUrl": "https://tecsial.gsdcampus.it/",
   "ollamaModel": "${OLLAMA_MODEL}",
   "aiSupervisorClient": "opencode",
-  "aiCloudEndpoint": "https://ollama.com",
+  "ollamaLocalEndpoint": "http://127.0.0.1:11434",
   "aiCloudProxyPort": 11435,
   "aiWeeklyRequestLimit": 400,
   "aiDailyRequestLimit": 80,
@@ -890,43 +891,110 @@ if [ "$FORCE_UPDATE" = true ] || [ "$NEEDS_NPM" = true ] || [ ! -f "$DIR/.packag
   save_package_hash
 fi
 
-# 5. Ollama CLI (nessun daemon locale e nessun modello da scaricare)
-step "5/7 - Ollama Cloud"
+# 5. Ollama CLI e daemon locale (gestisce il login Cloud)
+step "5/7 - Ollama"
 if ! command -v ollama &>/dev/null; then
-  info "Ollama CLI non trovato. Installazione in corso..."
+  info "Ollama non trovato. Installazione in corso..."
   install_ollama_official
-fi
-if command -v ollama &>/dev/null; then
-  ok "Ollama CLI pronto: $(ollama --version 2>/dev/null | head -1)"
+  if ! ensure_ollama_cli; then
+    err "Installazione Ollama non riuscita (CLI non disponibile)."
+    info "Rilancia il comando curl quando la rete è disponibile."
+    exit 1
+  fi
+  ok "Ollama installato."
+elif [ "$FORCE_UPDATE" = true ]; then
+  info "Reinstallazione/aggiornamento Ollama (richiesto --force-update)..."
+  install_ollama_official
+  ensure_ollama_cli || true
+  ok "Ollama aggiornato."
 else
-  warn "Ollama CLI non disponibile: continuo, perché l'accesso Cloud usa direttamente l'API."
-fi
-
-# 6. Chiave Ollama Cloud nel Portachiavi macOS
-step "6/7 - Chiave Ollama Cloud"
-if ollama_api_key_present; then
-  ok "Chiave Ollama Cloud già presente nel Portachiavi."
-else
-  info "Inserisci la chiave API nel Portachiavi macOS (input nascosto, mai in config o log)."
-  if ollama_api_key_store_prompt; then
-    ok "Chiave salvata nel Portachiavi."
+  OLLAMA_VER=$(ollama --version 2>/dev/null | extract_version)
+  if [ -z "$OLLAMA_VER" ]; then
+    warn "Versione Ollama non rilevabile. Reinstallo dal canale ufficiale..."
+    install_ollama_official
+    ensure_ollama_cli || true
+  elif version_ge "$OLLAMA_VER" "$MIN_OLLAMA"; then
+    ok "Ollama già installato (v$OLLAMA_VER ≥ min $MIN_OLLAMA). Salto."
   else
-    warn "Chiave non salvata: l'autoplay funzionerà comunque senza supervisore AI."
+    warn "Ollama presente ma versione vecchia (v$OLLAMA_VER < $MIN_OLLAMA). Provo ad aggiornare..."
+    install_ollama_official
+    ensure_ollama_cli || true
   fi
 fi
+
+OLLAMA_VER=$(ollama --version 2>/dev/null | extract_version)
+if [ -z "$OLLAMA_VER" ] || ! version_ge "$OLLAMA_VER" "$MIN_OLLAMA"; then
+  err "Ollama deve essere almeno v$MIN_OLLAMA (rilevata: ${OLLAMA_VER:-sconosciuta})."
+  exit 1
+fi
+
+ensure_ollama_server || true
+
+# 6. Modello Cloud: pull-first, login browser solo quando necessario
+step "6/7 - Modello Ollama ${OLLAMA_MODEL}"
+if [ "$OLLAMA_AVAILABLE" = false ]; then
+  err "Server Ollama non disponibile: non posso preparare il supervisore AI."
+  info "Rilancia il comando curl per riprovare l'avvio."
+  exit 1
+fi
+
+model_present_setup() {
+  ollama list 2>/dev/null | grep -F -c "${OLLAMA_MODEL}" >/dev/null
+}
+
+info "Verifico modello Cloud e sessione Ollama..."
+if ! ollama pull "${OLLAMA_MODEL}"; then
+  echo ""
+  warn "La sessione Ollama richiede il login. Si aprirà il browser: accedi e torna qui."
+  info "Non devi creare o incollare API key."
+  read_with_timer 3 "${BOLD}Tra 3s parte il login (Invio per saltare l'attesa).${NC}"
+  ollama signin || true
+  info "Riprovo il modello ${OLLAMA_MODEL}..."
+  if ! ollama pull "${OLLAMA_MODEL}"; then
+    err "Modello ${OLLAMA_MODEL} non disponibile dopo il login."
+    warn "Rilancia il comando curl per riprovare il login guidato."
+    exit 1
+  fi
+fi
+if ! model_present_setup; then
+  err "Il pull è terminato ma ${OLLAMA_MODEL} non compare nel catalogo locale."
+  exit 1
+fi
+ok "Sessione Ollama e modello ${OLLAMA_MODEL} pronti."
 
 # 7. OpenCode CLI
 step "7/7 - OpenCode CLI"
 ensure_local_bin_in_path
 export PATH="$HOME/.opencode/bin:$PATH"
+NEED_OPENCODE_INSTALL=false
 if ! command -v opencode &>/dev/null; then
   info "OpenCode non trovato. Installazione dal canale ufficiale..."
-  curl -fsSL https://opencode.ai/install | bash || warn "Installazione OpenCode non riuscita (rete?). Il check finale segnalerà se manca."
+  NEED_OPENCODE_INSTALL=true
+elif [ "$FORCE_UPDATE" = true ]; then
+  info "Aggiornamento OpenCode richiesto da --force-update..."
+  NEED_OPENCODE_INSTALL=true
+else
+  OPENCODE_VER=$(opencode --version 2>/dev/null | extract_version)
+  if [ -z "$OPENCODE_VER" ] || ! version_ge "$OPENCODE_VER" "$MIN_OPENCODE"; then
+    warn "OpenCode ${OPENCODE_VER:-sconosciuto} è precedente alla versione minima $MIN_OPENCODE. Aggiorno..."
+    NEED_OPENCODE_INSTALL=true
+  fi
+fi
+
+if [ "$NEED_OPENCODE_INSTALL" = true ]; then
+  curl -fsSL https://opencode.ai/install | bash || warn "Installazione OpenCode non riuscita (rete?)."
   ensure_local_bin_in_path
   export PATH="$HOME/.opencode/bin:$PATH"
 fi
+
 if command -v opencode &>/dev/null; then
-  ok "OpenCode CLI pronto: $(opencode --version 2>/dev/null | head -1)"
+  OPENCODE_VER=$(opencode --version 2>/dev/null | extract_version)
+  if [ -n "$OPENCODE_VER" ] && version_ge "$OPENCODE_VER" "$MIN_OPENCODE"; then
+    ok "OpenCode CLI pronto: v$OPENCODE_VER"
+  else
+    err "OpenCode deve essere almeno v$MIN_OPENCODE (rilevata: ${OPENCODE_VER:-sconosciuta})."
+    exit 1
+  fi
 else
   err "OpenCode CLI non trovato. Rilancia il comando curl quando la rete è disponibile."
   exit 1

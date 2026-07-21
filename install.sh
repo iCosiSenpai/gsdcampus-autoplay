@@ -70,7 +70,7 @@ warn() { printf ' %b%s%b %s\n' "$YELLOW$BOLD" "$UI_WARN" "$NC" "$1"; }
 err()  { printf ' %b%s%b %s\n' "$RED$BOLD" "$UI_ERR" "$NC" "$1"; }
 
 # Quando lo script arriva da "curl | bash", lo stdin è la pipe, non il Terminale: i comandi
-# interattivi (read dell'autologin/orari, sudo, Portachiavi) leggerebbero il testo dello script
+# interattivi (read dell'autologin/orari, sudo, login Ollama) leggerebbero il testo dello script
 # invece dell'input dell'utente. Riconnettiamo l'input alla tastiera tramite /dev/tty.
 # Verifichiamo che /dev/tty sia davvero APRIBILE in lettura (non basta che esista).
 TTY_REDIR=""
@@ -475,7 +475,7 @@ case "$MODE" in
       "$TARGET/scripts/lib/install-launchd.sh" install 2>/dev/null || true
     fi
     # Checkup a semaforo (post-update): AVVISA, non blocca — il launcher a valle
-    # ha già i rimedi per quasi tutto (setup, Ollama, pull modello).
+    # ha già i rimedi per quasi tutto (setup, Ollama, pull/login, OpenCode).
     DOCTOR_STATUS=""
     if [ -x "$TARGET/scripts/doctor.sh" ]; then
       if "$TARGET/scripts/doctor.sh"; then
@@ -524,8 +524,8 @@ case "$MODE" in
     if [ -n "$ka_clean_keep" ] && [ -f "$ka_clean_keep" ]; then
       mv -f "$ka_clean_keep" data/known_answers.json 2>/dev/null || rm -f "$ka_clean_keep" 2>/dev/null
     fi
+    migrate_claude_once
     if [ -n "$TTY_REDIR" ] && [ -f config.json ]; then
-      migrate_claude_once
       info "Reinstallo/aggiorno tutte le dipendenze (può richiedere qualche minuto)..."
       ./scripts/setup.sh --yes --force-update < "$TTY_REDIR" || warn "Force-update dipendenze non completato; proseguo."
     fi
@@ -544,14 +544,14 @@ case "$MODE" in
     ;;
 esac
 
-# Il vecchio flusso di logout/pull locale Ollama è intenzionalmente rimosso:
-# questa versione usa la chiave nel Portachiavi e Ollama Cloud via proxy.
+# Il login Ollama viene gestito dal launcher con pull-first: se la sessione non
+# è valida, `ollama signin` apre il browser e poi il pull riprende automaticamente.
 
 echo ""
 # Schermata finale "Tutto pronto" prima di passare al supervisore.
 FINAL_VER=$(git -C "$TARGET" describe --tags --always 2>/dev/null || echo "")
 case "$MODE" in
-  update)  FINAL_ACTION="aggiornato · Ollama Cloud + OpenCode" ;;
+  update)  FINAL_ACTION="aggiornato · Ollama + OpenCode" ;;
   reconfig) FINAL_ACTION="riconfigurazione in arrivo" ;;
   clean)   FINAL_ACTION="reinstallato da zero" ;;
   install) FINAL_ACTION="prima installazione" ;;
