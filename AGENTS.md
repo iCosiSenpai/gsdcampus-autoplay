@@ -27,7 +27,7 @@ Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `con
 
 **Giro di scoperta prima di cominciare**: ad **ogni run**, prima di processare qualsiasi corso, `autoplay.js` fa un passaggio di scoperta (`discoverCourses`) che legge dalla dashboard l'elenco fresco dei corsi dell'utente e li filtra per stato (salta `done`/`need_help`). Lo script **non persiste né "impara" gli ID dei corsi**: la scoperta è sempre da zero, perché gli ID sono personali e possono cambiare. Non inserire mai ID corso hardcoded nello script o in `config.json`.
 
-**AI sempre attiva insieme allo script**: l'autoplay gira **sempre insieme a Claude + Ollama** (v. `launch-ai-supervisor.sh`), quindi c'è sempre un'AI co-attiva che può intervenire su `need_help`/`ignoto`, arricchire `known_answers.json`, gestire domande sconosciute e diagnosi. I dump diagnostici (`debug/quiz/`, `dumpQuizDiagnostics` in `src/lib/quiz.js`) servono proprio a dare all'AI qualcosa da leggere quando l'esito non è chiaro: l'autopilot non fallisce mai in silenzio, lascia artefatti per l'AI.
+**AI sempre attiva insieme allo script**: l'autoplay gira **sempre insieme a un supervisore AI + Ollama**. Il launcher distribuito (`launch-ai-supervisor.sh`) usa Claude Code; quando il progetto viene aperto direttamente in Codex, queste istruzioni in `AGENTS.md` mantengono lo stesso contratto operativo. L'AI può intervenire su `need_help`/`ignoto`, arricchire `known_answers.json`, gestire domande sconosciute e diagnosi. I dump diagnostici (`debug/quiz/`, `dumpQuizDiagnostics` in `src/lib/quiz.js`) servono proprio a dare all'AI qualcosa da leggere quando l'esito non è chiaro: l'autopilot non fallisce mai in silenzio, lascia artefatti per l'AI.
 
 ---
 
@@ -262,13 +262,13 @@ Sii conciso. Riporta:
 - azione che hai intrapreso
 - **se c'è un aggiornamento disponibile** (segnalato da `status.sh`), consiglia esplicitamente all'utente di chiudere, riaprire il comando `curl` (come da README) e aggiornare.
 
-## Permessi di Claude Code
+## Permessi del supervisore AI
 
-`./launch-ai-supervisor.sh` avvia Claude con `--dangerously-skip-permissions`. Lo script chiede la password di sudo una sola volta (`sudo -v`) in foreground, **prima** dei prompt interattivi, e la rinfresca in foreground al passo Ollama. **Non usa un keepalive in background**: un `sudo -v` in background legge la password da `/dev/tty` e ruba i tasti al menu "Chi sei?" (caratteri non visibili + "Sorry, try again. Password:"). Durante il setup l'utente deve solo confermare eventuali richieste di installazione/aggiornamento da Homebrew/npm (sempre `y`). I permessi di Claude Code non richiedono conferme ripetute.
+`./launch-ai-supervisor.sh` avvia Claude Code con `--dangerously-skip-permissions`. Lo script chiede la password di sudo una sola volta (`sudo -v`) in foreground, **prima** dei prompt interattivi, e la rinfresca in foreground al passo Ollama. **Non usa un keepalive in background**: un `sudo -v` in background legge la password da `/dev/tty` e ruba i tasti al menu "Chi sei?" (caratteri non visibili + "Sorry, try again. Password:"). Durante il setup l'utente deve solo confermare eventuali richieste di installazione/aggiornamento da Homebrew/npm (sempre `y`). Le sessioni Codex aperte direttamente usano invece il proprio sistema di permessi.
 
 ## Requisito login Ollama
 
-Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)** — `launch-ai-supervisor.sh`, `setup.sh` e `check-requirements.sh` lo leggono tutti da lì, così non c'è rischio di scaricare/cercare modelli diversi tra loro. Se è un modello **cloud Ollama**, richiede l'autenticazione: `./launch-ai-supervisor.sh` e `./scripts/setup.sh` gestiscono automaticamente il login (aprono `ollama login` in modo interattivo, aspettano le credenziali, poi scaricano il modello e avviano Claude). Per cambiare modello basta modificare `ollamaModel` in `config.json`. Non devi fare altro.
+Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)** — `launch-ai-supervisor.sh`, `setup.sh` e `check-requirements.sh` lo leggono tutti da lì, così non c'è rischio di scaricare/cercare modelli diversi tra loro. Se è un modello **cloud Ollama**, richiede l'autenticazione: `./launch-ai-supervisor.sh` e `./scripts/setup.sh` gestiscono automaticamente il login (aprono `ollama login` in modo interattivo, aspettano le credenziali, poi scaricano il modello e avviano il supervisore). Per cambiare modello basta modificare `ollamaModel` in `config.json`. Non devi fare altro.
 
 ## Configurazione iniziale
 
@@ -276,4 +276,4 @@ Vedi **[docs/SETUP.md](docs/SETUP.md)** per il flusso di setup interattivo con "
 
 ## Permessi, Ollama e aspetti tecnici
 
-Vedi **[docs/TECH.md](docs/TECH.md)** per permessi Claude Code, login Ollama e note tecniche dell'architettura.
+Vedi **[docs/TECH.md](docs/TECH.md)** per permessi del supervisore, login Ollama e note tecniche dell'architettura.

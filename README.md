@@ -151,7 +151,9 @@ node scripts/lib/schedule-cli.js next-end      # prossima fine turno (ISO)
 ## Struttura
 
 - `launch-ai-supervisor.sh` — unico comando per l'utente
-- `CLAUDE.md` — istruzioni per l'AI supervisore
+- `CLAUDE.md` — istruzioni per il supervisore avviato dal launcher Claude Code
+- `AGENTS.md` — istruzioni equivalenti per sessioni Codex aperte sul repository
+- `docs/QUIZ.md`, `docs/ISSUES.md`, `docs/SETUP.md`, `docs/TECH.md` — runbook tematici condivisi dai supervisori
 - `src/autoplay.js` — main
 - `src/lib/` — logger, monitor, quiz, video, schedule
 - `scripts/lib/schedule-cli.js` — helper orari per gli script shell
