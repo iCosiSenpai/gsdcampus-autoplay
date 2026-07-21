@@ -115,13 +115,14 @@ function printBrandHero(layout) {
   panelTop(layout);
   framedLine(layout);
   if (layout.inner >= 62) {
-    framedLine(layout, `     ${UI.accentSoft}/\\_/\\${UI.reset}      ${UI.bold}GSD CAMPUS AUTOPILOT${UI.reset}`);
-    framedLine(layout, `    ${UI.accentSoft}( o.o )${UI.reset}     ${UI.bold}Ciao collega!${UI.reset}`);
-    framedLine(layout, `     ${UI.accentSoft}> ^ <${UI.reset}      ${UI.dim}Aggiorna · configura · avvia${UI.reset}`);
+    framedLine(layout, `       ${UI.accentSoft}╭─────╮${UI.reset}      ${UI.bold}GSD CAMPUS${UI.reset}`);
+    framedLine(layout, `       ${UI.accentSoft}│ ◉ ◉ │${UI.reset}      ${UI.bold}AUTOPILOT${UI.reset}`);
+    framedLine(layout, `       ${UI.accentSoft}│  ▾  │${UI.reset}      ${UI.accentSoft}Ciao collega!${UI.reset}`);
+    framedLine(layout, `       ${UI.accentSoft}╰─────╯${UI.reset}      ${UI.dim}aggiorna · configura · avvia${UI.reset}`);
   } else {
-    framedLine(layout, `   ${UI.accentSoft}/\\_/\\${UI.reset}   ${UI.bold}GSD CAMPUS${UI.reset}`);
-    framedLine(layout, `  ${UI.accentSoft}( o.o )${UI.reset}  ${UI.bold}Ciao collega!${UI.reset}`);
-    framedLine(layout, `   ${UI.accentSoft}> ^ <${UI.reset}   ${UI.dim}Autopilot${UI.reset}`);
+    framedLine(layout, `    ${UI.accentSoft}╭───╮${UI.reset}    ${UI.bold}GSD CAMPUS${UI.reset}`);
+    framedLine(layout, `    ${UI.accentSoft}│◉◉ │${UI.reset}    ${UI.bold}AUTOPILOT${UI.reset}`);
+    framedLine(layout, `    ${UI.accentSoft}╰─▾─╯${UI.reset}    ${UI.accentSoft}Ciao collega!${UI.reset}`);
   }
   framedLine(layout);
   panelBottom(layout);

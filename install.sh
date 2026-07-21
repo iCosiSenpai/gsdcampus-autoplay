@@ -79,11 +79,9 @@ if { : < /dev/tty; } 2>/dev/null; then
 fi
 
 # Diamo respiro all'interfaccia solo quando il Terminale è davvero troppo
-# piccolo. CSI 8 è gestito direttamente da Terminal.app/iTerm2, quindi non
-# richiede AppleScript né permessi Accessibilità. Le dimensioni nuove sono il
-# massimo tra quelle correnti e il minimo consigliato: una finestra già grande
-# (tipicamente anche quella a schermo intero) non viene mai ridotta. In modalità
-# full screen macOS può ignorare la richiesta, senza uscirne.
+# piccolo. Prima proviamo il resize nativo macOS, poi il comando ANSI per i
+# terminali compatibili. Le dimensioni nuove sono un minimo: una finestra già
+# grande (tipicamente anche quella a schermo intero) non viene mai ridotta.
 UI_WINDOW_RESIZED=false
 ui_prepare_terminal() {
   [ -t 1 ] || return 0
@@ -92,9 +90,78 @@ ui_prepare_terminal() {
   printf '\033]0;GSD Campus Autopilot\007'
 
   case "${TERM_PROGRAM:-}" in
-    Apple_Terminal|iTerm.app) ;;
+    Apple_Terminal)
+      if command -v osascript >/dev/null 2>&1; then
+        local app_resize
+        app_resize=$(osascript <<'APPLESCRIPT' 2>/dev/null || true
+set resultText to "unchanged"
+set hasWindow to false
+tell application "Terminal"
+  if (count of windows) > 0 then
+    set hasWindow to true
+    set oldBounds to bounds of front window
+  end if
+end tell
+if hasWindow then
+  tell application "Finder" to set screenBounds to bounds of window of desktop
+  set {screenLeft, screenTop, screenRight, screenBottom} to screenBounds
+  set {oldLeft, oldTop, oldRight, oldBottom} to oldBounds
+  set oldWidth to oldRight - oldLeft
+  set oldHeight to oldBottom - oldTop
+  if oldWidth < 1180 or oldHeight < 780 then
+    set targetWidth to 1180
+    set targetHeight to 780
+    if targetWidth > (screenRight - screenLeft - 40) then set targetWidth to screenRight - screenLeft - 40
+    if targetHeight > (screenBottom - screenTop - 60) then set targetHeight to screenBottom - screenTop - 60
+    set newLeft to screenLeft + ((screenRight - screenLeft - targetWidth) div 2)
+    set newTop to screenTop + 36
+    if newTop + targetHeight > screenBottom - 12 then set newTop to screenBottom - targetHeight - 12
+    tell application "Terminal" to set bounds of front window to {newLeft, newTop, newLeft + targetWidth, newTop + targetHeight}
+    set resultText to "resized"
+  end if
+end if
+return resultText
+APPLESCRIPT
+        )
+        case "$app_resize" in
+          resized*) UI_WINDOW_RESIZED=true; return 0 ;;
+          unchanged*) return 0 ;;
+        esac
+      fi
+      ;;
+    iTerm.app)
+      if command -v osascript >/dev/null 2>&1; then
+        local app_resize
+        app_resize=$(osascript <<'APPLESCRIPT' 2>/dev/null || true
+set resultText to "unchanged"
+set hasWindow to false
+tell application "iTerm2"
+  if (count of windows) > 0 then
+    set hasWindow to true
+    set oldBounds to bounds of front window
+  end if
+end tell
+if hasWindow then
+  set {oldLeft, oldTop, oldRight, oldBottom} to oldBounds
+  set oldWidth to oldRight - oldLeft
+  set oldHeight to oldBottom - oldTop
+  if oldWidth < 1180 or oldHeight < 780 then
+    tell application "iTerm2" to set bounds of front window to {40, 36, 1220, 816}
+    set resultText to "resized"
+  end if
+end if
+return resultText
+APPLESCRIPT
+        )
+        case "$app_resize" in
+          resized*) UI_WINDOW_RESIZED=true; return 0 ;;
+          unchanged*) return 0 ;;
+        esac
+      fi
+      ;;
     *) return 0 ;;
   esac
+
   command -v tput >/dev/null 2>&1 || return 0
 
   local cols lines new_cols new_lines
@@ -145,21 +212,6 @@ ui_box_line() {
   spaces=$(printf '%*s' "$pad" "")
   printf ' %b│%b  %b%s%b%s%b│%b\n' "$ACCENT" "$NC" "$style" "$text" "$NC" "$spaces" "$ACCENT" "$NC"
 }
-ui_mascot() {
-  if [ "${UI_OK}" = '✓' ]; then
-    printf ' %b                    ╭──────────────────╮%b\n' "$ACCENT" "$NC"
-    printf ' %b                    │%b %bCiao collega!%b    %b│%b\n' "$ACCENT" "$NC" "$BOLD" "$NC" "$ACCENT" "$NC"
-    printf ' %b                    ╰────────┬─────────╯%b\n' "$ACCENT" "$NC"
-  else
-    printf '                     +------------------+\n'
-    printf '                     | Ciao collega!    |\n'
-    printf '                     +--------+---------+\n'
-  fi
-  printf ' %b%s%b\n' "$ACCENT" '                          /\_/\' "$NC"
-  printf ' %b%s%b\n' "$ACCENT" '                         ( o.o )' "$NC"
-  printf ' %b%s%b\n' "$ACCENT$BOLD" '                          > ^ <' "$NC"
-}
-
 ui_prepare_terminal
 echo ""
 # Versione dell'installazione locale (se esiste già): aiuta a capire da quale
@@ -170,18 +222,14 @@ if [ -d "$HOME/gsdcampus-autoplay/.git" ]; then
   INST_DATE=$(git -C "$HOME/gsdcampus-autoplay" log -1 --format=%cd --date=format:'%d/%m/%Y' 2>/dev/null || echo "")
 fi
 if [ "${UI_OK}" = '✓' ]; then
-  ui_mascot
-  echo ""
   ui_box_top
-  ui_box_line "GSD Campus Autopilot" "$BOLD"
-  ui_box_line "Aggiorna · configura · avvia" "$DIM"
+  ui_box_line "GSD Campus Autopilot · preparazione" "$BOLD"
+  ui_box_line "Il menu guidato apparirà tra poco" "$DIM"
   [ -n "$INST_VER" ] && ui_box_line "versione $INST_VER${INST_DATE:+ · $INST_DATE}" "$DIM" || true
   ui_box_bottom
 else
-  ui_mascot
-  echo ""
   printf '%b  GSD Campus Autopilot%b\n' "$BOLD" "$NC"
-  printf '  Aggiorna - configura - avvia\n'
+  printf '  Preparo il menu guidato...\n'
   [ -n "$INST_VER" ] && printf "  versione installata: %s%s\n" "$INST_VER" "${INST_DATE:+ del $INST_DATE}" || true
 fi
 [ "$UI_WINDOW_RESIZED" = true ] && info "Finestra adattata per mostrare comodamente tutti i passaggi." || true

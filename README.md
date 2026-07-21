@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main
 
 > Se dopo l'incolla non succede nulla, premi Invio: alcuni copia-incolla non includono l'"a capo" finale che avvia il comando.
 
-Il comando apre con la mascotte **“Ciao collega!”** e un menu centrato, con descrizioni leggibili per ogni azione. Su Terminal.app o iTerm2 allarga automaticamente una finestra troppo piccola per mostrare bene menu e messaggi. Le finestre già abbastanza grandi o a schermo intero non vengono ridotte; non servono permessi di Accessibilità.
+Il comando apre con una mascotte compatta e un menu centrato, con descrizioni leggibili per ogni azione. Su Terminal.app o iTerm2 allarga automaticamente una finestra troppo piccola per mostrare bene menu e messaggi. Le finestre già abbastanza grandi o a schermo intero non vengono ridotte. Se macOS chiede di consentire a Terminale di controllare la propria finestra, autorizzalo: serve solo a impostarne le dimensioni; se rifiuti, il menu resta comunque utilizzabile.
 
 È l'unico comando che ti serve e vale per **tutte** le occasioni:
 - **prima installazione** su un Mac nuovo: scarica il progetto in `~/gsdcampus-autoplay`, installa tutti i requisiti e apre l'AI;
