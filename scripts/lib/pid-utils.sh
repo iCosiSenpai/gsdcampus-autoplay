@@ -11,6 +11,33 @@ pid_matches() {
   local p="$1"; local pat="$2"
   [ -n "$p" ] || return 1
   kill -0 "$p" 2>/dev/null || return 1
-  ps -o command= -p "$p" 2>/dev/null | grep -qE "$pat" || return 1
+  ps -o command= -p "$p" 2>/dev/null | grep -cE "$pat" >/dev/null || return 1
+  return 0
+}
+
+# PID dello scheduler verificato con lock+token. Fallback al PID file numerico
+# solo per compatibilità durante l'aggiornamento da versioni precedenti.
+autoplay_instance_pid() {
+  local root="$1"; local p=""
+  if [ -f "$root/scripts/lib/runtime-lock-cli.js" ]; then
+    p=$(node "$root/scripts/lib/runtime-lock-cli.js" pid "$root" 2>/dev/null || true)
+    if [ -n "$p" ]; then printf '%s' "$p"; return 0; fi
+  fi
+  if [ -f "$root/.autoplay_pid" ]; then
+    p=$(cat "$root/.autoplay_pid" 2>/dev/null || echo "")
+    if pid_matches "$p" "scheduler|autoplay"; then printf '%s' "$p"; return 0; fi
+  fi
+  return 1
+}
+
+autoplay_instance_alive() {
+  [ -n "$(autoplay_instance_pid "$1" 2>/dev/null || true)" ]
+}
+
+autoplay_clean_stale_lock() {
+  local root="$1"
+  if [ -f "$root/scripts/lib/runtime-lock-cli.js" ]; then
+    node "$root/scripts/lib/runtime-lock-cli.js" clean "$root" >/dev/null 2>&1 || return 1
+  fi
   return 0
 }

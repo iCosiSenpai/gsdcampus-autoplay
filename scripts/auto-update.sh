@@ -81,7 +81,7 @@ alog "Aggiornamento disponibile: ${OLD:0:7} → ${NEW:0:7}"
 
 # ── 5. Ferma lo scheduler se attivo (i suoi .sh stanno per cambiare) ────────
 WAS_RUNNING=false
-if [ -f "$DIR/.autoplay_pid" ] && pid_matches "$(cat "$DIR/.autoplay_pid" 2>/dev/null || echo "")" "scheduler|autoplay"; then
+if autoplay_instance_alive "$DIR"; then
   WAS_RUNNING=true
   alog "Scheduler attivo: lo fermo per l'aggiornamento."
   "$DIR/stop.sh" >> "$LOG" 2>&1 || true

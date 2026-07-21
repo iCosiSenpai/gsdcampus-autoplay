@@ -10,6 +10,7 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const { writeJsonAtomic, readJsonSafe } = require('./io');
+const { auditBank, compareBanks, mergeMissingByCanonical } = require('./bank-audit');
 
 const DEFAULT_PUBLIC_URL =
   'https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/data/known_answers_public.json';
@@ -25,13 +26,12 @@ const TIMEOUT_MS = 12000;
 function mergeBanks(local, remote) {
   const loc = local && typeof local === 'object' ? local : {};
   const rem = remote && typeof remote === 'object' ? remote : {};
-  const merged = { ...rem, ...loc };
-  let added = 0;
-  for (const k of Object.keys(rem)) {
-    if (String(k).startsWith('README')) continue;
-    if (!(k in loc)) added++;
-  }
-  return { merged, added };
+  const remoteIntoLocal = mergeMissingByCanonical(loc, rem);
+  return {
+    merged: remoteIntoLocal.bank,
+    added: remoteIntoLocal.added.length,
+    conflicts: remoteIntoLocal.conflicts,
+  };
 }
 
 function throttlePath(root) {
@@ -112,9 +112,24 @@ async function syncPublicBank(root, opts = {}) {
   } catch (e) {
     return { ok: false, error: e.message || String(e) };
   }
+  const remoteAudit = auditBank(remote);
+  if (!remoteAudit.ok) {
+    return {
+      ok: false,
+      error: 'remote_bank_invalid',
+      invalid: remoteAudit.invalid.length,
+      conflicts: remoteAudit.conflicts.length,
+      remoteHash: remoteAudit.sha256,
+    };
+  }
   const knownPath = path.join(root, 'data', 'known_answers.json');
   const local = readJsonSafe(knownPath, {});
-  const { merged, added } = mergeBanks(local, remote);
+  const publicFile = readJsonSafe(path.join(root, 'data', 'known_answers_public.json'), {});
+  const publicComparison = compareBanks(publicFile, remote);
+  const { merged, added, conflicts } = mergeBanks(local, remote);
+  if (conflicts.length > 0) {
+    return { ok: false, error: 'trusted_public_conflict', conflicts: conflicts.length, remoteHash: remoteAudit.sha256 };
+  }
   if (added > 0) {
     try {
       writeJsonAtomic(knownPath, merged);
@@ -124,7 +139,30 @@ async function syncPublicBank(root, opts = {}) {
   }
   markSynced(root);
   if (added > 0) log(`Banca: +${added} risposte dalla public (merge locale).`);
-  return { ok: true, added, skipped: false };
+  return {
+    ok: true,
+    added,
+    skipped: false,
+    remoteHash: remoteAudit.sha256,
+    publicFileHash: publicComparison.leftHash,
+    publicMatchesRemote: publicComparison.equal,
+  };
+}
+
+async function verifyRemotePublicBank(root, opts = {}) {
+  const url = opts.url || DEFAULT_PUBLIC_URL;
+  let remote;
+  try { remote = await fetchJson(url); } catch (e) { return { ok: false, error: e.message || String(e) }; }
+  const remoteAudit = auditBank(remote);
+  const localPublic = readJsonSafe(path.join(root, 'data', 'known_answers_public.json'), {});
+  const localAudit = auditBank(localPublic);
+  const comparison = compareBanks(localPublic, remote);
+  return {
+    ok: remoteAudit.ok && localAudit.ok && comparison.equal,
+    remoteAudit,
+    localAudit,
+    comparison,
+  };
 }
 
 /**
@@ -134,15 +172,17 @@ async function syncPublicBank(root, opts = {}) {
 function bankLag(root) {
   const known = readJsonSafe(path.join(root, 'data', 'known_answers.json'), {});
   const pub = readJsonSafe(path.join(root, 'data', 'known_answers_public.json'), {});
-  const k = Object.keys(known).filter((x) => !String(x).startsWith('README'));
-  const p = Object.keys(pub).filter((x) => !String(x).startsWith('README'));
-  const onlyLocal = k.filter((q) => !(q in pub)).length;
-  const onlyPublic = p.filter((q) => !(q in known)).length;
+  const cmp = compareBanks(known, pub);
+  const knownAudit = auditBank(known);
+  const publicAudit = auditBank(pub);
   return {
-    trusted: k.length,
-    publicFile: p.length,
-    onlyLocal,
-    onlyPublic,
+    trusted: knownAudit.canonicalEntries,
+    publicFile: publicAudit.canonicalEntries,
+    onlyLocal: cmp.onlyLeft.length,
+    onlyPublic: cmp.onlyRight.length,
+    conflicts: cmp.conflicts.length + knownAudit.conflicts.length + publicAudit.conflicts.length,
+    trustedHash: knownAudit.sha256,
+    publicHash: publicAudit.sha256,
   };
 }
 
@@ -151,6 +191,8 @@ module.exports = {
   shouldSync,
   syncPublicBank,
   bankLag,
+  verifyRemotePublicBank,
+  fetchJson,
   DEFAULT_PUBLIC_URL,
   THROTTLE_MS,
 };

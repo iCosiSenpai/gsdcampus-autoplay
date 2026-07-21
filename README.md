@@ -138,6 +138,10 @@ npm test                                # solo test unitari (node:test, pure fun
 ./scripts/doctor.sh [--full]            # checkup a semaforo (selettori DOM + con --full sonda autologin)
 node scripts/lib/metrics-cli.js summary # metriche phase ultime 24h (logs/metrics.jsonl, no dati personali)
 node scripts/lib/selector-probe.js      # verifica marker DOM critici sulle fixture
+node scripts/lib/answers-cli.js audit [--fix]   # duplicati/conflitti Unicode; fix solo equivalenti
+node scripts/lib/answers-cli.js verify [--remote] # integrità trusted/public e confronto con main
+node scripts/lib/course-state-backup-cli.js list # snapshot recuperabili dello stato account
+node scripts/lib/course-state-backup-cli.js restore <nome> --yes # ripristino verificato stesso account
 # CHANGELOG.md: aggiungere una sezione "## data" con bullet semplici a ogni push
 # rilevante — il curl mostra le righe nuove nel box "Novità" dopo l'update.
 
@@ -161,7 +165,7 @@ node scripts/lib/schedule-cli.js next-end      # prossima fine turno (ISO)
 - `data/` — risposte conosciute, risposte in attesa di verifica, mappa corsi, stato sessione
 - `logs/` — log, heartbeat, status.json, supervisor.log, ollama.log
 - `debug/` — screenshot e dump HTML in caso di errore
-- `backups/` — copie di sicurezza dello script
+- `backups/accounts/<CF>/course-state/` — snapshot con checksum dello stato corsi prima di riaperture/reset; mai cookie o database membri
 - `README-COLLEGHI.md` — guida semplificata per i colleghi
 
 ## Modalità headless
@@ -186,6 +190,8 @@ I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i tu
 - I formati orari accettati sono flessibili: `9`, `16`, `9:30`, `09:30`, `9.30`, `0930`, `1630`.
 - Default: lunedì–venerdì, 09:00–13:00 e 16:00–20:00.
 - Se avvii `start.sh` fuori orario, lo scheduler aspetta l'inizio del prossimo turno e poi avvia l'autoplay.
+- Fuori orario `status.json` resta fresco con fase `off_hours`, heartbeat e prossimo turno: un vecchio errore viene archiviato come run precedente e non genera allarmi fantasma.
+- Prima di ogni sessione browser lo scheduler esegue il probe offline dei selettori: se fallisce, l'autoplay non apre la piattaforma e non tocca quiz.
 - A fine turno, `src/autoplay.js` esce gracefulmente; lo scheduler aspetta il turno successivo e lo riavvia. Tutto autonomo: lanciato una volta, si ferma e riprende da solo a ogni cambio turno (il check di fine turno gira anche durante un video, con 15 min di tolleranza per completare il contenuto in corso).
 - `start.sh` attiva anche `caffeinate` (built-in macOS) per tenere il Mac sveglio finché gira lo scheduler.
 - `./start.sh --ignore-hours` ignora gli orari e non si ferma mai (pausa 10 min tra i run): solo se vuoi girare fuori orario senza fermarti.
@@ -206,7 +212,7 @@ I Mac in negozio restano accesi 24/7. Lo scheduler gestisce automaticamente i tu
 - Se una domanda non è in banca, lo script chiede a Ollama (modello configurabile in `config.json` tramite `ollamaModel`) con **few-shot** (esempi verificati) + **self-consistency** (3 campionamenti + voto a maggioranza). Per monitor/autoplay il modello cloud più economico e sufficiente per quiz in italiano è `gemma4:cloud`.
 - Le domande sconosciute o a bassa confidenza finiscono in `data/accounts/<CF>/ai_quiz_request.json` (con i tentativi di Ollama e la confidenza): l'AI supervisore le risolve e scrive la risposta verificata nella banca TRUSTED. L'esito (superato/non superato + punteggio) finisce in `logs/status.json` (`lastQuizResult`) ed è mostrato da `./status.sh`.
 - Se Ollama non sa rispondere, il quiz si ferma e salva la domanda in `data/accounts/<CF>/need_answer.json` + `ai_quiz_request.json`.
-- Manutenzione banca (per chi prepara i rilasci): `node scripts/lib/answers-cli.js stats|list|merge|set|audit`.
+- Manutenzione banca: `answers-cli audit --fix` rimuove solo duplicati Unicode con risposta equivalente; risposte discordanti vengono bloccate. `answers-cli verify --remote` confronta hash e contenuto canonico con `main`.
 
 ## Robustezza autologin
 

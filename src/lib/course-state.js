@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const account = require('./account');
 const { writeJsonAtomic, readJsonSafe } = require('./io');
+const { createCourseStateBackup } = require('./state-backup');
 
 const STATE_FILE = 'course_state.json';
 
@@ -191,6 +192,7 @@ function allAssessmentsPassed(state, courseUrl, assessmentUrls = null) {
 function reopenCourse(root, state, url) {
   const id = courseIdFromUrl(url);
   if (!id || !state[id]) return state;
+  try { createCourseStateBackup(root, state, { reason: 'before-reopen', courseId: id }); } catch (_) { /* non blocca il corso */ }
   return updateCourse(root, state, url, {
     status: 'in_progress',
     needHelpReason: null,
@@ -242,6 +244,7 @@ function allDoneOrNeedHelp(state, urls) {
 function resetCourse(root, state, url) {
   const id = courseIdFromUrl(url);
   if (!id || !state[id]) return state;
+  try { createCourseStateBackup(root, state, { reason: 'before-reset', courseId: id }); } catch (_) { /* non blocca il reset */ }
   delete state[id];
   // Merge consapevole: scrive memoria + corsi esterni, SENZA il corso resettato
   // (altrimenti, se un corso esterno fosse su disco ma non in memoria, verrebbe

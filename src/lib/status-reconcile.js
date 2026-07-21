@@ -12,6 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { writeJsonAtomic, readJsonSafe } = require('./io');
+const { inspectLock } = require('./runtime-lock');
 
 /** Fasi che indicano un run IN CORSO (non terminali). */
 const ACTIVE_PHASES = new Set([
@@ -41,6 +42,7 @@ const TERMINAL_PHASES = new Set([
   'session_unstable',
   'post_login_blocked',
   'crash_loop',
+  'preflight_failed',
   'error',
   'all_need_help',
 ]);
@@ -76,6 +78,15 @@ function reconcileStatusObject(status, opts = {}) {
     base.running = false;
     changed = true;
     reason = 'running_orphaned';
+  }
+
+  if (base.schedulerRunning) {
+    base.schedulerRunning = false;
+    changed = true;
+    reason = reason || 'scheduler_orphaned';
+    if (base.phase === 'off_hours' || base.phase === 'scheduler_starting' || base.phase === 'scheduler_launching' || base.phase === 'awaiting_ai') {
+      base.phase = 'stopped';
+    }
   }
 
   if (isActivePhase(base.phase)) {
@@ -135,6 +146,9 @@ function pidAliveMatching(pid, patternRe) {
  */
 function isAnyAutomationAlive(root) {
   const r = root || path.join(__dirname, '..', '..');
+  try {
+    if (inspectLock(r).alive) return true;
+  } catch (_) { /* fallback legacy sotto */ }
   const pid = readPidFile(r);
   if (pidAliveMatching(pid, /scheduler|autoplay\.js/i)) return true;
 

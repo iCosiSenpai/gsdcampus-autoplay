@@ -45,6 +45,7 @@ config.json
 config.json.bak
 PROMPT-per-altra-AI.md
 .autoplay_pid
+.autoplay_lock/
 .ollama_pid
 .scheduler_stop
 .supervisor_prompt.txt
@@ -52,4 +53,3 @@ PROMPT-per-altra-AI.md
 .package_hash
 .claude/
 .claude/plan.md
-

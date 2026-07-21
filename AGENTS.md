@@ -76,9 +76,9 @@ Questo è il canale principale. Tutti gli altri comandi (`./start.sh`, `./status
 1. **Orientati**: leggi `logs/ai_todo.json`; se manca o è vecchio (>15 min), lancia `node scripts/harvest-answers.js --all` (un solo login: censimento + riconciliazione + raccolta domande).
 2. **Risolvi le domande**: se `ai_quiz_request.json` ha domande aperte, risolvile TUTTE con WebSearch + ragionamento e `node scripts/lib/answers-cli.js resolve "domanda" "risposta"` (una per una). Non chiedere conferma: è lavoro che va fatto comunque.
 3. **Distribuisci**: dopo aver risolto un batch, `./scripts/publish-answers.sh` — funziona **per tutti** (anche senza permessi git push): POST al Cloudflare Worker che committà su `main`. I colleghi ricevono al prossimo "Aggiorna e avvia".
-4. **Recupera i corsi bloccati**: se ci sono corsi `need_help` le cui domande ora sono risolte, fai `resetCourse` su quelli.
+4. **Recupera i corsi bloccati**: se ci sono corsi `need_help` le cui domande ora sono risolte, `answers-cli resolve` li riapre in modo conservativo (preserva lezioni e ledger; backup automatico).
 5. **Avvia**: `./start.sh` in **modalità normale** (rispetta i turni: se in orario parte subito, se fuori orario aspetta e parte da solo al prossimo turno). Poi attiva il **Monitor** (v. sezione Monitoraggio).
-6. **Gestisci gli eventi da solo**: quando il Monitor segnala `need_help`/quiz sospeso, risolvi le domande (passo 2-3), `resetCourse`, riavvia — in autonomia, senza chiedere.
+6. **Gestisci gli eventi da solo**: quando il Monitor segnala `need_help`/quiz sospeso, risolvi le domande (passo 2-3), lascia che `resolve` riapra il corso, riavvia — in autonomia, senza chiedere.
 
 **Interrompi e coinvolgi l'utente SOLO se sei davvero bloccato:** link autologin morto CONFERMATO dalla sonda live (serve nuovo link/CSV), oppure un bug codice/infra da segnalare (issue). Per tutto il resto, procedi da solo. L'utente può sempre scrivere "come sta andando?" per un aggiornamento o "ferma tutto" per fermarti.
 
@@ -109,7 +109,9 @@ Sei stato aperto per portare avanti in autonomia il corso e-learning GSD Campus.
 - `tail -n 30 logs/autoplay.log` — ultimi log.
 - `cat logs/status.json` — stato live.
 - `node scripts/lib/metrics-cli.js summary [ore]` — conteggio cambi di fase da `logs/metrics.jsonl` (solo phase/id corso, **niente** CF/token). Utile per “quante session_unstable nelle ultime 24h?”.
-- `node scripts/lib/selector-probe.js` — verifica offline i marker DOM critici (fixture); anche in `./scripts/doctor.sh`.
+- `node scripts/lib/selector-probe.js` — verifica offline i marker DOM critici (fixture); è anche un gate automatico prima di ogni sessione browser.
+- `node scripts/lib/answers-cli.js audit [--fix]` / `verify [--remote]` — igiene e integrità della banca risposte.
+- `node scripts/lib/course-state-backup-cli.js list|restore <nome> --yes` — elenco/ripristino snapshot verificati dello stato account.
 
 > **IMPORTANTE — `logs/status.json` può essere VECCHIO.** Descrive l'ultimo run di autoplay, che potrebbe essere terminato giorni fa. Controlla sempre il campo `lastUpdate` (e la riga **Età stato** di `./status.sh`): se è più vecchio di qualche minuto e nessun processo è attivo, NON riportarlo come stato attuale. In particolare **non dire mai all'utente che l'autologin è scaduto basandoti solo su uno `status.json` con `phase: autologin_invalid`**: prima esegui la verifica live (`node scripts/lib/healthcheck-cli.js` o `./status.sh --check`). Il link è quasi sempre ancora valido — un singolo calo di sessione transitorio durante la scoperta corsi può aver scritto quella fase.
 - `node scripts/lib/schedule-cli.js describe` — descrizione leggibile degli orari configurati.
@@ -138,9 +140,9 @@ Sei stato aperto per portare avanti in autonomia il corso e-learning GSD Campus.
 
 **All'apertura della sessione (e quando l'utente chiede "quanti corsi ci sono?" / "come sono messo?"), controlla QUANTI corsi ci sono e la loro situazione**: `node scripts/harvest-answers.js --census` (legge la dashboard live, ~30-60s, scrive `logs/course_census.json`). Riporta all'utente: totale corsi, quanti al 100%, quanti parziali (con %), quanti a 0%. `./status.sh` mostra l'ultimo censimento dalla cache (istantaneo, senza browser) — usalo per un colpo d'occhio rapido; lancia `--census` per il dato aggiornato.
 
-**IMPORTANTE — 100% video ≠ corso concluso**: un corso al 100% può avere ancora il QUESTIONARIO finale da fare. Per scoprire i falsi-done (video finiti ma quiz pendente) lancia `node scripts/harvest-answers.js --reconcile` (e `--reset` per rimetterli in coda). Fallo quando i corsi risultano "tutti done" ma sospetti manchino questionari, o su richiesta dell'utente.
+**IMPORTANTE — 100% video ≠ corso concluso**: un corso al 100% può avere ancora il QUESTIONARIO finale da fare. Per scoprire i falsi-done lancia `node scripts/harvest-answers.js --reconcile`; per riaprirli serve `--reconcile --reset --yes`. Il flag storico `--reset` ora esegue una riapertura conservativa con backup, non cancella lezioni o contatori.
 
-**Scan unico (consigliato all'avvio)**: `node scripts/harvest-answers.js --all` fa in **un solo login** censimento + riconciliazione (+`--reset`) + raccolta domande dei questionari pendenti + aggiornamento di `logs/ai_todo.json`. È il modo più efficiente per orientarti: un comando invece di tre.
+**Scan unico (consigliato all'avvio)**: `node scripts/harvest-answers.js --all` fa in **un solo login** censimento + riconciliazione read-only + raccolta domande + aggiornamento di `logs/ai_todo.json`. La riapertura esplicita, se autorizzata, è `--all --reset --yes`.
 
 ## Flusso operativo (autonomo)
 
@@ -166,7 +168,7 @@ All'apertura procedi da solo (v. sezione "Autonomia"): orientati con `ai_todo.js
    1. Leggere `data/accounts/<CF>/ai_quiz_request.json` (CF = `config.codice_fiscale`, o derivato dall'URL di autologin). Se assente, leggi `need_answer.json`.
    2. Risolvere ogni domanda con `WebSearch`/`WebFetch` + ragionamento (il guess Ollama + confidenza è un suggerimento, non la verità).
    3. Scrivere la risposta verificata nella banca **TRUSTED** `data/known_answers.json` con `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
-   4. Se il quiz era **non superato** (`need_help`), fai riprovare il corso: `node -e "require('./src/lib/course-state').resetCourse('.', require('./src/lib/course-state').readState('.'), 'URL_CORSO')"`. Se era **superato con domande a bassa confidenza** (`quiz_needs_answers`), non serve reset: la verifica è opportunistica.
+   4. Se il quiz era **non superato** (`need_help`), `answers-cli resolve` riapre il corso senza perdere lo stato; usa `course-state-backup-cli.js` solo per un ripristino diagnostico. Se era **superato con domande a bassa confidenza** (`quiz_needs_answers`), non serve riaprire il corso.
    5. Riavviare con `./start.sh` o `./start.sh --ignore-hours`.
    Se tutti i corsi sono `done` o `need_help`, l'autoplay esce con codice 0 e `phase: "need_help"`; lo scheduler in `ignore-hours` aspetta 10 minuti prima di riavviare, dando tempo all'AI/utente di intervenire.
 

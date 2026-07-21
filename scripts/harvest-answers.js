@@ -20,6 +20,9 @@
  *   node scripts/harvest-answers.js --cf <CF>            # account da members.db
  *   node scripts/harvest-answers.js --to-ai-request      # scrive anche in
  *                                                        # ai_quiz_request (attivo)
+ *   node scripts/harvest-answers.js --reconcile --reset --yes
+ *                                                        # riapertura esplicita
+ *   node scripts/harvest-answers.js --help               # non apre il browser
  */
 
 const fs = require('fs');
@@ -42,19 +45,54 @@ const FORBIDDEN_RE = /conferma|finalizz|invia|termina|concludi|salva e invia/i;
 
 function log(...a) { console.log(`[harvest] ${a.join(' ')}`); }
 
+const HELP_TEXT = `Uso: node scripts/harvest-answers.js [opzioni]
+
+  --all                    censimento + riconciliazione + raccolta (un login)
+  --census                 solo censimento corsi
+  --reconcile              trova questionari pendenti / falsi-done
+  --reset --yes            riapre esplicitamente i falsi-done trovati
+  --course <url>           limita la raccolta a un corso
+  --cf <codice-fiscale>    usa un account da members.db (read-only)
+  --to-ai-request          aggiorna anche l'handoff AI dell'account attivo
+  --dry-run                limita la raccolta al primo caso utile
+  --help, -h               mostra questo aiuto e NON apre il browser
+
+Sicurezza: --reset richiede sempre --yes e non finalizza questionari.`;
+
+function usageError(message) {
+  const e = new Error(message);
+  e.code = 'HARVEST_USAGE';
+  return e;
+}
+
 function parseArgs(argv) {
   const args = argv.slice(2);
-  const o = { cf: null, dryRun: false, course: null, toAiRequest: false, reconcile: false, reset: false, census: false, all: false };
+  const o = { cf: null, dryRun: false, course: null, toAiRequest: false, reconcile: false, reset: false, yes: false, census: false, all: false, help: false };
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--cf') o.cf = args[++i];
+    if (args[i] === '--help' || args[i] === '-h') o.help = true;
+    else if (args[i] === '--cf') {
+      const value = args[++i];
+      if (!value || value.startsWith('--')) throw usageError('--cf richiede un codice fiscale.');
+      if (!/^[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]$/i.test(value)) throw usageError('--cf non è un codice fiscale valido.');
+      o.cf = value.toUpperCase();
+    }
     else if (args[i] === '--dry-run') o.dryRun = true;
-    else if (args[i] === '--course') o.course = args[++i];
+    else if (args[i] === '--course') {
+      const value = args[++i];
+      if (!value || value.startsWith('--')) throw usageError('--course richiede un URL /corso/show/<id>.');
+      if (!/\/corso\/show\/\d+/.test(value)) throw usageError('--course deve contenere /corso/show/<id>.');
+      o.course = value;
+    }
     else if (args[i] === '--to-ai-request') o.toAiRequest = true;
     else if (args[i] === '--reconcile') o.reconcile = true;
     else if (args[i] === '--reset') o.reset = true;
+    else if (args[i] === '--yes') o.yes = true;
     else if (args[i] === '--census') o.census = true;
     else if (args[i] === '--all') o.all = true;
+    else throw usageError(`Opzione sconosciuta: ${args[i]}`);
   }
+  if (o.reset && !o.yes) throw usageError('--reset richiede --yes (riapertura esplicita dello stato locale).');
+  if (o.reset && !o.reconcile && !o.all) throw usageError('--reset richiede --reconcile oppure --all.');
   return o;
 }
 
@@ -330,13 +368,16 @@ async function reconcile(page, config, opt) {
   log(`\nRIEPILOGO: ${findings.length} corso/i con questionario pendente, di cui ${falseDones.length} segnati done/need_help a torto.`);
   if (falseDones.length && canReset) {
     for (const f of falseDones) {
-      courseState.resetCourse(ROOT, state, f.courseUrlRaw);
+      // Il nome storico del flag resta --reset, ma l'operazione e una riapertura
+      // conservativa: conserva lezioni, ledger assessment e contatori. Inoltre
+      // reopenCourse crea prima un backup recuperabile di course_state.
+      courseState.reopenCourse(ROOT, state, f.courseUrlRaw);
       f.resetApplied = true;
-      log(`  reset: ${f.courseUrl} → tornerà processabile al prossimo avvio.`);
+      log(`  riaperto: ${f.courseUrl} → processabile al prossimo avvio (stato preservato).`);
     }
-    log(`${falseDones.length} corso/i resettato/i. Riavvia con ./start.sh per rifarne i questionari.`);
+    log(`${falseDones.length} corso/i riaperto/i in modo conservativo. Riavvia con ./start.sh per rifarne i questionari.`);
   } else if (falseDones.length) {
-    log(`Per resettarli automaticamente: node scripts/harvest-answers.js --reconcile --reset`);
+    log(`Per riaprirli esplicitamente: node scripts/harvest-answers.js --reconcile --reset --yes`);
   }
   // Riscrive il report dopo eventuali reset, così l'inbox distingue una
   // riconciliazione eseguita da una semplice scansione read-only.
@@ -355,6 +396,10 @@ async function reconcile(page, config, opt) {
 
 async function main() {
   const opt = parseArgs(process.argv);
+  if (opt.help) {
+    console.log(HELP_TEXT);
+    return;
+  }
   const config = resolveAccount(opt.cf);
   const who = config.codice_fiscale || 'attivo';
   const outDir = path.join(ROOT, 'debug', 'harvest', who);
@@ -469,4 +514,15 @@ async function main() {
   }
 }
 
-main().catch(e => { console.error(`[harvest] errore fatale: ${e.message}`); process.exit(1); });
+if (require.main === module) {
+  main().catch(e => {
+    if (e && e.code === 'HARVEST_USAGE') {
+      console.error(`[harvest] ${e.message}\n\n${HELP_TEXT}`);
+      process.exit(2);
+    }
+    console.error(`[harvest] errore fatale: ${e.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = { parseArgs, HELP_TEXT, usageError };

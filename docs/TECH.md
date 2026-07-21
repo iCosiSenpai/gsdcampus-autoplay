@@ -3,10 +3,11 @@
 ## Note tecniche
 
 - Lo script principale è `src/autoplay.js`; usa Playwright in modalità headless.
-- `start.sh` controlla i requisiti e la configurazione prima di avviare.
+- `start.sh` controlla requisiti, configurazione e integrità della banca prima di avviare. Il lock single-instance usa directory atomica + token nella command line: un PID riciclato non può essere scambiato per lo scheduler.
 - L'elenco membri è in `data/members.db` (SQLite, richiede Node >=22 per `node:sqlite` built-in). Lo stato per-account è in `data/accounts/<CF>/`. La dashboard aggregata è rigenerata in `data/dashboard.json` alla fine di ogni run.
 - I log sono in `logs/`.
-- `backups/` contiene copie di sicurezza dello script (se presenti).
+- `backups/accounts/<CF>/course-state/` contiene snapshot con SHA-256 creati prima di `reopenCourse`/`resetCourse`. Il restore verifica checksum e account e crea un ulteriore backup dello stato sostituito. Non include cookie, URL di login o `members.db`.
+- Fuori turno lo scheduler rinnova `status.json`/heartbeat con `phase: off_hours`; prima di ogni browser esegue `selector-probe.js` e usa `phase: preflight_failed` se il gate non passa.
 - `scripts/lib/schedule-cli.js` fornisce helper per leggere e validare gli orari dagli script shell. `scripts/lib/members-cli.js` e `scripts/lib/dashboard-cli.js` gestiscono membri e stato cross-utente.
 
 ## Permessi del supervisore AI

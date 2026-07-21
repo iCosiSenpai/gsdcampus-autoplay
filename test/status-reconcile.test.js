@@ -76,4 +76,11 @@ describe('reconcileStatusObject', () => {
     const r = reconcileStatusObject(s, { processAlive: false });
     assert.equal(r.changed, false);
   });
+
+  it('scheduler off_hours orfano → schedulerRunning false e stopped', () => {
+    const out = reconcileStatusObject({ phase: 'off_hours', running: false, schedulerRunning: true }, { processAlive: false });
+    assert.equal(out.changed, true);
+    assert.equal(out.status.schedulerRunning, false);
+    assert.equal(out.status.phase, 'stopped');
+  });
 });

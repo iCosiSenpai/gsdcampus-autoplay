@@ -157,7 +157,7 @@ node scripts/harvest-answers.js --to-ai-request
 ## STEP 2.4 — Reconcile falsi-done
 
 ```bash
-node scripts/harvest-answers.js --reconcile --reset
+node scripts/harvest-answers.js --reconcile --reset --yes
 ```
 
 **Done:** nessun corso 100% video con questionario ancora aperto segnato `done`.

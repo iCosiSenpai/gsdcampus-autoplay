@@ -47,8 +47,8 @@ echo ""
 
 # 0. Ferma eventuali istanze precedenti per evitare conflitti tra codice vecchio e nuovo
 info "Controllo e arresto eventuali istanze precedenti..."
-if [ -f "$DIR/.autoplay_pid" ]; then
-  OLD_PID=$(cat "$DIR/.autoplay_pid" 2>/dev/null || echo "")
+if autoplay_instance_alive "$DIR"; then
+  OLD_PID=$(autoplay_instance_pid "$DIR" 2>/dev/null || echo "")
   # pid_matches (non kill -0 puro): un PID recyclato a un processo estraneo NON
   # va killato — qui prima si mandava SIGKILL a qualunque processo vivo con quel PID.
   if pid_matches "$OLD_PID" "scheduler|autoplay"; then
@@ -61,15 +61,17 @@ if [ -f "$DIR/.autoplay_pid" ]; then
   fi
   rm -f "$DIR/.autoplay_pid"
 fi
+autoplay_clean_stale_lock "$DIR" >/dev/null 2>&1 || true
+if ! autoplay_instance_alive "$DIR"; then rm -f "$DIR/.autoplay_pid"; fi
 # Pattern path-indipendente: lo scheduler lancia `node /abs/path/src/autoplay.js`,
 # quindi "node src/autoplay.js" non matchava mai (lasciava orfani vivi). Usiamo il
 # nome file. Esclude autoplay.log (grep su "autoplay\.js").
 # `|| true` sul pgrep: sotto set -e + pipefail un pgrep senza match (exit 1)
 # farebbe fallire la pipeline e ucciderebbe il launcher.
-{ pgrep -f "autoplay\.js" 2>/dev/null || true; } | while read orphan; do
+{ pgrep -f "$DIR/src/autoplay\.js" 2>/dev/null || true; } | while read orphan; do
   kill -9 "$orphan" 2>/dev/null || true
 done
-{ pgrep -f "scheduler.sh" 2>/dev/null || true; } | while read orphan; do
+{ pgrep -f "$DIR/scripts/scheduler\.sh" 2>/dev/null || true; } | while read orphan; do
   [ "$orphan" != "$$" ] && kill -9 "$orphan" 2>/dev/null || true
 done
 ok "Pulizia istanze precedenti completata."

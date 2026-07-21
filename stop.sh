@@ -19,20 +19,13 @@ touch "$DIR/$STOP_FILE"
 
 step "1/3" "Lettura PID dello scheduler"
 PID=""
-if [ ! -f "$PID_FILE" ]; then
-  warn "Nessun PID file trovato. Procedo con pulizia orfani."
+PID=$(autoplay_instance_pid "$DIR" 2>/dev/null || echo "")
+if [ -n "$PID" ]; then
+  ok "Trovato scheduler PID $PID (identità lock verificata)."
 else
-  PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [ -z "$PID" ]; then
-    warn "PID file vuoto."
-    rm -f "$PID_FILE"
-  elif pid_matches "$PID" "scheduler|autoplay"; then
-    ok "Trovato scheduler PID $PID."
-  else
-    warn "PID $PID nel file non corrisponde a scheduler/autoplay (probabile PID recycling). Non lo kill: pulisco il file."
-    PID=""
-    rm -f "$PID_FILE"
-  fi
+  warn "Nessuna istanza verificata. Procedo con la pulizia dei soli orfani del progetto."
+  autoplay_clean_stale_lock "$DIR" >/dev/null 2>&1 || true
+  rm -f "$PID_FILE"
 fi
 
 echo ""
@@ -66,18 +59,18 @@ step "3/3" "Arresto graceful + pulizia orfani"
 # prima così autoplay.js gracefulShutdown() esegue browser.close() (niente leak
 # di processi chromium), poi SIGKILL solo se ancora vivi dopo ~8s. Pattern
 # path-indipendente ("autoplay\.js" matcha qualsiasi path; esclude autoplay.log).
-AUTO_ORPHANS=$(pgrep -f "autoplay\.js" 2>/dev/null || true)
+AUTO_ORPHANS=$(pgrep -f "$DIR/src/autoplay\.js" 2>/dev/null || true)
 if [ -n "$AUTO_ORPHANS" ]; then
   echo "$AUTO_ORPHANS" | while read orphan; do
     [ "$orphan" != "$$" ] && kill -TERM "$orphan" 2>/dev/null || true
   done
   echo "Attesa graceful shutdown (max 8s, Invio nel frattempo non serve)..."
   for i in {1..8}; do
-    AUTO_ORPHANS=$(pgrep -f "autoplay\.js" 2>/dev/null || true)
+    AUTO_ORPHANS=$(pgrep -f "$DIR/src/autoplay\.js" 2>/dev/null || true)
     [ -z "$AUTO_ORPHANS" ] && break
     sleep 1
   done
-  AUTO_ORPHANS=$(pgrep -f "autoplay\.js" 2>/dev/null || true)
+  AUTO_ORPHANS=$(pgrep -f "$DIR/src/autoplay\.js" 2>/dev/null || true)
   if [ -n "$AUTO_ORPHANS" ]; then
     warn "Ancora attivi dopo 8s. SIGKILL dei processi autoplay..."
     echo "$AUTO_ORPHANS" | while read orphan; do
@@ -100,7 +93,7 @@ if [ -n "$CHROME_ORPHANS" ]; then
 fi
 
 # 3c. Orfani scheduler (non hanno browser da chiudere graceful): SIGKILL diretto.
-SCH_ORPHANS=$(pgrep -f "scheduler.sh" 2>/dev/null || true)
+SCH_ORPHANS=$(pgrep -f "$DIR/scripts/scheduler\.sh" 2>/dev/null || true)
 if [ -n "$SCH_ORPHANS" ]; then
   echo "$SCH_ORPHANS" | while read orphan; do
     [ "$orphan" != "$$" ] && kill -9 "$orphan" 2>/dev/null || true
@@ -110,6 +103,7 @@ fi
 
 # Rimuovi il segnale di stop se ancora presente
 rm -f "$DIR/$STOP_FILE"
+autoplay_clean_stale_lock "$DIR" >/dev/null 2>&1 || true
 
 # Status: forza running=false / phase stopped se erano rimasti "in corso"
 if [ -f "$DIR/scripts/lib/status-cli.js" ]; then

@@ -4,18 +4,18 @@
 const fs = require('fs');
 const path = require('path');
 const { writeJsonAtomic, readJsonSafe } = require('./io');
-const { normKey } = require('./quiz-match');
+const { canonicalQuestion, upsertBankEntry } = require('./bank-audit');
 
 function mergeIntoKnown(root, newAnswers, log) {
   if (!newAnswers || Object.keys(newAnswers).length === 0) return 0;
   const knownPath = path.join(root, 'data', 'known_answers.json');
   let known = readJsonSafe(knownPath, {});
-  const existingNorm = new Set(Object.keys(known).map(normKey));
+  const existingNorm = new Set(Object.keys(known).map(canonicalQuestion));
   let added = 0;
   for (const [qq, a] of Object.entries(newAnswers)) {
-    const nk = normKey(qq);
+    const nk = canonicalQuestion(qq);
     if (!known[qq] && !existingNorm.has(nk)) {
-      known[qq] = a;
+      known = upsertBankEntry(known, qq, a).bank;
       existingNorm.add(nk);
       added++;
     }

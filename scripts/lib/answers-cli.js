@@ -54,6 +54,13 @@ const account = require(path.join(__dirname, '..', '..', 'src', 'lib', 'account'
 const { clearResolvedFromHandoff } = require(path.join(__dirname, '..', '..', 'src', 'lib', 'quiz'));
 const { writeAiTodo } = require(path.join(__dirname, '..', '..', 'src', 'lib', 'ai-todo'));
 const { shareAnswersToRemote } = require(path.join(__dirname, 'answers-share'));
+const {
+  auditBank,
+  normalizeBank,
+  upsertBankEntry,
+  mergeMissingByCanonical,
+  compareBanks,
+} = require(path.join(__dirname, '..', '..', 'src', 'lib', 'bank-audit'));
 
 const ROOT = path.join(__dirname, '..', '..');
 const DATA = path.join(ROOT, 'data');
@@ -65,12 +72,9 @@ const PUBLIC = path.join(DATA, 'known_answers_public.json');
 // delle domande aggiunte. Riusata da `publish` e `resolve`.
 function mergeIntoPublic(known) {
   const pub = readJsonSafe(PUBLIC, {});
-  const added = [];
-  for (const [q, a] of Object.entries(known)) {
-    if (!pub[q]) { pub[q] = a; added.push(q); }
-  }
-  if (added.length > 0) writeJsonAtomic(PUBLIC, pub);
-  return added;
+  const merged = mergeMissingByCanonical(pub, known);
+  if (merged.added.length > 0) writeJsonAtomic(PUBLIC, merged.bank);
+  return { added: merged.added, conflicts: merged.conflicts };
 }
 
 // Path per-account dell'account attivo (CF da config.json), con fallback ai
@@ -100,6 +104,8 @@ if (cmd === 'stats') {
   console.log(`Pending guess Ollama (per-account${pa.cf ? ' ' + pa.cf : ' (legacy)'}): ${Object.keys(pending).length}  [${pa.pending}]`);
   console.log(`Richieste AI in attesa (ai_quiz_request):  ${aiReq && Array.isArray(aiReq.questions) ? aiReq.questions.length : 0}  [${pa.aiRequest}]`);
   console.log(`need_answer.json:                          ${need ? (Array.isArray(need.questions) ? need.questions.length : 1) : 0}  [${pa.needAnswer}]`);
+  const integrity = auditBank(known);
+  console.log(`Integrità trusted:                         ${integrity.ok ? 'ok' : `PROBLEMI (conflitti ${integrity.conflicts.length}, invalidi ${integrity.invalid.length})`}  [sha256 ${integrity.sha256}]`);
   if (aiReq && Array.isArray(aiReq.questions) && aiReq.questions.length > 0) {
     console.log(`  → reason: ${aiReq.reason || '?'}`);
     aiReq.questions.slice(0, 5).forEach(q => {
@@ -118,19 +124,16 @@ if (cmd === 'stats') {
   const known = readJson(KNOWN, {});
   const pa = perAccountPaths();
   const pending = readJson(pa.pending, {});
-  let added = 0;
-  const addedList = [];
-  for (const [q, a] of Object.entries(pending)) {
-    if (!known[q]) { known[q] = a; added++; addedList.push(q); }
-  }
-  if (added > 0) {
-    writeJsonAtomic(KNOWN, known);
-    console.log(`Aggiunte ${added} risposte (pending→trusted) alla banca condivisa:`);
-    addedList.forEach(q => console.log(`  + ${q.slice(0, 80)}`));
+  const merged = mergeMissingByCanonical(known, pending);
+  if (merged.added.length > 0) {
+    writeJsonAtomic(KNOWN, merged.bank);
+    console.log(`Aggiunte ${merged.added.length} risposte (pending→trusted) alla banca condivisa:`);
+    merged.added.forEach(q => console.log(`  + ${q.slice(0, 80)}`));
     console.log('\nATTENZIONE: i pending sono guess Ollama NON verificati. Ricontrolla che siano corrette prima di rilasciare il pacchetto ai colleghi.');
   } else {
     console.log('Nessuna nuova risposta da aggiungere (le pending sono già note o assenti).');
   }
+  if (merged.conflicts.length > 0) console.error(`Conflitti non importati: ${merged.conflicts.length} (usa answers-cli audit).`);
 } else if (cmd === 'set') {
   const q = process.argv[3];
   const a = process.argv[4];
@@ -139,13 +142,14 @@ if (cmd === 'stats') {
     process.exit(1);
   }
   const known = readJson(KNOWN, {});
-  known[q] = a; // overwrite: l'AI supervisore corregge anche risposte sbagliate
-  writeJsonAtomic(KNOWN, known);
+  const upserted = upsertBankEntry(known, q, a); // overwrite canonico: rimuove duplicati equivalenti
+  writeJsonAtomic(KNOWN, upserted.bank);
   // Auto-pulizia handoff: la domanda ora è risolta, toglila da ai_quiz_request /
   // need_answer così l'inbox dell'AI non resta pieno di domande già fatte.
   const cleaned = clearResolvedFromHandoff(ROOT, [q]);
   try { writeAiTodo(ROOT); } catch (_) {}
   console.log(`Salvata (trusted): "${q.slice(0, 70)}" → "${a.slice(0, 50)}"`);
+  if (upserted.replaced.length > 1) console.log(`  (normalizzati ${upserted.replaced.length} duplicati della stessa domanda)`);
   if (cleaned > 0) console.log(`  (rimossa da ${cleaned} voce/i dell'handoff AI)`);
 } else if (cmd === 'resolve') {
   // resolve = set + handoff clear + merge public file + auto-share Worker (fleet F1).
@@ -157,13 +161,15 @@ if (cmd === 'stats') {
     process.exit(1);
   }
   const known = readJson(KNOWN, {});
-  known[q] = a;
-  writeJsonAtomic(KNOWN, known);
+  const upserted = upsertBankEntry(known, q, a);
+  writeJsonAtomic(KNOWN, upserted.bank);
   const cleaned = clearResolvedFromHandoff(ROOT, [q]);
   try { writeAiTodo(ROOT); } catch (_) {}
-  const added = mergeIntoPublic({ [q]: a });
+  const published = mergeIntoPublic({ [q]: a });
+  const added = published.added;
   console.log(`Risolta: "${q.slice(0, 70)}" → "${a.slice(0, 50)}"`);
   console.log(`  trusted: aggiornata · handoff: -${cleaned} · banca condivisa: ${added.length > 0 ? '+1 (nuova)' : 'già presente'}`);
+  if (published.conflicts.length > 0) console.log('  ATTENZIONE: conflitto con la banca pubblica; voce remota non sovrascritta. Esegui answers-cli audit.');
 
   let autoShare = true;
   try {
@@ -191,20 +197,26 @@ if (cmd === 'stats') {
   }
 } else if (cmd === 'audit') {
   const known = readJson(KNOWN, {});
-  const entries = Object.entries(known).filter(([q]) => !String(q).startsWith('README'));
-  console.log(`Voci banca trusted: ${entries.length}`);
-  console.log('Queste voci dovrebbero essere verificate (piattaforma-scrape o AI).');
-  console.log('Le voci storiche promosse da guess Ollama (pre-redesign) vanno controllate con WebSearch.\n');
-  entries.forEach(([q, a], i) => {
-    console.log(`${String(i + 1).padStart(3)}. ${q.slice(0, 80)}  →  ${String(a).slice(0, 40)}`);
-  });
+  const fix = process.argv.includes('--fix');
+  const normalized = normalizeBank(known);
+  if (fix && (normalized.removed > 0 || JSON.stringify(normalized.bank) !== JSON.stringify(known))) {
+    writeJsonAtomic(KNOWN, normalized.bank);
+  }
+  const report = auditBank(fix ? normalized.bank : known);
+  console.log(`Banca trusted: ${report.entries} voci · ${report.canonicalEntries} domande canoniche · hash ${report.sha256}`);
+  console.log(`Duplicati: ${report.duplicates.length} · conflitti: ${report.conflicts.length} · voci non valide: ${report.invalid.length}`);
+  if (fix) console.log(`Correzione sicura applicata: ${normalized.removed} duplicato/i equivalente/i rimossi; i conflitti restano da revisionare.`);
+  report.conflicts.forEach((c) => console.log(`  CONFLITTO ${c.key}: ${c.entries.map(e => `"${e.answer}"`).join(' / ')}`));
+  report.invalid.forEach((x) => console.log(`  NON VALIDA: ${x.question.slice(0, 80)} [${x.issues.join(', ')}]`));
+  if (!report.ok) process.exitCode = 1;
 } else if (cmd === 'publish') {
   // Local (gitignorato, trusted) -> pubblico (tracciato, condiviso). Le risposte
   // locali verificate diventano disponibili ai colleghi al loro prossimo aggiornamento.
   // NON sovrascrive voci pubbliche esistenti (la banca pubblica è curata): aggiunge
   // solo le chiavi nuove.
   const known = readJson(KNOWN, {});
-  const addedList = mergeIntoPublic(known);
+  const published = mergeIntoPublic(known);
+  const addedList = published.added;
   if (addedList.length > 0) {
     console.log(`Aggiunte ${addedList.length} risposte alla banca condivisa (known_answers_public.json):`);
     addedList.forEach(q => console.log(`  + ${q.slice(0, 80)}`));
@@ -212,12 +224,22 @@ if (cmd === 'stats') {
   } else {
     console.log('Nessuna nuova risposta da pubblicare (tutte già nella banca pubblica).');
   }
+  if (published.conflicts.length > 0) {
+    console.error(`Pubblicazione parziale: ${published.conflicts.length} conflitto/i non sovrascritto/i. Esegui answers-cli audit.`);
+    process.exitCode = 1;
+  }
+  try { writeAiTodo(ROOT); } catch (_) {}
 } else if (cmd === 'share') {
   // 1) merge local trusted → public file
   // 2) POST al Worker delle entry nuove (o --all per ritentare un invio fallito)
   const forceAll = process.argv.includes('--all');
   const known = readJson(KNOWN, {});
-  const addedList = mergeIntoPublic(known);
+  const published = mergeIntoPublic(known);
+  const addedList = published.added;
+  if (published.conflicts.length > 0) {
+    console.error(`Share rifiutato: ${published.conflicts.length} conflitto/i con la banca pubblica. Esegui answers-cli audit.`);
+    process.exit(1);
+  }
   const payload = {};
   if (addedList.length > 0) {
     for (const q of addedList) {
@@ -272,13 +294,38 @@ if (cmd === 'stats') {
   console.log(`Public (file):   ${lag.publicFile}`);
   console.log(`Solo locale (da share):  ${lag.onlyLocal}`);
   console.log(`Solo public (da pull):   ${lag.onlyPublic}`);
+  console.log(`Conflitti/duplicati critici: ${lag.conflicts || 0}`);
+  console.log(`Hash trusted/public: ${lag.trustedHash} / ${lag.publicHash}`);
   if (lag.onlyLocal > 0) {
     console.log('→ node scripts/lib/answers-cli.js share   (o share --all)');
   }
   if (lag.onlyPublic > 0) {
     console.log('→ ./scripts/update-known-answers.sh  oppure start.sh (sync throttled)');
   }
+} else if (cmd === 'verify') {
+  const known = readJson(KNOWN, {});
+  const pub = readJson(PUBLIC, {});
+  const trustedAudit = auditBank(known);
+  const publicAudit = auditBank(pub);
+  const comparison = compareBanks(known, pub);
+  const localOk = trustedAudit.ok && publicAudit.ok && comparison.conflicts.length === 0;
+  console.log(`Trusted: ${trustedAudit.canonicalEntries} · hash ${trustedAudit.sha256} · conflitti ${trustedAudit.conflicts.length}`);
+  console.log(`Public:  ${publicAudit.canonicalEntries} · hash ${publicAudit.sha256} · conflitti ${publicAudit.conflicts.length}`);
+  console.log(`Delta: solo trusted ${comparison.onlyLeft.length} · solo public ${comparison.onlyRight.length} · risposte discordanti ${comparison.conflicts.length}`);
+  if (!process.argv.includes('--remote')) {
+    process.exit(localOk ? 0 : 1);
+  }
+  const { verifyRemotePublicBank } = require(path.join(ROOT, 'src', 'lib', 'bank-sync'));
+  verifyRemotePublicBank(ROOT).then((remote) => {
+    if (!remote.remoteAudit) {
+      console.error(`Verifica main fallita: ${remote.error || 'errore rete'}`);
+      process.exit(1);
+    }
+    console.log(`Main:    ${remote.remoteAudit.canonicalEntries} · hash ${remote.remoteAudit.sha256}`);
+    console.log(remote.comparison.equal ? 'Public locale e main coincidono.' : `Public locale/main divergono: locale-only ${remote.comparison.onlyLeft.length}, main-only ${remote.comparison.onlyRight.length}, conflitti ${remote.comparison.conflicts.length}.`);
+    process.exit(localOk && remote.ok ? 0 : 1);
+  }).catch((e) => { console.error(`Verifica main fallita: ${e.message}`); process.exit(1); });
 } else {
-  console.error(`Comando sconosciuto: ${cmd}\nComandi: stats | list | merge | set | resolve | audit | publish | share | lag`);
+  console.error(`Comando sconosciuto: ${cmd}\nComandi: stats | list | merge | set | resolve | audit [--fix] | publish | share | lag | verify [--remote]`);
   process.exit(1);
 }

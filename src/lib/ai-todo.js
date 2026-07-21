@@ -105,6 +105,9 @@ function buildAiTodo(root) {
   if (lag.onlyPublic > 0) {
     actions.push(`${lag.onlyPublic} risposte in public non ancora in trusted: update-known-answers o start (sync).`);
   }
+  if (lag.conflicts > 0) {
+    actions.push(`${lag.conflicts} conflitto/i nella banca risposte: autoplay bloccato in sicurezza; esegui answers-cli audit.`);
+  }
   if (queue.length >= 2) {
     actions.push(`Coda multi-CF (${queue.length}): attivo idx ${qIdx}, prossimo ${nextCf || '?'}. A fine corsi avanza da solo — non fermarti al primo CF.`);
   }

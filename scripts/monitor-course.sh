@@ -44,8 +44,9 @@ render() {
   ui_header "Monitor corso GSD Campus" "aggiornato alle $(date '+%H:%M:%S')"
 
   # ── Processo ── (pid_matches: un PID recyclato non risulta "ATTIVO")
-  if [ -f "$PID_FILE" ] && pid_matches "$(cat "$PID_FILE" 2>/dev/null || echo "")" "scheduler|autoplay"; then
-    ui_kv "Processo" "${GREEN}${BOLD}${UI_OK} ATTIVO${NC} ${DIM}(PID $(cat "$PID_FILE"))${NC}"
+  LIVE_PID=$(autoplay_instance_pid "$DIR" 2>/dev/null || echo "")
+  if [ -n "$LIVE_PID" ]; then
+    ui_kv "Processo" "${GREEN}${BOLD}${UI_OK} ATTIVO${NC} ${DIM}(PID $LIVE_PID, identità verificata)${NC}"
   else
     ui_kv "Processo" "${YELLOW}${BOLD}FERMO${NC}"
   fi

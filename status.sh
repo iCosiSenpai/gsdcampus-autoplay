@@ -50,9 +50,8 @@ PID_FILE=".autoplay_pid"
 # ── Stato scheduler ──
 info "Processo scheduler"
 SCHED_ACTIVE=false
-if [ -f "$PID_FILE" ]; then
-  PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [ -n "$PID" ] && pid_matches "$PID" "scheduler|autoplay"; then
+PID=$(autoplay_instance_pid "$DIR" 2>/dev/null || echo "")
+if [ -n "$PID" ]; then
     SCHED_ACTIVE=true
     # Calcola durata attività dal tempo trascorso (etime), più robusto di lstart.
     # Niente `local` (siamo a top-level, non in una funzione: anti-pattern che in
@@ -82,12 +81,10 @@ if [ -f "$PID_FILE" ]; then
     else
       ok "Scheduler attivo: PID $PID"
     fi
-  else
-    warn "Scheduler NON attivo (PID file presente: $PID) — pulisco."
-    rm -f "$PID_FILE"
-  fi
 else
-  warn "Nessun scheduler in esecuzione."
+  autoplay_clean_stale_lock "$DIR" >/dev/null 2>&1 || true
+  [ -f "$PID_FILE" ] && rm -f "$PID_FILE"
+  warn "Nessuno scheduler verificato in esecuzione."
 fi
 
 # ── Orario lavorativo ──

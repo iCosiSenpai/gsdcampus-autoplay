@@ -51,8 +51,34 @@ notify_on_exit() {
 }
 
 IGNORE_HOURS=false
-if [ "${1:-}" = "--ignore-hours" ]; then
-  IGNORE_HOURS=true
+LOCK_TOKEN=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --ignore-hours) IGNORE_HOURS=true; shift ;;
+    --lock-token)
+      [ "$#" -ge 2 ] || { echo "scheduler: --lock-token richiede un valore" >&2; exit 2; }
+      LOCK_TOKEN="$2"; shift 2 ;;
+    *) echo "scheduler: opzione sconosciuta: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ -z "$LOCK_TOKEN" ]; then
+  echo "scheduler: token single-instance mancante; usa ./start.sh" >&2
+  exit 2
+fi
+# start.sh promuove il lock subito dopo il fork. Aspettiamo brevemente quella
+# scrittura atomica; uno scheduler senza ownership verificata non parte.
+LOCK_READY=false
+for _lock_try in {1..20}; do
+  if node "$DIR/scripts/lib/runtime-lock-cli.js" owns "$DIR" "$LOCK_TOKEN" "$$" >/dev/null 2>&1; then
+    LOCK_READY=true
+    break
+  fi
+  sleep 0.1
+done
+if [ "$LOCK_READY" != true ]; then
+  echo "scheduler: lock identità non valido; uscita di sicurezza" >&2
+  exit 2
 fi
 
 # Colori
@@ -65,6 +91,7 @@ NC='\033[0m'
 PID_FILE="$DIR/.autoplay_pid"
 LOG_FILE="$DIR/logs/scheduler.log"
 STOP_FILE="$DIR/.scheduler_stop"
+SCHEDULER_STATUS_CLI="$DIR/scripts/lib/scheduler-status-cli.js"
 
 mkdir -p "$DIR/logs"
 
@@ -89,8 +116,19 @@ warn() { log "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
 # Pulizia file di controllo in uscita
 cleanup() {
   rm -f "$STOP_FILE"
+  if [ -f "$PID_FILE" ] && [ "$(cat "$PID_FILE" 2>/dev/null || echo '')" = "$$" ]; then
+    rm -f "$PID_FILE"
+  fi
+  if [ -n "$LOCK_TOKEN" ] && [ -f "$DIR/scripts/lib/runtime-lock-cli.js" ]; then
+    node "$DIR/scripts/lib/runtime-lock-cli.js" release "$DIR" "$LOCK_TOKEN" >/dev/null 2>&1 || true
+  fi
+  if [ -f "$SCHEDULER_STATUS_CLI" ]; then
+    node "$SCHEDULER_STATUS_CLI" stop "$DIR" >/dev/null 2>&1 || true
+  fi
 }
-trap cleanup EXIT INT TERM
+shutdown_scheduler() { exit 0; }
+trap cleanup EXIT
+trap shutdown_scheduler INT TERM
 
 # Calcola i millisecondi fino al prossimo inizio turno lavorativo.
 # Usa process.stdout.write (NON console.log): quest'ultimo colorizzerebbe il
@@ -113,6 +151,8 @@ next_start_readable() {
 # Aspetta un certo numero di millisecondi, controllando periodicamente se lo scheduler deve fermarsi
 wait_ms() {
   local total_ms="$1"
+  local heartbeat_phase="${2:-}"
+  local heartbeat_next="${3:-}"
   local step_ms=60000 # 1 minuto
   local elapsed=0
 
@@ -123,6 +163,9 @@ wait_ms() {
   fi
 
   while [[ "$elapsed" -lt "$total_ms" ]]; do
+    if [ -n "$heartbeat_phase" ] && [ -f "$SCHEDULER_STATUS_CLI" ]; then
+      node "$SCHEDULER_STATUS_CLI" mark "$DIR" "$heartbeat_phase" "$heartbeat_next" "Scheduler in attesa; nessun browser attivo." >/dev/null 2>&1 || true
+    fi
     if [[ -f "$STOP_FILE" ]]; then
       log "Ricevuto segnale di stop. Fermo lo scheduler."
       rm -f "$STOP_FILE"
@@ -150,7 +193,7 @@ wait_for_work_change() {
   local max_ms="${2:-21600000}" # 6h: reminder/ricontrollo massimo
   local elapsed=0
   while [[ "$elapsed" -lt "$max_ms" ]]; do
-    wait_ms 60000
+    wait_ms 60000 awaiting_ai
     elapsed=$((elapsed + 60000))
     local current
     current=$(work_fingerprint)
@@ -229,6 +272,21 @@ EOF
 }
 
 log "Scheduler avviato. IGNORE_HOURS=$IGNORE_HOURS"
+if [ -f "$SCHEDULER_STATUS_CLI" ]; then
+  node "$SCHEDULER_STATUS_CLI" mark "$DIR" scheduler_starting "" "Scheduler avviato; preparo il prossimo ciclo." >/dev/null 2>&1 || true
+fi
+
+# Gate offline prima di OGNI sessione browser reale. Se fixture/selettori non
+# sono coerenti, non apriamo la piattaforma e soprattutto non tocchiamo quiz.
+preflight_selectors() {
+  if node "$DIR/scripts/lib/selector-probe.js" >> "$LOG_FILE" 2>&1; then
+    return 0
+  fi
+  log "Preflight selettori FALLITO: autoplay non avviato."
+  node "$SCHEDULER_STATUS_CLI" mark "$DIR" preflight_failed "" "Probe selettori fallito; browser non aperto." "selector_probe_failed" >/dev/null 2>&1 || true
+  notify_user "GSD Campus" "Controllo pagine fallito: aggiorna con il comando curl prima di riprovare." preflight_failed || true
+  return 1
+}
 
 # Contatore crash consecutivi (exit code diverso da 0 e 4). Backoff crescente per
 # evitare di martellare autoplay quando crasha di fila (es. bug o piattaforma giù):
@@ -301,6 +359,8 @@ while true; do
 
   if [[ "$IGNORE_HOURS" = true ]]; then
     log "Avvio autoplay (modalità ignore-hours)..."
+    preflight_selectors || exit 1
+    node "$SCHEDULER_STATUS_CLI" mark "$DIR" scheduler_launching "" "Preflight superato; avvio browser." >/dev/null 2>&1 || true
     # zsh: l'exit code dei comandi in pipe è in $pipestatus (1-indexed), NON in
     # $PIPESTATUS (bash-ism). Il `|| EXIT_CODE=...` va nella STESSA riga: sotto
     # set -e + pipefail una pipe fallita (autoplay crashato) ucciderebbe lo
@@ -340,6 +400,8 @@ while true; do
 
   if is_in_hours; then
     log "In orario lavorativo. Avvio autoplay..."
+    preflight_selectors || exit 1
+    node "$SCHEDULER_STATUS_CLI" mark "$DIR" scheduler_launching "" "Preflight superato; avvio browser." >/dev/null 2>&1 || true
     # zsh pipestatus (1-indexed): v. commento nel ramo ignore-hours.
     EXIT_CODE=0
     node "$DIR/src/autoplay.js" 2>&1 | tee -a "$LOG_FILE" || EXIT_CODE=${pipestatus[1]}
@@ -383,5 +445,6 @@ while true; do
   NEXT_MIN=$((NEXT_MS / 60000))
   NEXT_START=$(next_start_readable)
   log "Prossimo avvio: ${NEXT_START} (fra circa ${NEXT_MIN} minuti)."
-  wait_ms "$NEXT_MS"
+  node "$SCHEDULER_STATUS_CLI" mark "$DIR" off_hours "$NEXT_START" "Fuori orario; nessun browser attivo." >/dev/null 2>&1 || true
+  wait_ms "$NEXT_MS" off_hours "$NEXT_START"
 done

@@ -5,6 +5,15 @@ il comando curl mostra automaticamente le righe nuove di questo file.
 (Per il maintainer: aggiungere una sezione `## data` con bullet brevi a ogni
 push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
+## 2026-07-21
+
+- Lo scheduler mostra `off_hours` con heartbeat e prossimo turno, senza lasciare vecchi errori come se fossero ancora attivi.
+- Prima di ogni browser viene verificato il contratto dei selettori: se il controllo fallisce, nessun corso o quiz viene aperto.
+- Il lock anti-doppio-avvio verifica PID, comando e token casuale: un PID riciclato non può più essere scambiato per l'autoplay.
+- Riaperture e reset creano backup recuperabili dello stato corsi, con checksum e controllo dell'account; il database membri non viene incluso.
+- La banca risposte rileva duplicati Unicode e risposte discordanti, blocca i conflitti e può confrontare la copia locale con `main`.
+- L'harvester ora ha un vero `--help`, rifiuta opzioni sconosciute e richiede `--yes` per qualunque riapertura esplicita.
+
 ## 2026-07-19
 
 - Fine video più affidabile: ascolta l'evento "ended" del player e controlla più spesso vicino alla fine della lezione.

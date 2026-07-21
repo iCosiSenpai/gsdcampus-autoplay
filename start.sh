@@ -16,6 +16,7 @@ SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 source "$DIR/scripts/lib/ui.sh"
 
 PID_FILE=".autoplay_pid"
+LOCK_CLI="$DIR/scripts/lib/runtime-lock-cli.js"
 OUT_FILE="logs/autoplay.out"
 
 mkdir -p logs
@@ -56,6 +57,15 @@ if [ -f "$DIR/src/lib/bank-sync.js" ]; then
     }).catch(() => {});
   " 2>/dev/null || true
 fi
+# Gate locale: una stessa domanda con due risposte diverse può consumare un
+# tentativo anche se entrambe le banche hanno lo stesso numero di voci.
+if [ -f "$DIR/scripts/lib/answers-cli.js" ]; then
+  if ! node "$DIR/scripts/lib/answers-cli.js" verify >> "$OUT_FILE" 2>&1; then
+    err "Conflitto nella banca risposte: avvio bloccato per proteggere i quiz."
+    info "Diagnosi: node scripts/lib/answers-cli.js audit"
+    exit 1
+  fi
+fi
 
 echo ""
 step "2/5" "Verifica requisiti"
@@ -75,14 +85,15 @@ fi
 echo ""
 step "3/5" "Controllo istanze attive"
 source "$DIR/scripts/lib/pid-utils.sh"
+if autoplay_instance_alive "$DIR"; then
+  OLD_PID=$(autoplay_instance_pid "$DIR" 2>/dev/null || echo "?")
+  warn "Autoplay già in esecuzione (PID $OLD_PID, identità verificata)."
+  info "Monitor: ./status.sh"
+  info "Ferma:   ./stop.sh"
+  exit 1
+fi
+autoplay_clean_stale_lock "$DIR" >/dev/null 2>&1 || true
 if [ -f "$PID_FILE" ]; then
-  OLD_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if pid_matches "$OLD_PID" "scheduler|autoplay"; then
-    warn "Autoplay già in esecuzione (PID $OLD_PID)."
-    info "Monitor: ./status.sh"
-    info "Ferma:   ./stop.sh"
-    exit 1
-  fi
   ok "Nessuna istanza attiva (PID file orfano rimosso)."
   rm -f "$PID_FILE"
 else
@@ -92,17 +103,22 @@ fi
 if [ -f "$DIR/scripts/lib/status-cli.js" ]; then
   node "$DIR/scripts/lib/status-cli.js" reconcile >/dev/null 2>&1 || true
 fi
-# Lock atomica anti-doppio-avvio: noclobber crea il PID file solo se non esiste,
-# in modo esclusivo. Previene che due start.sh lanciati in rapida successione
-# passino entrambi il check "nessuna istanza" e avviino due scheduler concorrenti.
-# Scriviamo subito il PID di start.sh ($$) invece di un file vuoto: nella finestra
-# prima che lo scheduler parta, un lettore concorrente (stop/status) trova un PID
-# reale che NON matcha "scheduler|autoplay" → stato "fermo", mai `kill -0 ""`.
-if ! (set -o noclobber; echo "$$" > "$PID_FILE") 2>/dev/null; then
-  err "Impossibile acquisire il lock su $PID_FILE (avvio concorrente?)."
-  info "Se sei sicuro che non ci sia un'istanza attiva: rm -f $PID_FILE e riprova."
+# Lock directory atomica + token nella command line dello scheduler. Un PID
+# riciclato non basta più a impersonare la nostra istanza.
+LOCK_TOKEN=$(node -e "process.stdout.write(require('crypto').randomBytes(18).toString('hex'))")
+START_COMPLETE=false
+if ! node "$LOCK_CLI" acquire "$DIR" "$$" "$LOCK_TOKEN" >/dev/null 2>&1; then
+  err "Impossibile acquisire il lock single-instance (avvio concorrente?)."
   exit 1
 fi
+cleanup_start_lock() {
+  if [ "$START_COMPLETE" != true ]; then
+    node "$LOCK_CLI" release "$DIR" "$LOCK_TOKEN" >/dev/null 2>&1 || true
+    if [ -f "$PID_FILE" ] && [ "$(cat "$PID_FILE" 2>/dev/null || echo '')" = "$$" ]; then rm -f "$PID_FILE"; fi
+  fi
+}
+trap cleanup_start_lock EXIT INT TERM
+echo "$$" > "$PID_FILE"
 
 echo ""
 step "4/5" "Rotazione log precedenti"
@@ -119,7 +135,7 @@ done || true
 echo ""
 step "5/5" "Avvio scheduler in background"
 if [ "$IGNORE_HOURS" = true ]; then
-  nohup "$DIR/scripts/scheduler.sh" --ignore-hours > "$OUT_FILE" 2>&1 &
+  nohup "$DIR/scripts/scheduler.sh" --ignore-hours --lock-token "$LOCK_TOKEN" > "$OUT_FILE" 2>&1 &
 else
   # grep -c >/dev/null (NON -q): sotto pipefail, grep -q esce al primo match
   # chiudendo la pipe -> SIGPIPE (141) al comando a sinistra -> pipeline fallita
@@ -135,10 +151,17 @@ else
       warn "Impossibile calcolare il prossimo turno; lo scheduler riproverà a breve."
     fi
   fi
-  nohup "$DIR/scripts/scheduler.sh" > "$OUT_FILE" 2>&1 &
+  nohup "$DIR/scripts/scheduler.sh" --lock-token "$LOCK_TOKEN" > "$OUT_FILE" 2>&1 &
 fi
 PID=$!
 echo "$PID" > "$PID_FILE"
+if ! node "$LOCK_CLI" promote "$DIR" "$LOCK_TOKEN" "$PID" >/dev/null 2>&1; then
+  kill "$PID" 2>/dev/null || true
+  rm -f "$PID_FILE"
+  err "Scheduler avviato ma lock identità non registrato: arresto per sicurezza."
+  exit 1
+fi
+START_COMPLETE=true
 
 # macOS: tieni il Mac sveglio finché gira lo scheduler. I Mac sono sempre accesi,
 # ma lo sleep di sistema (idle/display su batteria, sospensione notturna) bloccherebbe

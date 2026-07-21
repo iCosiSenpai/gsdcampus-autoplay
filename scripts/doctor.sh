@@ -114,7 +114,25 @@ else
     "la piattaforma potrebbe aver cambiato layout — rilancia il curl per aggiornare, o chiedi all'AI di aprire un'issue"
 fi
 
-# 9. (--full) Sonda LIVE del link autologin: apre un browser headless.
+# 9. Integrità banca trusted/public (offline, nessuna risposta modificata).
+if node "$DIR/scripts/lib/answers-cli.js" verify >/dev/null 2>&1; then
+  chk_ok "Banca risposte integra (nessun conflitto)"
+else
+  chk_err "Banca risposte con conflitti o dati non validi" \
+    "esegui: node scripts/lib/answers-cli.js audit"
+fi
+
+# 10. (--full) Corrispondenza banca pubblica locale ↔ main.
+if [ "$FULL" = true ]; then
+  if node "$DIR/scripts/lib/answers-cli.js" verify --remote >/dev/null 2>&1; then
+    chk_ok "Banca pubblica locale allineata a main"
+  else
+    chk_err "Banca pubblica locale non allineata a main" \
+      "rilancia il comando curl per aggiornare e riprova"
+  fi
+fi
+
+# 11. (--full) Sonda LIVE del link autologin: apre un browser headless.
 if [ "$FULL" = true ]; then
   info "Sonda LIVE del link autologin in corso ${DIM}(~30s, fino a 5 min se il link è morto)${NC}..."
   if node "$DIR/scripts/lib/healthcheck-cli.js" >/dev/null 2>&1; then
@@ -125,8 +143,8 @@ if [ "$FULL" = true ]; then
 fi
 
 # Riga finale a semaforo.
-NCHECKS=8
-[ "$FULL" = true ] && NCHECKS=9
+NCHECKS=9
+[ "$FULL" = true ] && NCHECKS=11
 TOTAL_OK=$((NCHECKS - CRIT - WARN))
 [ "$TOTAL_OK" -lt 0 ] && TOTAL_OK=0
 echo ""
