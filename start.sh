@@ -179,11 +179,16 @@ echo ""
 ui_hr
 if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
   ok "Scheduler autoplay avviato in background ${DIM}(PID $PID)${NC}"
-  echo ""
-  echo -e " ${BOLD}Comandi utili${NC}"
-  ui_kv "Stato" "./status.sh"
-  ui_kv "Ferma" "./stop.sh"
-  ui_kv "Log live" "tail -f logs/autoplay.log"
+  # Sotto il launcher (curl) la schermata finale e' la plancia interattiva:
+  # non mostriamo comandi shell al collega. In uso diretto da manutentore
+  # (./start.sh) restano i comandi utili.
+  if [ "${GSD_LAUNCHER:-0}" != "1" ]; then
+    echo ""
+    echo -e " ${BOLD}Comandi utili${NC}"
+    ui_kv "Stato" "./status.sh"
+    ui_kv "Ferma" "./stop.sh"
+    ui_kv "Log live" "tail -f logs/autoplay.log"
+  fi
 else
   err "Avvio fallito. Controlla $OUT_FILE"
   exit 1
