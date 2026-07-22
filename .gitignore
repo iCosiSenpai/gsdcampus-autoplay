@@ -49,6 +49,8 @@ config.json.bak
 PROMPT-per-altra-AI.md
 .autoplay_pid
 .ai_proxy_pid
+.claude_batch_pid
+.claude_runner_pid
 .autoplay_lock/
 .ollama_pid
 .scheduler_stop

@@ -27,7 +27,7 @@ Se qualcosa non è corretto, **non chiedere all'utente di modificare a mano `con
 
 **Giro di scoperta prima di cominciare**: ad **ogni run**, prima di processare qualsiasi corso, `autoplay.js` fa un passaggio di scoperta (`discoverCourses`) che legge dalla dashboard l'elenco fresco dei corsi dell'utente e li filtra per stato (salta `done`/`need_help`). Lo script **non persiste né "impara" gli ID dei corsi**: la scoperta è sempre da zero, perché gli ID sono personali e possono cambiare. Non inserire mai ID corso hardcoded nello script o in `config.json`.
 
-**AI sempre attiva insieme allo script**: l'autoplay gira **sempre insieme a un supervisore AI + Ollama Cloud** (v. `launch-ai-supervisor.sh`), con OpenCode e proxy locale a budget. L'AI può intervenire su `need_help`/`ignoto`, arricchire `known_answers.json`, gestire domande sconosciute e diagnosi. I dump diagnostici (`debug/quiz/`, `dumpQuizDiagnostics` in `src/lib/quiz.js`) servono proprio a dare all'AI qualcosa da leggere quando l'esito non è chiaro: l'autopilot non fallisce mai in silenzio, lascia artefatti per l'AI.
+**AI on-demand, mai persistente**: autoplay e scheduler sono deterministici. `launch-ai-supervisor.sh` aggiorna banca/inbox e invoca un solo batch Claude Code soltanto se `openQuizRequests > 0`; senza domande non avvia Claude, Ollama o proxy. In `awaiting_ai` lo scheduler richiama il batch solo su un nuovo `workFingerprint`. I dump diagnostici (`debug/quiz/`, `dumpQuizDiagnostics` in `src/lib/quiz.js`) restano disponibili per diagnosi esplicite.
 
 ---
 
@@ -158,7 +158,7 @@ All'apertura procedi da solo (v. sezione "Autonomia"): orientati con `ai_todo.js
    1. Se `data/members.db` esiste, prova DA SOLO a **re-selezionare il membro** dal database (`node scripts/lib/members-cli.js set-active <CF>` col CF del membro attivo) e riavvia: il db può contenere un token aggiornato. Coinvolgi l'utente solo se anche questo token è scaduto.
    2. Re-seleziona il membro da **members.db** (`set-active <CF>` o menu Chi sei?): gli autologin sono nel DB che arriva col repo — **il collega non incolla link**.
    3. Se il token nel DB è scaduto: il **referente** aggiorna `members.db` (import CSV + commit/push). Il collega fa «Aggiorna e avvia». Fallback incolla-link solo se la persona non è in elenco.
-6. **Quiz non superato / domande a bassa confidenza / corso in `need_help`**: se `logs/status.json` mostra `phase: "need_help"` o `"quiz_needs_answers"`, o il log emette `[AI_QUIZ_REQUEST] ... domande a bassa confidenza salvate in ai_quiz_request.json`, lo script ha già automaticamente:
+6. **Quiz non superato / domande aperte / corso in `need_help`**: se `logs/status.json` mostra `phase: "need_help"` o `"quiz_needs_answers"`, o il log emette `[AI_QUIZ_REQUEST] ... domande aperte salvate in ai_quiz_request.json`, lo script ha già automaticamente:
    - catturato le domande del quiz in `data/accounts/<CF>/need_answer.json`;
    - scritto l'handoff arricchito in `data/accounts/<CF>/ai_quiz_request.json` (domanda + opzioni + eventuale guess legacy + confidenza);
    - segnato il corso come `need_help` in `data/accounts/<CF>/course_state.json` (solo se il quiz non è superato);
@@ -167,7 +167,7 @@ All'apertura procedi da solo (v. sezione "Autonomia"): orientati con `ai_todo.js
    1. Leggere `data/accounts/<CF>/ai_quiz_request.json` (CF = `config.codice_fiscale`, o derivato dall'URL di autologin). Se assente, leggi `need_answer.json`.
    2. Risolvere ogni domanda con `WebSearch`/`WebFetch` + ragionamento (un eventuale guess locale + confidenza è un suggerimento, non la verità).
    3. Scrivere la risposta verificata nella banca **TRUSTED** `data/known_answers.json` con `node scripts/lib/answers-cli.js set "domanda" "risposta"`.
-   4. Se il quiz era **non superato** (`need_help`), `answers-cli resolve` riapre il corso senza perdere lo stato; usa `course-state-backup-cli.js` solo per un ripristino diagnostico. Se era **superato con domande a bassa confidenza** (`quiz_needs_answers`), non serve riaprire il corso.
+   4. Se il quiz era **non superato** (`need_help`), `answers-cli resolve` riapre il corso senza perdere lo stato; usa `course-state-backup-cli.js` solo per un ripristino diagnostico. Se era **superato con domande aperte** (`quiz_needs_answers`), non serve riaprire il corso.
    5. Riavviare con `./start.sh` o `./start.sh --ignore-hours`.
    Se tutti i corsi sono `done` o `need_help`, l'autoplay esce con codice 0 e `phase: "need_help"`; lo scheduler in `ignore-hours` aspetta 10 minuti prima di riavviare, dando tempo all'AI/utente di intervenire.
 
@@ -263,13 +263,13 @@ Sii conciso. Riporta:
 - azione che hai intrapreso
 - **se c'è un aggiornamento disponibile** (segnalato da `status.sh`), consiglia esplicitamente all'utente di chiudere, riaprire il comando `curl` (come da README) e aggiornare.
 
-## Permessi del supervisore OpenCode
+## Permessi del batch Claude on-demand
 
-`./launch-ai-supervisor.sh` avvia OpenCode con `--auto` attraverso il proxy locale a budget. Il proxy inoltra al daemon Ollama autenticato tramite `ollama signin`; prompt e risposte non vengono scritti nel contatore.
+`./launch-ai-supervisor.sh` non apre una TUI persistente. Solo con `openQuizRequests > 0` esegue `claude -p --bare --safe-mode --no-session-persistence` con `WebSearch`/`WebFetch`. Il payload contiene esclusivamente domanda, opzioni, guess e ID effimero; l'output JSON è validato e applicato da script deterministici. Proxy e daemon avviati dal batch vengono chiusi a fine esecuzione.
 
 ## Requisito login Ollama
 
-Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)**. Il setup installa Ollama e OpenCode, avvia il daemon locale e tenta il modello Cloud. Se serve autenticazione esegue `ollama signin`, apre il browser e riprende dopo il login; non richiede API key. Il proxy conserva il budget locale e inoltra le richieste al daemon su `127.0.0.1:11434`.
+Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)**. Con inbox vuota setup e diagnostica non eseguono le CLI AI; installazione/verifica di Ollama e Claude Code, daemon, pull e `ollama signin` avvengono soltanto dopo `openQuizRequests > 0`. Il login si svolge nel browser e non richiede API key manuali; il proxy temporaneo conserva budget e limite hard di 8 generazioni per batch.
 
 ## Configurazione iniziale
 
@@ -277,4 +277,4 @@ Vedi **[docs/SETUP.md](docs/SETUP.md)** per il flusso di setup interattivo con "
 
 ## Permessi, Ollama e aspetti tecnici
 
-Vedi **[docs/TECH.md](docs/TECH.md)** per permessi OpenCode, Ollama Cloud e note tecniche dell'architettura.
+Vedi **[docs/TECH.md](docs/TECH.md)** per il batch Claude on-demand, Ollama Cloud e le note tecniche dell'architettura.
