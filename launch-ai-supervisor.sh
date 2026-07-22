@@ -130,12 +130,12 @@ ui_kv "Account" "${BOLD}${MEMBER_LINE}${NC}"
 ui_kv "Orari" "$SCHEDULE_LINE"
 ui_kv "AI" "Claude Code on-demand · gate openQuizRequests · proxy budget temporaneo"
 
-if "$DIR/start.sh"; then
-  echo ""
-  ui_hr
-  ok "Sistema avviato. Il launcher termina; scheduler e monitoraggio deterministico proseguono in background."
-  info "Claude verra aperto di nuovo soltanto alla prossima inbox quiz nuova."
-  ui_hr
+if GSD_LAUNCHER=1 "$DIR/start.sh"; then
+  # Plancia interattiva del collega: si aggiorna da sola, azioni a tasto singolo
+  # (L guarda dal vivo · F ferma · R aggiorna · Q chiudi). In ambiente non
+  # interattivo stampa un solo riquadro ed esce. Non tiene in vita nulla: lo
+  # scheduler prosegue in background anche dopo la chiusura della plancia.
+  node "$DIR/scripts/lib/panel-cli.js" || true
 else
   err "Scheduler non avviato. Controlla logs/autoplay.out e rilancia il comando curl."
   exit 1
