@@ -70,7 +70,7 @@ fi
 echo ""
 step "2/5" "Verifica requisiti"
 if [ -f "$DIR/scripts/check-requirements.sh" ]; then
-  if ! "$DIR/scripts/check-requirements.sh" >> "$OUT_FILE" 2>&1; then
+  if ! "$DIR/scripts/check-requirements.sh" --runtime >> "$OUT_FILE" 2>&1; then
     echo ""
     err "Requisiti mancanti. L'autoplay non può partire automaticamente."
     info "Esegui una volta: ./scripts/setup.sh"
