@@ -112,6 +112,9 @@ rm -rf "$OUTPUT_DIR/scripts/logs"
 rm -f "$OUTPUT_DIR/.autoplay_pid"
 rm -f "$OUTPUT_DIR/.ai_proxy_pid"
 rm -f "$OUTPUT_DIR/.ollama_pid"
+rm -f "$OUTPUT_DIR/.claude_batch_pid"
+rm -f "$OUTPUT_DIR/.claude_runner_pid"
+rm -rf "$OUTPUT_DIR/logs/.claude-quiz-batch.lock" 2>/dev/null || true
 rm -f "$OUTPUT_DIR/.scheduler_stop"
 rm -f "$OUTPUT_DIR/.supervisor_prompt.txt"
 rm -rf "$OUTPUT_DIR/.claude" 2>/dev/null || true

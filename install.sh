@@ -7,17 +7,17 @@
 #
 # Cosa fa:
 #   1. Verifica che git sia disponibile (lo installa via Command Line Tools se manca).
-#   2. PRIMA installazione: clona il progetto in ~/gsdcampus-autoplay e apre l'AI (con setup).
-#      Se l'installazione ESISTE GIÀ, chiede COSA vuoi fare con un menu:
+#   2. PRIMA installazione: clona il progetto in ~/gsdcampus-autoplay e avvia il setup.
+#      Se l'installazione ESISTE GIA, chiede COSA vuoi fare con un menu:
 #        - Aggiorna e avvia
 #        - Cambia account e/o orari
 #        - Reinstallazione pulita (riallinea codice + reinstalla dipendenze)
 #        - Solo avvia
-#        - Migrazione AI (aggiorna il codice + configura Ollama Cloud/OpenCode)
+#        - Diagnostica on-demand (presenza componenti, nessun processo AI)
 #        - Disinstalla
 #        - Annulla
-#   3. Avvia ./launch-ai-supervisor.sh, che installa il resto (Node, Playwright, Ollama, OpenCode)
-#      e apre l'AI.
+#   3. Avvia ./launch-ai-supervisor.sh, che completa il setup, risolve eventuali
+#      quiz con Claude on-demand e avvia lo scheduler. Nessun processo AI resta aperto.
 #
 # L'aggiornamento NON tocca config.json (è in .gitignore): autologin e orari restano.
 
@@ -296,7 +296,7 @@ update_repo() {
 }
 
 # 2. Prima installazione oppure gestione di un'installazione esistente
-MODE="install"   # install | update | reconfig | clean | launch | uninstall | cancel
+MODE="install"   # install | update | reconfig | clean | launch | diagnose | uninstall | cancel
 RELOGIN_OLLAMA=false   # compatibilità con vecchie installazioni: non usato dal flusso Cloud
 
 if [ -d "$TARGET/.git" ]; then
@@ -328,11 +328,11 @@ if [ -d "$TARGET/.git" ]; then
     echo ""
     CHOICE=$(node "$TARGET/scripts/lib/prompt-cli.js" select \
       --brand --title "Cosa vuoi fare?" --subtitle "$ACCT_DESC" --default 1 -- \
-      "Aggiorna e avvia — Scarica fix e risposte quiz, poi apre l'AI (consigliato)" \
+      "Aggiorna e avvia — Scarica fix e risposte, poi avvia i corsi (consigliato)" \
       "Cambia collega o orari — Seleziona l'account e modifica i turni di lavoro" \
       "Ripara l'installazione — Riallinea il codice e reinstalla le dipendenze" \
-      "Apri soltanto l'AI — Avvia senza cambiare configurazione o file" \
-      "Configura la nuova AI — Imposta Ollama Cloud e OpenCode" \
+      "Solo avvia — Non aggiorna codice/account; riconcilia stato e avvia" \
+      "Diagnostica on-demand — Controlla i componenti senza avviare AI" \
       "Disinstalla — Rimuove programmi e componenti, dopo una conferma" \
       "Esci — Non modifica nulla" < "$TTY_REDIR" 2>/dev/null || echo 1)
     case "$CHOICE" in
@@ -340,7 +340,7 @@ if [ -d "$TARGET/.git" ]; then
       2) MODE="reconfig" ;;
       3) MODE="clean" ;;
       4) MODE="launch" ;;
-      5) MODE="update" ;;   # aggiornamento + migrazione una-tantum
+      5) MODE="diagnose" ;;
       6) MODE="uninstall" ;;
       0|7) MODE="cancel" ;;
       *) MODE="update" ;;   # node failure / EOF → safest default
@@ -374,50 +374,8 @@ cd "$TARGET"
 chmod +x ./launch-ai-supervisor.sh ./start.sh ./stop.sh ./status.sh 2>/dev/null || true
 chmod +x ./scripts/*.sh 2>/dev/null || true
 
-# Migrazione una sola volta per Mac. Il marker vive fuori dal repository, quindi
-# non si ripete dopo un pull/reset e non viene distribuito ai colleghi.
-migrate_claude_once() {
-  local marker_dir="$HOME/Library/Application Support/gsdcampus-autoplay"
-  local marker="$marker_dir/client-opencode-v1.done"
-  [ -f "$marker" ] && return 0
-  [ -n "$TTY_REDIR" ] || return 0
-  [ -f "$TARGET/scripts/lib/migrate-claude-settings.js" ] || return 0
-  if ! command -v claude >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/claude" ] && [ ! -d "$HOME/.claude" ]; then
-    return 0
-  fi
-
-  echo ""
-  info "Ho aggiornato il client AI da Claude a OpenCode. Claude ti serve ancora?"
-  local choice
-  choice=$(node "$TARGET/scripts/lib/prompt-cli.js" select \
-    --brand --title "Claude → OpenCode" --subtitle "Scegli come trattare il vecchio client" --default 1 -- \
-    "Tieni Claude — Ripristina soltanto le impostazioni GSD/Ollama" \
-    "Rimuovi Claude — Conserva dati e conversazioni personali" \
-    "Lascia tutto com'è — Decidi in un secondo momento" < "$TTY_REDIR" 2>/dev/null || echo 1)
-
-  case "$choice" in
-    1)
-      node "$TARGET/scripts/lib/migrate-claude-settings.js" 2>/dev/null || warn "Non ho potuto ripristinare gli override Ollama di Claude."
-      ok "Claude conservato; rimossi soltanto eventuali override GSD/Ollama riconoscibili."
-      ;;
-    2)
-      rm -f "$HOME/.local/bin/claude" 2>/dev/null || true
-      if command -v brew >/dev/null 2>&1; then
-        brew uninstall --cask claude-code 2>/dev/null || true
-        brew uninstall --cask claude 2>/dev/null || true
-      fi
-      if command -v npm >/dev/null 2>&1; then
-        npm uninstall -g @anthropic-ai/claude-code 2>/dev/null || true
-      fi
-      ok "Claude disinstallato; configurazioni e conversazioni personali non sono state cancellate."
-      ;;
-    *)
-      info "Claude lasciato invariato. Potrai disinstallarlo manualmente in seguito."
-      ;;
-  esac
-  mkdir -p "$marker_dir"
-  printf 'client=opencode\ncompletedAt=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
-}
+# Le vecchie installazioni OpenCode non vengono disinstallate o modificate
+# automaticamente: il nuovo flusso smette semplicemente di invocarle.
 
 # 3. Esegui l'azione scelta
 case "$MODE" in
@@ -429,7 +387,6 @@ case "$MODE" in
     else
       OLD_HEAD=$(git -C "$TARGET" rev-parse HEAD 2>/dev/null || echo "")
       update_repo
-      migrate_claude_once
       # Box "Novità": righe aggiunte a CHANGELOG.md tra la versione di prima e
       # quella appena scaricata, in linguaggio semplice. Ogni grep con || true:
       # sotto pipefail un no-match (exit 1) abortirebbe l'installer.
@@ -457,7 +414,7 @@ case "$MODE" in
       # Dopo l'aggiornamento del codice, controlla se anche le dipendenze sono allineate.
       # Se package.json/package-lock.json sono cambiati, setup.sh le aggiornerà in modo
       # automatico e solo se necessario.
-      if [ -f "$TARGET/scripts/check-requirements.sh" ] && ! "$TARGET/scripts/check-requirements.sh" >/dev/null 2>&1; then
+      if [ -f "$TARGET/scripts/check-requirements.sh" ] && ! "$TARGET/scripts/check-requirements.sh" --runtime >/dev/null 2>&1; then
         info "Dipendenze da aggiornare dopo il pull. Avvio setup condizionale..."
         sudo -v
         if [ -n "$TTY_REDIR" ]; then
@@ -475,7 +432,7 @@ case "$MODE" in
       "$TARGET/scripts/lib/install-launchd.sh" install 2>/dev/null || true
     fi
     # Checkup a semaforo (post-update): AVVISA, non blocca — il launcher a valle
-    # ha già i rimedi per quasi tutto (setup, Ollama, pull/login, OpenCode).
+    # ha gia i rimedi per quasi tutto (setup, Ollama, pull/login, Claude Code).
     DOCTOR_STATUS=""
     if [ -x "$TARGET/scripts/doctor.sh" ]; then
       if "$TARGET/scripts/doctor.sh"; then
@@ -496,7 +453,6 @@ case "$MODE" in
     else
       update_repo
     fi
-    migrate_claude_once
     warn "Riconfigurazione: ti verrà richiesto di selezionare l'account dall'elenco membri e di configurare gli orari."
     # NON cancelliamo subito la config: la mettiamo da parte come backup, così se
     # la riconfigurazione viene annullata setup.sh può ripristinarla (niente perdita
@@ -524,11 +480,21 @@ case "$MODE" in
     if [ -n "$ka_clean_keep" ] && [ -f "$ka_clean_keep" ]; then
       mv -f "$ka_clean_keep" data/known_answers.json 2>/dev/null || rm -f "$ka_clean_keep" 2>/dev/null
     fi
-    migrate_claude_once
     if [ -n "$TTY_REDIR" ] && [ -f config.json ]; then
       info "Reinstallo/aggiorno tutte le dipendenze (può richiedere qualche minuto)..."
       ./scripts/setup.sh --yes --force-update < "$TTY_REDIR" || warn "Force-update dipendenze non completato; proseguo."
     fi
+    ;;
+  diagnose)
+    info "Diagnostica offline/on-demand: nessun daemon, proxy o client AI verra avviato."
+    DIAG_RC=0
+    if [ -x "$TARGET/scripts/doctor.sh" ]; then
+      "$TARGET/scripts/doctor.sh" || DIAG_RC=$?
+    else
+      warn "Doctor non disponibile nella copia installata. Scegli 'Aggiorna e avvia' e riprova."
+      DIAG_RC=1
+    fi
+    exit "$DIAG_RC"
     ;;
   uninstall)
     if [ -n "$TTY_REDIR" ]; then
@@ -540,27 +506,27 @@ case "$MODE" in
     fi
     ;;
   launch|install)
-    migrate_claude_once
     ;;
 esac
 
-# Il login Ollama viene gestito dal launcher con pull-first: se la sessione non
-# è valida, `ollama signin` apre il browser e poi il pull riprende automaticamente.
+# Migrazione una-tantum delle vecchie impostazioni OpenCode/Ollama e dei default
+# config Claude on-demand. Non avvia alcuna CLI AI; ogni file personale toccato
+# viene prima salvato con suffisso .gsdcampus-backup.
+if [ "$MODE" != "launch" ] && [ -f "$TARGET/scripts/lib/migrate-claude-settings.js" ]; then
+  node "$TARGET/scripts/lib/migrate-claude-settings.js" \
+    || warn "Migrazione Claude on-demand non completata; riprovero al prossimo aggiornamento."
+fi
+
+# Il login Ollama e differito al primo batch quiz: se la sessione non e valida,
+# `ollama signin` apre il browser e il batch riprende dopo l'autenticazione.
 
 echo ""
-# Schermata finale "Tutto pronto" prima di passare al supervisore.
+# Riepilogo finale prima del bootstrap deterministico.
 FINAL_VER=$(git -C "$TARGET" describe --tags --always 2>/dev/null || echo "")
-case "$MODE" in
-  update)  FINAL_ACTION="aggiornato · Ollama + OpenCode" ;;
-  reconfig) FINAL_ACTION="riconfigurazione in arrivo" ;;
-  clean)   FINAL_ACTION="reinstallato da zero" ;;
-  install) FINAL_ACTION="prima installazione" ;;
-  *)       FINAL_ACTION="pronto" ;;
-esac
 if [ "${UI_OK}" = '✓' ]; then
   ui_box_top
   ui_box_line "Tutto pronto" "$BOLD"
-  [ -n "$FINAL_VER" ] && ui_box_line "versione $FINAL_VER · $FINAL_ACTION" "$DIM" || true
+  [ -n "$FINAL_VER" ] && ui_box_line "versione $FINAL_VER · Claude on-demand" "$DIM" || true
   if [ "${DOCTOR_STATUS:-}" = "ok" ]; then
     ui_box_line "checkup sistema: tutto in ordine" "$DIM"
   elif [ "${DOCTOR_STATUS:-}" = "problemi" ]; then
@@ -569,31 +535,20 @@ if [ "${UI_OK}" = '✓' ]; then
   ui_box_bottom
   echo ""
 fi
-ok "Avvio il supervisore AI..."
+ok "Avvio il sistema autonomo..."
 echo ""
 
-# 4. Avvia il launcher in modo interattivo (legge da terminale anche se siamo in pipe).
-#    Nel path "curl | bash", fd0 è la pipe (lo script) ma fd1/fd2 sono ancora il pty reale
-#    ereditato dal terminale (es. /dev/ttys002, device major 16). Duplichiamo fd0 e fd2 su
-#    fd1 (<&1 2>&1) così stdin/stdout/stderr condividono tutti lo stesso pty reale: è esattamente
-#    ciò che fa la shell interattiva nel lancio manuale.
-#
-#    NON usare /dev/tty (device major 2) per i fd del TUI: il client TUI può richiedere un pty,
-#    che crea il WriteStream del TTY tramite kqueue; kqueue su macOS non supporta /dev/tty e
-#    fallisce con EINVAL (crash "invalid argument, kqueue" in internal:util/colors).
-#    Inoltre, redirigere solo fd0 su /dev/tty lascia stdout/stderr sul pty reale: il TUI entra
-#    in raw mode su fd0 ma scrive su fd1 (device diverso) e l'input da tastiera non arriva
-#    (la finestra si apre ma non risponde).
+# 4. Avvia il bootstrap. Quando install.sh arriva da `curl | bash`, fd0 e la
+#    pipe dello script: riconnettiamo l'input al pty solo per gli eventuali
+#    passaggi interattivi di setup e login Ollama. Il launcher non apre una chat
+#    persistente e termina dopo aver avviato lo scheduler.
 if [ -n "$TTY_REDIR" ]; then
   exec ./launch-ai-supervisor.sh <&1 2>&1
 else
   warn "Nessun terminale interattivo rilevato in questo contesto."
-  info "Apro automaticamente una nuova finestra del Terminale con l'AI..."
-  # osascript apre una finestra di Terminal.app che lancia il supervisore in un pty
-  # pulito: il collega non deve lanciare comandi a mano. Se Terminal.app non è
-  # disponibile (es. usa iTerm2 senza permessi di automazione), restiamo sul messaggio.
+  info "Apro una nuova finestra del Terminale per eventuali setup o login e per completare l'avvio..."
   if osascript -e "tell application \"Terminal\" to do script \"cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh\"" >/dev/null 2>&1; then
-    ok "Finestra del Terminale aperta. Continua lì: l'AI si avvierà da sola."
+    ok "Finestra del Terminale aperta. L'avvio prosegue automaticamente."
     exit 0
   else
     warn "Impossibile aprire automaticamente una finestra del Terminale."

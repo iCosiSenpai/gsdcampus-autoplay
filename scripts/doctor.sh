@@ -3,7 +3,7 @@
 # doctor.sh — checkup del sistema a semaforo, pensato per colleghi non tecnici.
 #
 # Esegue in ~5 secondi i controlli che spiegano il 90% dei "non funziona":
-# rete, GitHub, piattaforma GSD, Ollama+OpenCode, spazio disco, requisiti,
+# rete, GitHub, piattaforma GSD, Ollama+Claude on-demand, spazio disco, requisiti,
 # configurazione. Ogni problema ha il suo rimedio scritto sotto.
 #
 # Uso:
@@ -69,21 +69,26 @@ else
   chk_err "Piattaforma GSD Campus non raggiungibile" "il sito del corso è giù o la rete lo blocca; riprova più tardi"
 fi
 
-# 4. Ollama: login gestito dalla CLI, daemon locale e budget proxy.
-OLLAMA_MODEL=$(node -e "try{const c=require('./config.json');process.stdout.write(c.ollamaModel||'gemma4:31b-cloud')}catch(e){process.stdout.write('gemma4:31b-cloud')}" 2>/dev/null)
+# 4. AI on-demand: il doctor verifica presenza e stato della porta senza
+# eseguire le CLI. Versione, login e modello vengono controllati dal batch solo
+# dopo il gate openQuizRequests > 0.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if ! command -v ollama >/dev/null 2>&1; then
-  chk_warn "Ollama CLI assente" "rilancia il comando curl: verrà installato automaticamente"
-elif ! curl -fsS "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
-  chk_warn "Daemon Ollama non attivo" "il launcher lo avvierà automaticamente"
-elif ollama list 2>/dev/null | grep -F -c "$OLLAMA_MODEL" >/dev/null; then
-  chk_ok "Ollama pronto con $OLLAMA_MODEL"
+  chk_warn "Ollama CLI assente" "verra installata automaticamente quando compare un quiz aperto"
+elif curl -fsS "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
+  chk_ok "Ollama installato; daemon gia attivo"
 else
-  chk_warn "Modello Ollama $OLLAMA_MODEL non ancora pronto" "il launcher eseguirà il pull e aprirà il login browser se necessario"
+  chk_ok "Ollama installato; daemon correttamente spento"
+fi
+if command -v claude >/dev/null 2>&1; then
+  chk_ok "Claude Code installato (non avviato dal checkup)"
+else
+  chk_warn "Claude Code assente" "verra installato automaticamente quando compare un quiz aperto"
 fi
 if node "$DIR/scripts/lib/ai-budget-cli.js" --json >/dev/null 2>&1; then
   chk_ok "Budget AI locale leggibile (nessun prompt salvato)"
 else
-  chk_warn "Budget AI locale non inizializzato" "verrà creato alla prima chiamata"
+  chk_warn "Budget AI locale non inizializzato" "verra creato alla prima chiamata"
 fi
 
 # 5. Spazio disco nella home (GB liberi).
@@ -94,8 +99,9 @@ else
   chk_ok "Spazio disco: ${FREE_GB:-?} GB liberi"
 fi
 
-# 6. Requisiti installati (Node, dipendenze, Chrome, CLI...).
-if [ -x "$DIR/scripts/check-requirements.sh" ] && "$DIR/scripts/check-requirements.sh" >/dev/null 2>&1; then
+# 6. Requisiti runtime installati. Le CLI AI non vengono eseguite dal doctor:
+# il batch le verifica soltanto con domande aperte.
+if [ -x "$DIR/scripts/check-requirements.sh" ] && "$DIR/scripts/check-requirements.sh" --runtime >/dev/null 2>&1; then
   chk_ok "Programmi necessari installati"
 else
   chk_err "Programmi necessari mancanti o da aggiornare" "rilancia il comando curl e scegli 'Aggiorna e avvia'"
