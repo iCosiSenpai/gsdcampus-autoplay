@@ -373,8 +373,9 @@ cd "$TARGET"
 chmod +x ./launch-ai-supervisor.sh ./start.sh ./stop.sh ./status.sh 2>/dev/null || true
 chmod +x ./scripts/*.sh 2>/dev/null || true
 
-# Le vecchie installazioni OpenCode non vengono disinstallate o modificate
-# automaticamente: il nuovo flusso smette semplicemente di invocarle.
+# Le vecchie installazioni OpenCode non vengono rimosse in automatico: il nuovo
+# flusso smette di invocarle. Piu' sotto, una volta per macchina, offriamo al
+# collega la rimozione opzionale di OpenCode (con conferma esplicita).
 
 # 3. Esegui l'azione scelta
 case "$MODE" in
@@ -514,6 +515,29 @@ esac
 if [ "$MODE" != "launch" ] && [ -f "$TARGET/scripts/lib/migrate-claude-settings.js" ]; then
   node "$TARGET/scripts/lib/migrate-claude-settings.js" \
     || warn "Migrazione Claude on-demand non completata; riprovero al prossimo aggiornamento."
+fi
+
+# Cleanup una-tantum di OpenCode (ora il supervisore e' Claude). Solo su
+# richiesta esplicita e una volta per macchina (marker in ~/.gsdcampus): non
+# tocca mai la cartella del progetto ne i dati personali. Salta in "Solo avvia"
+# e quando non c'e' un terminale interattivo.
+if [ "$MODE" != "launch" ] && [ -n "$TTY_REDIR" ] && [ -f "$TARGET/scripts/lib/opencode-cleanup.js" ]; then
+  OC_STATE=$(node "$TARGET/scripts/lib/opencode-cleanup.js" status 2>/dev/null || echo skip)
+  if [ "$OC_STATE" = "prompt" ]; then
+    OC_CHOICE=$(node "$TARGET/scripts/lib/prompt-cli.js" select \
+      --title "OpenCode non serve più: ora il supervisore è Claude." \
+      --subtitle "Vuoi rimuovere OpenCode da questo Mac? Non tocca i corsi né i tuoi dati." \
+      --default 1 -- \
+      "Sì, rimuovilo — libera spazio, non mi serve" \
+      "No, lo uso per conto mio — lascialo e non chiedermelo più" \
+      "Decidi più tardi — richiedimelo al prossimo avvio" \
+      < "$TTY_REDIR" 2>/dev/null || echo 3)
+    case "$OC_CHOICE" in
+      1) node "$TARGET/scripts/lib/opencode-cleanup.js" remove || warn "Rimozione OpenCode non completata del tutto." ;;
+      2) node "$TARGET/scripts/lib/opencode-cleanup.js" keep >/dev/null 2>&1 || true ;;
+      *) info "OpenCode: decisione rimandata; te lo richiedo al prossimo avvio." ;;
+    esac
+  fi
 fi
 
 # Il login Ollama e differito al primo batch quiz: se la sessione non e valida,

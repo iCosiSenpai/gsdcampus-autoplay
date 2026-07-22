@@ -306,6 +306,7 @@ async function runAutoplay() {
       // era solo I/O sprecato + una copia dei cookie di sessione su disco.
       // Gli unlink di STATE_FILE restano per ripulire i file legacy.
 
+      const courseTitles = {}; // url -> titolo dashboard, per status.json / plancia
       async function discoverCourses() {
         if (Array.isArray(config.courseUrls) && config.courseUrls.length > 0) {
           log('Corsi configurati manualmente in config.json.');
@@ -344,6 +345,9 @@ async function runAutoplay() {
             // Card + progress-bar style width (stesso parser del census).
             const rawCards = await page.evaluate(collectCoursesFromDom);
             const discovered = enrichCourseRows(rawCards);
+            // Cattura i titoli (stesso parser del censimento) per mostrarli nella
+            // plancia via status.json: discoverCourses restituisce solo URL.
+            for (const c of discovered) { if (c && c.url) courseTitles[c.url] = (c.title || '').replace(/\s+/g, ' ').trim() || null; }
             const links = discovered.map(c => c.url);
             const reconciledPending = recentlyReconciledPendingCourses();
             const fresh = links.filter(url => !courseState.isCourseDoneOrNeedHelp(state, url) || reconciledPending.has(url));
@@ -425,6 +429,9 @@ async function runAutoplay() {
         let worked = false;
         for (const courseUrl of courseUrls) {
           log(`Controllo corso: ${courseUrl}`);
+          // Titolo leggibile del corso nella plancia (fallback benigno: se manca,
+          // resta null e la plancia usa il censimento).
+          monitor.update({ courseTitle: courseTitles[courseUrl] || null });
           // Con --ignore-hours non passare shiftCheck: altrimenti watchVideo
           // ferma il video a fine turno (extra-time) anche in ignore-hours.
           await runCourse(page, courseUrl, sessionState, state, IGNORE_HOURS ? null : shiftCheck);

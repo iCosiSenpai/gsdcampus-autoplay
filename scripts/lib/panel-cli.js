@@ -168,10 +168,17 @@ function readModel(root, now = Date.now()) {
   try { scheduleDesc = schedule.describeSchedule(); } catch (_) { scheduleDesc = ''; }
 
   let courseTitle = null;
-  const courseId = courseIdFromUrl(status.courseUrl);
-  if (census && Array.isArray(census.courses) && courseId) {
-    const hit = census.courses.find((c) => courseIdFromUrl(c.url) === courseId);
-    if (hit && hit.title) courseTitle = String(hit.title).slice(0, 46);
+  const cleanTitle = (t) => String(t).replace(/\s+/g, ' ').trim().slice(0, 46);
+  if (status.courseTitle) {
+    // Fonte preferita: titolo scritto live dall'autoplay (sempre fresco).
+    courseTitle = cleanTitle(status.courseTitle);
+  } else {
+    // Fallback: abbina l'URL corrente al censimento.
+    const courseId = courseIdFromUrl(status.courseUrl);
+    if (census && Array.isArray(census.courses) && courseId) {
+      const hit = census.courses.find((c) => courseIdFromUrl(c.url) === courseId);
+      if (hit && hit.title) courseTitle = cleanTitle(hit.title);
+    }
   }
 
   return {
