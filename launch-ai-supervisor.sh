@@ -42,7 +42,17 @@ stop_tracked_pid_file "$DIR/.claude_runner_pid" "claude-quiz-runner\\.js" || tru
 stop_tracked_pid_file "$DIR/.claude_batch_pid" "run-claude-quiz-batch\\.sh" || true
 stop_tracked_pid_file "$DIR/.ai_proxy_pid" "ollama-cloud-proxy\\.js" || true
 stop_tracked_pid_file "$DIR/.ollama_pid" "ollama|Ollama" || true
-rm -rf "$DIR/logs/.claude-quiz-batch.lock" 2>/dev/null || true
+# Rimuovi il lock del batch SOLO se orfano: un batch ancora vivo (non tracciato
+# dai pid file sopra) deve mantenere la mutua esclusione, cosi il prossimo batch
+# lo riconosce e attende (exit 26) invece di scavalcarlo con una seconda istanza.
+_batch_lock="$DIR/logs/.claude-quiz-batch.lock"
+if [ -d "$_batch_lock" ]; then
+  _batch_lock_owner="$(cat "$_batch_lock/pid" 2>/dev/null || true)"
+  if [ -z "$_batch_lock_owner" ] || ! kill -0 "$_batch_lock_owner" 2>/dev/null; then
+    rm -rf "$_batch_lock" 2>/dev/null || true
+  fi
+fi
+unset _batch_lock _batch_lock_owner
 ok "Pulizia istanze precedenti completata."
 
 step "1/5" "Verifica configurazione"

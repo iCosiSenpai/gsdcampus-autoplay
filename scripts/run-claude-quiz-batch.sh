@@ -40,10 +40,10 @@ acquire_lock() {
   owner="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
   if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then
     echo "[claude-batch] un batch e gia in esecuzione; non ne avvio un secondo."
-    return 21
+    return 26
   fi
   rm -rf "$LOCK_DIR" 2>/dev/null || true
-  mkdir "$LOCK_DIR" 2>/dev/null || return 21
+  mkdir "$LOCK_DIR" 2>/dev/null || return 26
   printf '%s\n' "$$" > "$LOCK_DIR/pid"
 }
 

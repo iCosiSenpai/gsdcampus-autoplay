@@ -60,7 +60,7 @@
     "course_state_backup": "snapshot SHA-256 per-account prima di reopen/reset; restore same-account only",
     "answer_bank_integrity": "normalizzazione Unicode, conflitti bloccanti, hash canonico locale/main",
     "selector_preflight": "gate offline prima di ogni sessione browser",
-    "ai_fingerprint": "un solo batch per workFingerprint; errori in cooldown e output invalidi lasciano intatto l'handoff",
+    "ai_fingerprint": "un solo batch per workFingerprint; solo un esito 'complete' e terminale, mentre error/partial/invalid ritentano dopo un backoff (retryAfter) senza toccare l'handoff",
     "ai_routes": ["POST /v1/messages", "POST /v1/messages/count_tokens"],
     "ai_tools": ["WebSearch", "WebFetch"]
   },
@@ -110,10 +110,11 @@
     "0": "risposte valide applicate e share fleet completato/noop",
     "20": "nessun lavoro AI",
     "21": "fingerprint gia elaborato",
-    "22": "output strutturato non valido",
+    "22": "output strutturato non valido; retryAfter 30 minuti",
     "23": "errore Claude; retryAfter 30 minuti",
     "24": "componenti o login AI non pronti",
-    "25": "risposte locali salve ma share fleet pending"
+    "25": "risposte locali salve ma share fleet pending",
+    "26": "un altro batch AI e in esecuzione (contesa lock); retry breve ~1 min"
   },
   "config_keys": {
     "autologinUrl": "required",

@@ -22,7 +22,8 @@ const { mergeQuestionList } = require('../../src/lib/quiz-handoff');
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const VALID_CF = /^[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]$/;
 const STATE_NAME = 'claude-quiz-state.json';
-const ERROR_RETRY_MS = 30 * 60 * 1000;
+// Backoff prima di ritentare un fingerprint non risolto (error/partial/invalid).
+const RETRY_BACKOFF_MS = 30 * 60 * 1000;
 const EXIT = Object.freeze({
   OK: 0,
   NO_WORK: 20,
@@ -191,7 +192,12 @@ function shouldSkipFingerprint(root, fingerprint, force, now = Date.now()) {
   if (force || !fingerprint) return false;
   const state = readJsonSafe(statePath(root), null, { warn: false });
   if (!state || state.fingerprint !== fingerprint) return false;
-  if (state.outcome !== 'error') return true;
+  // Solo un esito 'complete' su questa esatta inbox e terminale. Un batch
+  // 'partial' o 'invalid' lascia domande aperte e va ritentato dopo il backoff,
+  // non saltato per sempre (altrimenti le domande restanti resterebbero senza
+  // risposta finche l'inbox non cambia). Senza un retryAfter valido si ritenta
+  // al giro successivo.
+  if (state.outcome === 'complete') return true;
   const retryAt = Date.parse(state.retryAfter || '');
   return Number.isFinite(retryAt) && retryAt > now;
 }
@@ -362,7 +368,9 @@ function saveAttempt(root, attemptedFingerprint, outcome, answered, remaining) {
     outcome,
     answered,
     remaining,
-    ...(outcome === 'error' ? { retryAfter: new Date(now.getTime() + ERROR_RETRY_MS).toISOString() } : {}),
+    ...(outcome === 'complete'
+      ? {}
+      : { retryAfter: new Date(now.getTime() + RETRY_BACKOFF_MS).toISOString() }),
   };
   writeJsonAtomic(statePath(root), state);
   return state;

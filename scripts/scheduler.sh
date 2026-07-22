@@ -247,7 +247,10 @@ handle_awaiting_ai() {
     case "$code" in
       20) log "awaiting_ai senza domande leggibili: attendo un cambiamento locale." ;;
       21) log "Fingerprint quiz gia elaborato: nessuna nuova chiamata AI." ;;
-      22) log "Output AI non valido: handoff preservato, attendo revisione o nuova inbox." ;;
+      22)
+        wait_limit_ms=$(claude_retry_wait_ms)
+        log "Output AI non valido: handoff preservato; ritento al retryAfter tra circa $(( (wait_limit_ms + 59999) / 60000 )) min."
+        ;;
       23)
         wait_limit_ms=$(claude_retry_wait_ms)
         log "Batch AI fallito: retry automatico al retryAfter tra circa $(( (wait_limit_ms + 59999) / 60000 )) min."
@@ -259,6 +262,10 @@ handle_awaiting_ai() {
       25)
         wait_limit_ms=1800000
         log "Risposte locali salve ma share fleet pending; ritento il batch tra 30 min senza perdere dati."
+        ;;
+      26)
+        wait_limit_ms=60000
+        log "Un altro batch AI e gia in esecuzione (contesa lock): ritento tra circa 1 min."
         ;;
       *) log "Restano $remaining domande; batch terminato con codice $code." ;;
     esac

@@ -297,7 +297,6 @@ update_repo() {
 
 # 2. Prima installazione oppure gestione di un'installazione esistente
 MODE="install"   # install | update | reconfig | clean | launch | diagnose | uninstall | cancel
-RELOGIN_OLLAMA=false   # compatibilità con vecchie installazioni: non usato dal flusso Cloud
 
 if [ -d "$TARGET/.git" ]; then
   # Il menu viene mostrato prima di chiedere l'azione. Se la copia locale ha il

@@ -109,15 +109,23 @@ function migrateProjectConfig(project) {
     return { file, changed: false, exists: true, invalid: true, kind: 'project-config' };
   }
   const before = JSON.stringify(cfg);
+  const firstMigration = cfg.aiSupervisorClient !== 'claude-on-demand';
   cfg.aiSupervisorClient = 'claude-on-demand';
-  cfg.useOllamaForQuiz = false;
+  // Alla PRIMA migrazione stabilisci il modello Claude on-demand (Ollama fuori
+  // dal percorso quiz, una richiesta alla volta). Ai run successivi ("Aggiorna e
+  // avvia") NON sovrascrivere scelte deliberate del maintainer: correggi solo i
+  // valori mancanti o fuori range, cosi la migrazione resta idempotente.
+  if (firstMigration || typeof cfg.useOllamaForQuiz !== 'boolean') cfg.useOllamaForQuiz = false;
   if (!cfg.ollamaLocalEndpoint) cfg.ollamaLocalEndpoint = 'http://127.0.0.1:11434';
   if (!cfg.aiCloudProxyPort) cfg.aiCloudProxyPort = 11435;
   if (!cfg.aiWeeklyRequestLimit) cfg.aiWeeklyRequestLimit = 400;
   if (!cfg.aiDailyRequestLimit) cfg.aiDailyRequestLimit = 80;
   if (!cfg.aiPerMinuteRequestLimit) cfg.aiPerMinuteRequestLimit = 8;
   if (!cfg.aiMinRequestIntervalMs) cfg.aiMinRequestIntervalMs = 1500;
-  cfg.aiMaxConcurrentRequests = 1;
+  const configuredConcurrency = Number(cfg.aiMaxConcurrentRequests);
+  cfg.aiMaxConcurrentRequests = (firstMigration || !Number.isFinite(configuredConcurrency) || configuredConcurrency < 1)
+    ? 1
+    : Math.min(8, Math.floor(configuredConcurrency));
   const configuredBatchLimit = Number(cfg.aiClaudeMaxRequestsPerBatch);
   cfg.aiClaudeMaxRequestsPerBatch = Number.isFinite(configuredBatchLimit)
     ? Math.max(1, Math.min(8, Math.floor(configuredBatchLimit)))
