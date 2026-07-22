@@ -1,49 +1,49 @@
 #!/bin/zsh
 set -eu -o pipefail
 
-# Aggiorna la banca risposte locale scaricando quella pubblica dal repository e
-# facendone il merge con le risposte personali dell'utente.
-# Questo script viene chiamato automaticamente dall'installer durante l'aggiornamento.
+# Mergia la banca pubblica nel trusted locale.
+# Prima usa SEMPRE data/known_answers_public.json gia ricevuto con git pull;
+# il fetch remoto e solo un aggiornamento best-effort, throttled di default,
+# e non annulla il merge locale quando la rete non e disponibile.
+
+FORCE_SYNC=false
+case "${1:-}" in
+  "") ;;
+  --force) FORCE_SYNC=true ;;
+  *) echo "Uso: $0 [--force]" >&2; exit 2 ;;
+esac
+if [ "$#" -gt 1 ]; then
+  echo "Uso: $0 [--force]" >&2
+  exit 2
+fi
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
+mkdir -p "$DIR/data" "$DIR/logs"
 
-LOCAL_FILE="$DIR/data/known_answers.json"
-PUBLIC_URL="https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/data/known_answers_public.json"
-mkdir -p "$DIR/data"
-
-# mktemp (non /tmp/...$$): percorso univoco e sicuro, evita collisioni/symlink
-# e viene creato in modo atomico. Il fallback resta DENTRO il progetto (data/ è
-# 0755 dell'utente, non world-writable come /tmp: niente symlink attack sul
-# pattern PID prevedibile). Trappato per la pulizia in uscita.
-REMOTE_FILE="$(mktemp 2>/dev/null || echo "$DIR/data/.known_answers_public.$$.tmp")"
-trap 'rm -f "$REMOTE_FILE" 2>/dev/null' EXIT
-
-if ! command -v curl >/dev/null 2>&1; then
-  echo "[WARN] curl non disponibile, salto aggiornamento banca risposte pubblica."
-  exit 0
-fi
-
-echo "[INFO] Controllo banca risposte pubblica..."
-if curl -fsSL --max-time 20 "$PUBLIC_URL" -o "$REMOTE_FILE" 2>/dev/null; then
-  node -e "
-    const fs = require('fs');
-    const localPath = '$LOCAL_FILE';
-    const remotePath = '$REMOTE_FILE';
-    let local = {};
-    let remote = {};
-    try { local = JSON.parse(fs.readFileSync(localPath, 'utf8')); } catch (_) {}
-    try { remote = JSON.parse(fs.readFileSync(remotePath, 'utf8')); } catch (_) {}
-    const merged = { ...remote, ...local };
-    const added = Object.keys(remote).filter(k => !(k in local)).length;
-    // Scrittura atomica (tmp+rename): un'interruzione a metà scrittura non lascia
-    // la banca risposte troncata/corrotta (verrebbe persa l'intera banca).
-    const tmp = localPath + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(merged, null, 2));
-    fs.renameSync(tmp, localPath);
-    console.log('[OK] Banca risposte aggiornata: +' + added + ' nuove risposte dalla repo pubblica.');
-  "
-else
-  echo "[WARN] Impossibile scaricare la banca risposte pubblica (offline o non ancora creata)."
-  exit 0
-fi
+echo "[INFO] Aggiorno la banca risposte pubblica..."
+GSD_BANK_SYNC_FORCE="$FORCE_SYNC" node -e "
+  const { syncPublicBank } = require('./src/lib/bank-sync');
+  syncPublicBank('.', {
+    force: process.env.GSD_BANK_SYNC_FORCE === 'true',
+    log: (message) => console.log('[INFO] ' + message),
+  }).then((result) => {
+    if (result.ok) {
+      if (result.skipped) {
+        console.log('[OK] File pubblico locale allineato; fetch remoto non necessario (throttle attivo).');
+      } else {
+        console.log('[OK] Banca risposte allineata: +' + Number(result.added || 0) + ' risposta/e.');
+      }
+      process.exit(0);
+    }
+    if (result.localMerged) {
+      console.log('[WARN] File pubblico locale mergiato; fetch remoto saltato: ' + (result.error || 'offline'));
+      process.exit(0);
+    }
+    console.log('[WARN] Aggiornamento banca incompleto: ' + (result.error || 'errore sconosciuto'));
+    process.exit(0);
+  }).catch((error) => {
+    console.log('[WARN] Aggiornamento banca non disponibile: ' + error.message);
+    process.exit(0);
+  });
+"

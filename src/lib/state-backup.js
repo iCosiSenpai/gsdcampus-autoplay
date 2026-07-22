@@ -28,7 +28,7 @@ function safePart(value, fallback) {
 }
 
 function backupDir(root, cf = null) {
-  const paths = account.stateFilePaths(root);
+  const paths = account.stateFilePaths(root, cf);
   const owner = safePart(cf || paths.codiceFiscale || 'legacy', 'legacy');
   return path.join(root, 'backups', 'accounts', owner, 'course-state');
 }
@@ -49,7 +49,7 @@ function pruneBackups(dir, keep = DEFAULT_KEEP) {
 }
 
 function createCourseStateBackup(root, state, meta = {}) {
-  const paths = account.stateFilePaths(root);
+  const paths = account.stateFilePaths(root, meta.cf || null);
   const cf = paths.codiceFiscale || null;
   const snapshot = state && typeof state === 'object' ? state : {};
   const sha256 = snapshotHash(snapshot);

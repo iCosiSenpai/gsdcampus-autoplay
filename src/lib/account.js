@@ -91,12 +91,11 @@ function accountFile(root, cf, name) {
 }
 
 /**
- * Path dei file di stato per l'account ATTIVO. Se il CF non è determinabile
- * (config legacy senza autologinUrl), tutti i path ricadono sui vecchi file
- * flat in data/ → back-compat.
+ * Path dei file di stato per l'account indicato, oppure per l'account ATTIVO.
+ * Se nessun CF e determinabile, ricade sui vecchi file flat in data/.
  */
-function stateFilePaths(root) {
-  const cf = activeCodiceFiscale(root, null);
+function stateFilePaths(root, cfOverride = null) {
+  const cf = cfOverride ? String(cfOverride).toUpperCase() : activeCodiceFiscale(root, null);
   if (cf) {
     const base = accountDataDir(root, cf);
     return {

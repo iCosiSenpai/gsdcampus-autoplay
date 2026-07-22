@@ -66,6 +66,25 @@ const ROOT = path.join(__dirname, '..', '..');
 const DATA = path.join(ROOT, 'data');
 const KNOWN = path.join(DATA, 'known_answers.json');
 const PUBLIC = path.join(DATA, 'known_answers_public.json');
+const SHARE_PENDING = path.join(ROOT, 'logs', '.answers-share-pending.json');
+
+function hasPendingShare() {
+  return fs.existsSync(SHARE_PENDING);
+}
+
+function markSharePending() {
+  fs.mkdirSync(path.dirname(SHARE_PENDING), { recursive: true });
+  writeJsonAtomic(SHARE_PENDING, {
+    schemaVersion: 1,
+    pendingSince: new Date().toISOString(),
+  });
+}
+
+function clearPendingShare() {
+  try { fs.unlinkSync(SHARE_PENDING); } catch (error) {
+    if (error && error.code !== 'ENOENT') throw error;
+  }
+}
 
 // Mergia le chiavi nuove del trusted locale nella banca pubblica condivisa
 // (senza sovrascrivere le voci pubbliche esistenti, curate). Ritorna la lista
@@ -146,7 +165,7 @@ if (cmd === 'stats') {
   writeJsonAtomic(KNOWN, upserted.bank);
   // Auto-pulizia handoff: la domanda ora è risolta, toglila da ai_quiz_request /
   // need_answer così l'inbox dell'AI non resta pieno di domande già fatte.
-  const cleaned = clearResolvedFromHandoff(ROOT, [q]);
+  const cleaned = clearResolvedFromHandoff(ROOT, [q], { allAccounts: true });
   try { writeAiTodo(ROOT); } catch (_) {}
   console.log(`Salvata (trusted): "${q.slice(0, 70)}" → "${a.slice(0, 50)}"`);
   if (upserted.replaced.length > 1) console.log(`  (normalizzati ${upserted.replaced.length} duplicati della stessa domanda)`);
@@ -163,7 +182,7 @@ if (cmd === 'stats') {
   const known = readJson(KNOWN, {});
   const upserted = upsertBankEntry(known, q, a);
   writeJsonAtomic(KNOWN, upserted.bank);
-  const cleaned = clearResolvedFromHandoff(ROOT, [q]);
+  const cleaned = clearResolvedFromHandoff(ROOT, [q], { allAccounts: true });
   try { writeAiTodo(ROOT); } catch (_) {}
   const published = mergeIntoPublic({ [q]: a });
   const added = published.added;
@@ -177,16 +196,22 @@ if (cmd === 'stats') {
     if (cfg && cfg.autoShareAnswers === false) autoShare = false;
   } catch (_) {}
   if (added.length > 0 && autoShare) {
-    // Share remoto best-effort: non fallisce resolve se Worker down.
-    shareAnswersToRemote({ [q]: a }).then((res) => {
+    // Un marker senza payload rende durevole il retry. Se esiste gia, un invio
+    // precedente puo essere fallito: ritenta l'intera banca trusted (receiver
+    // additivo/idempotente), non soltanto la risposta corrente.
+    const retryAll = hasPendingShare();
+    try { markSharePending(); } catch (_) { /* il POST resta comunque tentato */ }
+    const sharePayload = retryAll ? upserted.bank : { [q]: a };
+    shareAnswersToRemote(sharePayload).then((res) => {
       if (res.ok) {
-        console.log(`  share Worker: ok (+${res.added != null ? res.added : '?'} remote)`);
+        try { clearPendingShare(); } catch (_) { /* un retry idempotente e sicuro */ }
+        console.log(`  share Worker: ok (+${res.added != null ? res.added : '?'} remote${retryAll ? ', retry completo' : ''})`);
       } else {
-        console.log(`  share Worker: skip (${res.error || 'fail'}) — riprova: ./scripts/publish-answers.sh`);
+        console.log(`  share Worker: pending (${res.error || 'fail'}) — retry automatico al termine del batch`);
       }
       process.exit(0);
     }).catch((e) => {
-      console.log(`  share Worker: errore ${e.message} — riprova: ./scripts/publish-answers.sh`);
+      console.log(`  share Worker: pending (${e.message}) — retry automatico al termine del batch`);
       process.exit(0);
     });
   } else {
@@ -231,8 +256,10 @@ if (cmd === 'stats') {
   try { writeAiTodo(ROOT); } catch (_) {}
 } else if (cmd === 'share') {
   // 1) merge local trusted → public file
-  // 2) POST al Worker delle entry nuove (o --all per ritentare un invio fallito)
+  // 2) POST al Worker del delta oppure dell'intera banca quando un tentativo
+  // precedente ha lasciato il marker persistente.
   const forceAll = process.argv.includes('--all');
+  const retryPending = hasPendingShare();
   const known = readJson(KNOWN, {});
   const published = mergeIntoPublic(known);
   const addedList = published.added;
@@ -241,12 +268,7 @@ if (cmd === 'stats') {
     process.exit(1);
   }
   const payload = {};
-  if (addedList.length > 0) {
-    for (const q of addedList) {
-      if (known[q] != null) payload[q] = known[q];
-    }
-    console.log(`Preparo share di ${addedList.length} risposte nuove (delta locale)...`);
-  } else if (forceAll) {
+  if (forceAll || retryPending) {
     let n = 0;
     for (const [q, a] of Object.entries(known)) {
       if (String(q).startsWith('README')) continue;
@@ -254,17 +276,24 @@ if (cmd === 'stats') {
       n++;
     }
     if (n === 0) {
+      try { clearPendingShare(); } catch (_) {}
       console.log('Banca trusted vuota: niente da condividere.');
       process.exit(0);
     }
-    console.log(`Preparo share --all di ${n} risposte trusted (chunk da 50)...`);
+    console.log(`Preparo share ${retryPending && !forceAll ? 'di retry' : '--all'} di ${n} risposte trusted (chunk da 50)...`);
+  } else if (addedList.length > 0) {
+    for (const q of addedList) {
+      if (known[q] != null) payload[q] = known[q];
+    }
+    console.log(`Preparo share di ${addedList.length} risposte nuove (delta locale)...`);
   } else {
-    console.log('Nessuna nuova risposta locale da condividere (banca pubblica già allineata).');
-    console.log('Per ritentare l\'invio remoto: node scripts/lib/answers-cli.js share --all');
+    console.log('Nessuna nuova risposta locale da condividere (banca pubblica e receiver già allineati).');
     process.exit(0);
   }
+  try { markSharePending(); } catch (_) { /* il POST resta comunque tentato */ }
   shareAnswersToRemote(payload).then((res) => {
     if (res.ok) {
+      try { clearPendingShare(); } catch (_) { /* retry idempotente al prossimo giro */ }
       if (res.added === 0) {
         console.log('Receiver: nessuna voce nuova sul remoto (già presenti). ok.');
       } else {

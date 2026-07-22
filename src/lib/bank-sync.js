@@ -102,15 +102,40 @@ function fetchJson(url) {
  */
 async function syncPublicBank(root, opts = {}) {
   const log = opts.log || (() => {});
+  const knownPath = path.join(root, 'data', 'known_answers.json');
+  const publicPath = path.join(root, 'data', 'known_answers_public.json');
+  let local = readJsonSafe(knownPath, {});
+  const publicFile = readJsonSafe(publicPath, {});
+
+  // Il file pubblico tracciato arriva gia con git pull: mergialo SEMPRE, anche
+  // quando il fetch remoto e offline o il throttle di rete e ancora attivo.
+  const publicAudit = auditBank(publicFile);
+  if (!publicAudit.ok) {
+    return { ok: false, error: 'local_public_bank_invalid', invalid: publicAudit.invalid.length, conflicts: publicAudit.conflicts.length };
+  }
+  const localMerge = mergeBanks(local, publicFile);
+  if (localMerge.conflicts.length > 0) {
+    return { ok: false, error: 'trusted_public_conflict', conflicts: localMerge.conflicts.length };
+  }
+  if (localMerge.added > 0) {
+    try {
+      writeJsonAtomic(knownPath, localMerge.merged);
+      local = localMerge.merged;
+      log(`Banca: +${localMerge.added} risposte dal file public locale.`);
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
   if (!opts.force && !shouldSync(root)) {
-    return { ok: true, skipped: true, reason: 'throttled' };
+    return { ok: true, skipped: true, reason: 'throttled', added: localMerge.added };
   }
   const url = opts.url || DEFAULT_PUBLIC_URL;
   let remote;
   try {
     remote = await fetchJson(url);
   } catch (e) {
-    return { ok: false, error: e.message || String(e) };
+    return { ok: false, error: e.message || String(e), added: localMerge.added, localMerged: true };
   }
   const remoteAudit = auditBank(remote);
   if (!remoteAudit.ok) {
@@ -120,28 +145,26 @@ async function syncPublicBank(root, opts = {}) {
       invalid: remoteAudit.invalid.length,
       conflicts: remoteAudit.conflicts.length,
       remoteHash: remoteAudit.sha256,
+      added: localMerge.added,
     };
   }
-  const knownPath = path.join(root, 'data', 'known_answers.json');
-  const local = readJsonSafe(knownPath, {});
-  const publicFile = readJsonSafe(path.join(root, 'data', 'known_answers_public.json'), {});
   const publicComparison = compareBanks(publicFile, remote);
-  const { merged, added, conflicts } = mergeBanks(local, remote);
-  if (conflicts.length > 0) {
-    return { ok: false, error: 'trusted_public_conflict', conflicts: conflicts.length, remoteHash: remoteAudit.sha256 };
+  const remoteMerge = mergeBanks(local, remote);
+  if (remoteMerge.conflicts.length > 0) {
+    return { ok: false, error: 'trusted_public_conflict', conflicts: remoteMerge.conflicts.length, remoteHash: remoteAudit.sha256, added: localMerge.added };
   }
-  if (added > 0) {
+  if (remoteMerge.added > 0) {
     try {
-      writeJsonAtomic(knownPath, merged);
+      writeJsonAtomic(knownPath, remoteMerge.merged);
     } catch (e) {
-      return { ok: false, error: e.message };
+      return { ok: false, error: e.message, added: localMerge.added };
     }
   }
   markSynced(root);
-  if (added > 0) log(`Banca: +${added} risposte dalla public (merge locale).`);
+  if (remoteMerge.added > 0) log(`Banca: +${remoteMerge.added} risposte dalla public remota.`);
   return {
     ok: true,
-    added,
+    added: localMerge.added + remoteMerge.added,
     skipped: false,
     remoteHash: remoteAudit.sha256,
     publicFileHash: publicComparison.leftHash,
