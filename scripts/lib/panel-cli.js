@@ -314,7 +314,7 @@ function renderFrame(model, opts = {}) {
   L.push('');
   L.push(rule);
   const key = (k, label) => `${c(ANSI.bold, k)} ${label}`;
-  const actions = [key('L', 'guarda dal vivo'), key('F', 'ferma'), key('R', 'aggiorna'), key('Q', 'chiudi')];
+  const actions = [key('L', 'guarda dal vivo'), key('F', 'ferma e chiudi'), key('R', 'aggiorna'), key('Q', 'chiudi')];
   if (head.level === 'attention' && head.hint && head.hint.includes('C ')) actions.splice(3, 0, key('C', 'cambia collega'));
   L.push('  ' + actions.join(`   `));
   L.push(` ${c(ANSI.dim, 'si aggiorna da solo ' + GLYPH.bul + ' chiudere la finestra non ferma nulla')}`);
@@ -335,6 +335,20 @@ function renderLogView(root, opts = {}) {
 }
 
 // ── Loop interattivo ────────────────────────────────────────────────────────
+// Chiude la tab/finestra del Terminale al termine di "ferma" (best-effort, solo
+// per app note; altrimenti no-op e il processo esce lasciando la finestra aperta).
+function terminalCloseScript(termProgram) {
+  const t = String(termProgram || '');
+  if (/Apple_Terminal/i.test(t)) return 'tell application "Terminal" to close front window';
+  if (/iTerm/i.test(t)) return 'tell application "iTerm2" to tell current window to close';
+  return null;
+}
+function closeTerminalTab() {
+  const script = terminalCloseScript(process.env.TERM_PROGRAM);
+  if (!script) return false;
+  try { spawnSync('osascript', ['-e', script], { stdio: 'ignore', timeout: 5000 }); return true; } catch (_) { return false; }
+}
+
 function parseArgs(argv) {
   const a = { root: path.resolve(__dirname, '..', '..'), once: false, color: undefined, interval: REFRESH_MS };
   for (let i = 0; i < argv.length; i += 1) {
@@ -376,7 +390,7 @@ function main() {
       ? renderLogView(args.root, { color, width })
       : renderFrame(readModel(args.root), { color, width, spinIndex });
     const extra = (view === 'panel' && confirmStop)
-      ? `\n  ${color ? ANSI.red : ''}Premere di nuovo F per fermare tutto, un altro tasto per annullare.${color ? ANSI.reset : ''}`
+      ? `\n  ${color ? ANSI.red : ''}Premere di nuovo F per fermare tutto e chiudere la finestra, un altro tasto per annullare.${color ? ANSI.reset : ''}`
       : '';
     process.stdout.write('\x1b[H\x1b[2J' + frame + extra + '\n');
   };
@@ -399,9 +413,10 @@ function main() {
 
   const doStop = () => {
     teardown();
-    process.stdout.write('\nFermo il sistema…\n');
+    process.stdout.write('\nFermo il sistema e chiudo la finestra…\n');
     const stop = path.join(args.root, 'stop.sh');
     try { spawnSync(stop, [], { stdio: 'inherit' }); } catch (_) {}
+    closeTerminalTab();
     process.exit(0);
   };
 
@@ -454,4 +469,5 @@ if (require.main === module) {
 module.exports = {
   parseClockSeconds, videoPercent, progressBar, formatDuration, relativeTime, formatWhen,
   courseIdFromUrl, computeHeadline, readModel, renderFrame, renderLogView, stripAnsi, visLen,
+  terminalCloseScript,
 };
