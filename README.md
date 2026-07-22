@@ -108,7 +108,7 @@ La prima volta che serve davvero, potrebbe aprirsi il browser per un **accesso**
 Quasi tutto si sistema **rilanciando il comando `curl`** e scegliendo **"Aggiorna e avvia"**.
 
 - **Non parte o dà un errore strano** → rilancia il `curl`.
-- **Dice "link scaduto" / non entra nel corso** → rilancia il `curl`; se insiste, scegli **"Cambia collega o orari"** e riseleziona il tuo nome.
+- **Dice "accesso non riuscito" / non entra nel corso** → quasi sempre **non** è colpa del link (è unico e non cambia mai): la piattaforma l'ha messo in **timeout temporaneo** perché è stato usato troppo. **Non cambiare il link.** Lascialo "raffreddare" e riprova **più tardi o domani** — puoi anche lasciare la finestra aperta, riprova da sola.
 - **Ti chiede se rimuovere "OpenCode"** → è la vecchia AI, non serve più: puoi rispondere **Sì**. (Se lo usi per conto tuo, scegli **No**.)
 - **Il Mac** deve restare **acceso** (non in stop) quando i corsi devono girare: ci pensa lui a tenerlo sveglio, tu non spegnerlo.
 
@@ -134,7 +134,7 @@ Questa parte **non serve ai colleghi**: è un riferimento tecnico per chi prepar
 - **Membri e stato:** elenco in `data/members.db` (da CSV, solo maintainer). Stato personale per Mac in `data/accounts/<CF>/`. Banca risposte: `data/known_answers.json` (trusted locale) + `data/known_answers_public.json` (condivisa). Distribuzione senza git push via `./scripts/publish-answers.sh` (Cloudflare Worker).
 - **Comandi locali utili:** `./status.sh`, `./start.sh` [`--ignore-hours`], `./stop.sh`, `./scripts/setup.sh [--yes --force-update]`, `./scripts/dev-check.sh`, `node scripts/lib/panel-cli.js` (plancia).
 - **Preparare un pacchetto per un collega:** `./scripts/prepare-package.sh --yes --zip` (rimuove dati personali).
-- **Riferimenti completi:** `AGENTS.md` / `CLAUDE.md` (contratto supervisore), `docs/SETUP.md`, `docs/QUIZ.md`, `docs/ISSUES.md`, `docs/TECH.md`, `docs/SECURITY-MEMBERS.md`. Guida colleghi estesa: `README-COLLEGHI.md`.
+- **Riferimenti completi:** `AGENTS.md` / `CLAUDE.md` (contratto supervisore), `docs/SETUP.md`, `docs/QUIZ.md`, `docs/ISSUES.md`, `docs/TECH.md`, `docs/SECURITY-MEMBERS.md`.
 - **Note tecniche:** browser headless (nessuna finestra); ID corsi personali scoperti dalla dashboard dopo il login (non in `config.json`); orari in `config.json` → `workSchedule`.
 
 </details>
