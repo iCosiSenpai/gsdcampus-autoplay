@@ -1,40 +1,31 @@
 #!/bin/zsh
-# Niente `set -e`: è uno script diagnostico che deve eseguire TUTTI i check e
-# riportare ogni mancanza, non fermarsi al primo comando in errore. L'esito
-# finale è deciso dal flag `missing` e dagli exit espliciti in fondo.
+# Diagnostico requisiti: default runtime (non esegue CLI AI); --ai e usato
+# soltanto dal batch dopo openQuizRequests > 0. Non usa set -e per riportare
+# tutte le mancanze del profilo scelto.
+
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
-
-# shellcheck source=scripts/setup/package-hash.sh
 . "$DIR/scripts/setup/package-hash.sh"
 . "$DIR/scripts/setup/browser-check.sh"
 . "$DIR/scripts/setup/versions.sh"
 
+PROFILE="runtime"
+for arg in "$@"; do
+  case "$arg" in
+    --runtime) PROFILE="runtime" ;;
+    --ai) PROFILE="ai" ;;
+    *) echo "Uso: $0 [--runtime|--ai]" >&2; exit 2 ;;
+  esac
+done
+
 missing=0
+log_missing() { echo "❌ MANCANTE: $1"; missing=1; }
+log_ok() { echo "✅ OK: $1"; }
 
-log_missing() {
-  echo "❌ MANCANTE: $1"
-  missing=1
-}
+want_runtime() { [ "$PROFILE" = "all" ] || [ "$PROFILE" = "runtime" ]; }
+want_ai() { [ "$PROFILE" = "all" ] || [ "$PROFILE" = "ai" ]; }
 
-log_ok() {
-  echo "✅ OK: $1"
-}
-
-MODEL_FALLBACK="gemma4:31b-cloud"
-get_ollama_model() {
-  node -e "try { const c=require('./config.json'); console.log(c.ollamaModel || '${MODEL_FALLBACK}'); } catch(e){ console.log('${MODEL_FALLBACK}'); }" 2>/dev/null || echo "${MODEL_FALLBACK}"
-}
-OLLAMA_MODEL="$(get_ollama_model)"
-
-# 1. Homebrew (opzionale, serve per Node.js/Ollama su alcuni sistemi)
-if command -v brew &>/dev/null; then
-  log_ok "Homebrew ($(brew --version | head -1))"
-else
-  log_missing "Homebrew"
-fi
-
-# 2. Node.js / npm
+# Node serve sia al runtime sia al batch AI deterministico.
 if command -v node &>/dev/null; then
   NODE_MAJOR=$(node -v | sed 's/^v\([0-9]*\).*/\1/')
   if [ "$NODE_MAJOR" -ge 22 ] 2>/dev/null; then
@@ -46,65 +37,81 @@ else
   log_missing "Node.js"
 fi
 
-# 3. npm dependencies
-if [ ! -d "$DIR/node_modules" ]; then
-  log_missing "Dipendenze npm (esegui: npm install)"
-elif package_hash_ok; then
-  log_ok "Dipendenze npm allineate"
-else
-  log_missing "Dipendenze npm obsolete (esegui: npm install o ./scripts/setup.sh)"
-fi
-
-# 4. Browser: Chrome consigliato, Chromium ok
-if ! report_browser_status; then
-  :
-fi
-
-# 5. Ollama CLI + daemon + modello Cloud registrato localmente
-if command -v ollama &>/dev/null; then
-  OLLAMA_VER=$(ollama --version 2>/dev/null | extract_version)
-  if [ -z "$OLLAMA_VER" ] || ! version_ge "$OLLAMA_VER" "$MIN_OLLAMA"; then
-    log_missing "Ollama >= $MIN_OLLAMA (versione attuale: ${OLLAMA_VER:-sconosciuta})"
+if want_runtime; then
+  if command -v brew &>/dev/null; then
+    log_ok "Homebrew ($(brew --version | head -1))"
   else
-    log_ok "Ollama v$OLLAMA_VER"
+    log_missing "Homebrew"
   fi
-  if ! curl -fsS "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
-    log_missing "Server Ollama su 127.0.0.1:11434 (verrà avviato dal launcher)"
-  elif ollama list 2>/dev/null | grep -F -c "$OLLAMA_MODEL" >/dev/null; then
-    log_ok "Modello Ollama $OLLAMA_MODEL"
+
+  if [ ! -d "$DIR/node_modules" ]; then
+    log_missing "Dipendenze npm (esegui: npm install)"
+  elif package_hash_ok; then
+    log_ok "Dipendenze npm allineate"
   else
-    log_missing "Modello Ollama $OLLAMA_MODEL (il launcher aprirà ollama signin se necessario)"
+    log_missing "Dipendenze npm obsolete (esegui: npm install o ./scripts/setup.sh)"
   fi
-else
-  log_missing "Ollama CLI"
+
+  if ! report_browser_status; then :; fi
+
+  if command -v osascript &>/dev/null; then
+    log_ok "osascript"
+  else
+    log_missing "osascript (richiesto su macOS)"
+  fi
 fi
 
-# 6. OpenCode CLI
-export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
-if command -v opencode &>/dev/null; then
-  OPENCODE_VER=$(opencode --version 2>/dev/null | extract_version)
-  if [ -n "$OPENCODE_VER" ] && version_ge "$OPENCODE_VER" "$MIN_OPENCODE"; then
-    log_ok "OpenCode v$OPENCODE_VER"
-  else
-    log_missing "OpenCode >= $MIN_OPENCODE (versione attuale: ${OPENCODE_VER:-sconosciuta})"
-  fi
-else
-  log_missing "OpenCode CLI"
-fi
+if want_ai; then
+  export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+  AI_OPEN_REQUESTS=$(node -e "try{const t=require('./src/lib/ai-todo').buildAiTodo(process.cwd());process.stdout.write(String(t.openQuizRequests||0))}catch(e){process.stdout.write('0')}" 2>/dev/null || echo 0)
+  if [ "$AI_OPEN_REQUESTS" -gt 0 ] 2>/dev/null; then
+    if command -v ollama &>/dev/null; then
+      OLLAMA_VER=$(ollama --version 2>/dev/null | extract_version)
+      if [ -n "$OLLAMA_VER" ] && version_ge "$OLLAMA_VER" "$MIN_OLLAMA"; then
+        log_ok "Ollama v$OLLAMA_VER (daemon e login avviati solo dal batch)"
+      else
+        log_missing "Ollama >= $MIN_OLLAMA (versione attuale: ${OLLAMA_VER:-sconosciuta})"
+      fi
+    else
+      log_missing "Ollama CLI"
+    fi
 
-# 7. osascript (macOS)
-if command -v osascript &>/dev/null; then
-  log_ok "osascript"
-else
-  log_missing "osascript (richiesto su macOS)"
+    if command -v claude &>/dev/null; then
+      CLAUDE_VER=$(claude --version 2>/dev/null | extract_version)
+      if [ -n "$CLAUDE_VER" ] && version_ge "$CLAUDE_VER" "$MIN_CLAUDE"; then
+        log_ok "Claude Code v$CLAUDE_VER"
+      else
+        log_missing "Claude Code >= $MIN_CLAUDE (versione attuale: ${CLAUDE_VER:-sconosciuta})"
+      fi
+    else
+      log_missing "Claude Code CLI"
+    fi
+  else
+    command -v ollama >/dev/null 2>&1 \
+      && log_ok "Ollama presente; versione non eseguita con inbox vuota" \
+      || log_ok "Ollama assente; installazione differita al primo quiz"
+    command -v claude >/dev/null 2>&1 \
+      && log_ok "Claude Code presente; versione non eseguita con inbox vuota" \
+      || log_ok "Claude Code assente; installazione differita al primo quiz"
+  fi
+
+  if node "$DIR/scripts/lib/ai-budget-cli.js" --json >/dev/null 2>&1; then
+    log_ok "Budget AI locale leggibile"
+  else
+    log_missing "Budget AI locale"
+  fi
 fi
 
 if [ "$missing" -eq 0 ]; then
   echo ""
-  echo "🟢 Tutti i requisiti sono soddisfatti."
+  case "$PROFILE" in
+    runtime) echo "🟢 Requisiti runtime autoplay soddisfatti." ;;
+    ai) echo "🟢 Requisiti Claude on-demand soddisfatti." ;;
+    *) echo "🟢 Tutti i requisiti sono soddisfatti." ;;
+  esac
   exit 0
-else
-  echo ""
-  echo "🔴 Requisiti mancanti. Esegui ./scripts/setup.sh per installarli."
-  exit 1
 fi
+
+echo ""
+echo "🔴 Requisiti mancanti. Esegui ./scripts/setup.sh per installarli."
+exit 1

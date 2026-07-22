@@ -117,7 +117,8 @@ function updateConfigForAccount(result) {
   if (!cfg.baseUrl) cfg.baseUrl = 'https://tecsial.gsdcampus.it/';
   if (!Array.isArray(cfg.courseUrls)) cfg.courseUrls = [];
   if (!cfg.ollamaModel) cfg.ollamaModel = 'gemma4:31b-cloud';
-  if (!cfg.aiSupervisorClient) cfg.aiSupervisorClient = 'opencode';
+  cfg.aiSupervisorClient = 'claude-on-demand';
+  cfg.useOllamaForQuiz = false;
   if (!cfg.ollamaLocalEndpoint) cfg.ollamaLocalEndpoint = 'http://127.0.0.1:11434';
   if (!cfg.aiCloudProxyPort) cfg.aiCloudProxyPort = 11435;
   if (!cfg.aiWeeklyRequestLimit) cfg.aiWeeklyRequestLimit = 400;
@@ -125,6 +126,10 @@ function updateConfigForAccount(result) {
   if (!cfg.aiPerMinuteRequestLimit) cfg.aiPerMinuteRequestLimit = 8;
   if (!cfg.aiMinRequestIntervalMs) cfg.aiMinRequestIntervalMs = 1500;
   if (!cfg.aiMaxConcurrentRequests) cfg.aiMaxConcurrentRequests = 1;
+  const configuredBatchLimit = Number(cfg.aiClaudeMaxRequestsPerBatch);
+  cfg.aiClaudeMaxRequestsPerBatch = Number.isFinite(configuredBatchLimit)
+    ? Math.max(1, Math.min(8, Math.floor(configuredBatchLimit))) : 8;
+  if (!cfg.aiClaudeTimeoutMs) cfg.aiClaudeTimeoutMs = 900000;
   return writeConfig(cfg);
 }
 

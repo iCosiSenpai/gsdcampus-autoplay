@@ -7,6 +7,13 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-21
 
+- Claude Code ora lavora **solo on-demand**: con inbox quiz vuota non partono neppure le CLI di verifica/installazione AI e non viene consumata nessuna richiesta.
+- Se Claude o la distribuzione delle risposte falliscono, il sistema conserva tutto e ritenta: 30 minuti per il batch, marker persistente per lo share ai colleghi.
+- Il launcher esegue sync/harvest/resolve/start in modo deterministico; Claude riceve solo domanda, opzioni e guess, restituisce JSON validato e termina insieme al proxy.
+- Lo scheduler richiama il batch su un nuovo fingerprint quando entra in `awaiting_ai`, senza tenere una TUI o riaprire il browser del corso in loop.
+- Il login resta quello semplice di Ollama nel browser (`ollama signin`) e compare soltanto quando serve realmente un quiz; OpenCode installato in precedenza viene lasciato intatto ma non usato.
+- Il proxy supporta le route Anthropic di Claude, conserva il budget rolling e limita ogni batch a 8 richieste generative.
+
 - Il supervisore OpenCode usa di nuovo il login browser gestito da Ollama: `ollama signin`, daemon locale e modello Cloud completo. Non richiede più di creare o incollare API key; il proxy locale continua ad applicare budget e limiti.
 - Il supervisore ripulisce i proxy Ollama rimasti bloccati, verifica il ponte locale prima di aprire OpenCode e conserva il token del proxy nella sessione per evitare falsi `Unauthorized`.
 - Il menu del curl è stato ridisegnato da zero: mascotte persistente, layout centrato, descrizioni separate e voce consigliata evidenziata. Il renderer viene aggiornato prima del primo menu, così il nuovo aspetto si vede già al primo rilancio.

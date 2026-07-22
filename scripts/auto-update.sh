@@ -120,7 +120,7 @@ if ! "$DIR/scripts/dev-check.sh" >> "$LOG" 2>&1; then
 fi
 
 # ── 8. Dipendenze: MAI sudo unattended — se servono, delega al collega ──────
-if [ -x "$DIR/scripts/check-requirements.sh" ] && ! "$DIR/scripts/check-requirements.sh" >> "$LOG" 2>&1; then
+if [ -x "$DIR/scripts/check-requirements.sh" ] && ! "$DIR/scripts/check-requirements.sh" --runtime >> "$LOG" 2>&1; then
   alog "Aggiornamento codice OK ma servono dipendenze nuove: serve il comando curl (interattivo)."
   notify_user "GSD Campus" "Aggiornamento quasi completo: apri il Terminale e rilancia il comando di installazione per finire." auto_update_deps || true
   # Non riavviare: senza dipendenze start.sh fallirebbe comunque.

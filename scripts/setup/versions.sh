@@ -3,10 +3,10 @@
 # Versioni minime consigliate delle dipendenze esterne. Se un collega ha già una
 # versione >= di questa, lo script NON reinstalla e NON si blocca: va avanti.
 # Se la versione è più vecchia, tenta un aggiornamento NON bloccante (se fallisce,
-# prosegue con la versione presente piuttosto che abortire). Così chi ha già
-# Ollama o OpenCode installati non viene fermato.
-MIN_OLLAMA="0.15.0"  # login Cloud e integrazioni moderne
-MIN_OPENCODE="1.17.0" # verificata con provider inline, --auto e --prompt
+# prosegue con la versione presente piuttosto che abortire). Cosi chi ha gia
+# Ollama o Claude Code installati non viene fermato.
+MIN_OLLAMA="0.15.0"   # login Cloud e integrazioni moderne
+MIN_CLAUDE="2.1.215" # verificata con --bare, --json-schema e --no-session-persistence
 
 # Confronto versione: restituisce 0 se $1 >= $2 (componenti numeriche separate da punto).
 version_ge() {

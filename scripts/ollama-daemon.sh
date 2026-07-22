@@ -99,10 +99,11 @@ start() {
   # Fallback: bind diretto non riuscito (quarantine SIGKILL, entitlements mancanti,
   # ...). open -a Ollama avvia l'app GUI che a sua volta fa partire il server su 11434.
   log "Bind diretto non riuscito entro 30s. Fallback: open -a Ollama (GUI)..."
+  local gui_pid=""
   open -a Ollama 2>/dev/null || true
   for i in $(seq 1 40); do            # 20s
+    [ -n "$gui_pid" ] || gui_pid="$(pgrep -x Ollama 2>/dev/null | head -1 || true)"
     if curl -s http://127.0.0.1:11434 >/dev/null 2>&1; then
-      local gui_pid=$(pgrep -x Ollama 2>/dev/null | head -1)
       [ -n "$gui_pid" ] && echo "$gui_pid" > "$PID_FILE"
       echo "Ollama pronto (via GUI)"
       return 0
@@ -110,7 +111,23 @@ start() {
     sleep 0.5
   done
 
-  log "Ollama non ha bindato 11434 entro ~50s."
+  # Nessun processo tentato da start deve sopravvivere a un ritorno non-zero:
+  # il chiamante non puo ancora impostare OLLAMA_STARTED e quindi non saprebbe
+  # ripulirlo. Termina soltanto i PID avviati in questa funzione.
+  local started_pid
+  for started_pid in "$pid" "$gui_pid"; do
+    [ -n "$started_pid" ] || continue
+    if pid_matches "$started_pid" "ollama|Ollama"; then
+      kill -TERM "$started_pid" 2>/dev/null || true
+      for _ in 1 2 3 4 5; do
+        pid_matches "$started_pid" "ollama|Ollama" || break
+        sleep 0.2
+      done
+      pid_matches "$started_pid" "ollama|Ollama" && kill -9 "$started_pid" 2>/dev/null || true
+    fi
+  done
+  rm -f "$PID_FILE"
+  log "Ollama non ha bindato 11434 entro ~50s; processi tentati rimossi."
   echo "Attenzione: Ollama non ha risposto su 11434." >&2
   return 1
 }

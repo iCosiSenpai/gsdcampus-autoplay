@@ -1,7 +1,7 @@
 {
   "$schema_note": "Contratto machine-readable per il supervisore AI. Path relativi alla root repo.",
   "project": "gsdcampus-autoplay",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "package_version": "1.1.0",
   "entrypoints": {
     "autoplay": "src/autoplay.js",
@@ -12,7 +12,8 @@
     "install": "install.sh",
     "ai_budget": "src/lib/ai-budget.js",
     "ai_proxy": "scripts/lib/ollama-cloud-proxy.js",
-    "opencode_config": "scripts/lib/opencode-config.js"
+    "claude_quiz_runner": "scripts/lib/claude-quiz-runner.js",
+    "claude_batch": "scripts/run-claude-quiz-batch.sh"
   },
   "paths": {
     "config": "config.json",
@@ -30,14 +31,18 @@
     "runbook_keys": "docs/RUNBOOK-KEYS.md"
   },
   "ai_supervisor": {
-    "client": "opencode",
-    "provider": "ollama-budget",
-    "endpoint": "OpenCode → proxy budget 127.0.0.1:11435 → daemon Ollama 127.0.0.1:11434 → Cloud",
-    "authentication": "ollama signin via browser; la CLI autentica automaticamente le richieste Cloud del daemon locale",
-    "local_proxy": "127.0.0.1:11435",
+    "client": "claude-on-demand",
+    "provider": "ollama-budget-anthropic",
+    "endpoint": "Claude Code one-shot → proxy budget 127.0.0.1:11435 → daemon Ollama 127.0.0.1:11434 → Cloud",
+    "authentication": "ollama signin via browser; token proxy casuale solo in variabili ambiente del batch",
+    "lifecycle": "nessun processo AI persistente; anche setup/doctor non eseguono CLI AI senza lavoro; daemon/proxy/Claude partono soltanto con openQuizRequests > 0 e vengono chiusi a fine batch",
+    "gate": "buildAiTodo unifica e deduplica ai_quiz_request + need_answer per tutti gli account; openQuizRequests > 0 e l'unico gate AI",
+    "payload": "solo id effimero, domanda, opzioni e guess; mai CF, URL, token, cookie o contesti account",
+    "output": "JSON schema; risposta accettata solo con confidence >= 0.7 e match esatto di un'opzione quando presente",
+    "local_proxy": "127.0.0.1:11435 (temporaneo)",
     "budget_file": "data/ai_usage.json (metadata only, gitignored)",
-    "limits": { "weekly": 400, "daily": 80, "perMinute": 8, "minIntervalMs": 1500, "maxConcurrent": 1 },
-    "quiz_default": "useOllamaForQuiz=false; AI is used only for supervisor handoff"
+    "limits": { "weekly": 400, "daily": 80, "perMinute": 8, "minIntervalMs": 1500, "maxConcurrent": 1, "maxPerBatch": 8 },
+    "quiz_default": "useOllamaForQuiz=false; AI is invoked only for a new supervisor handoff fingerprint"
   },
   "account_files": {
     "course_state": "data/accounts/<CF>/course_state.json",
@@ -54,7 +59,10 @@
     "runtime_lock": "directory atomica + PID + token command-line; rifiuta PID recycling",
     "course_state_backup": "snapshot SHA-256 per-account prima di reopen/reset; restore same-account only",
     "answer_bank_integrity": "normalizzazione Unicode, conflitti bloccanti, hash canonico locale/main",
-    "selector_preflight": "gate offline prima di ogni sessione browser"
+    "selector_preflight": "gate offline prima di ogni sessione browser",
+    "ai_fingerprint": "un solo batch per workFingerprint; solo un esito 'complete' e terminale, mentre error/partial/invalid ritentano dopo un backoff (retryAfter) senza toccare l'handoff",
+    "ai_routes": ["POST /v1/messages", "POST /v1/messages/count_tokens"],
+    "ai_tools": ["WebSearch", "WebFetch"]
   },
   "commands": {
     "status": "./status.sh",
@@ -80,6 +88,7 @@
     "answers_audit": "node scripts/lib/answers-cli.js audit [--fix]",
     "answers_verify": "node scripts/lib/answers-cli.js verify [--remote]",
     "ai_budget": "node scripts/lib/ai-budget-cli.js [--json]",
+    "ai_batch": "./scripts/run-claude-quiz-batch.sh [--force]",
     "course_state_backup_list": "node scripts/lib/course-state-backup-cli.js list",
     "course_state_backup_restore": "node scripts/lib/course-state-backup-cli.js restore <name> --yes",
     "members_queue_list": "node scripts/lib/members-cli.js queue list",
@@ -97,12 +106,22 @@
     "3": "autologin_invalid",
     "4": "session_unstable o post_login_blocked (cooldown, non crash)"
   },
+  "ai_batch_exit_codes": {
+    "0": "risposte valide applicate e share fleet completato/noop",
+    "20": "nessun lavoro AI",
+    "21": "fingerprint gia elaborato",
+    "22": "output strutturato non valido; retryAfter 30 minuti",
+    "23": "errore Claude; retryAfter 30 minuti",
+    "24": "componenti o login AI non pronti",
+    "25": "risposte locali salve ma share fleet pending",
+    "26": "un altro batch AI e in esecuzione (contesa lock); retry breve ~1 min"
+  },
   "config_keys": {
     "autologinUrl": "required",
     "codice_fiscale": "preferred",
     "workSchedule": "days + shifts",
     "ollamaModel": "string",
-    "aiSupervisorClient": "opencode",
+    "aiSupervisorClient": "claude-on-demand",
     "ollamaLocalEndpoint": "http://127.0.0.1:11434",
     "aiCloudProxyPort": "number 1024-65535",
     "aiWeeklyRequestLimit": "number capped at 500",
@@ -110,6 +129,9 @@
     "aiPerMinuteRequestLimit": "number capped at 10",
     "aiMinRequestIntervalMs": "number milliseconds",
     "aiMaxConcurrentRequests": "1",
+    "aiClaudeMaxRequestsPerBatch": "number default 8 hard-capped at 8; config may only lower it",
+    "aiClaudeTimeoutMs": "number default 900000 capped at 1800000",
+    "useOllamaForQuiz": "false; autoplay never invokes Ollama directly",
     "memberQueue": "string[] CF optional",
     "memberQueueIndex": "number optional",
     "shareMetrics": "boolean opt-in",

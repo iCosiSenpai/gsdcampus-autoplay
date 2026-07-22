@@ -2,11 +2,14 @@
 
 ## Unreleased (2026-07-21)
 
-- Supervisore migrato da Claude Code a OpenCode mantenendo il login browser Ollama: `ollama signin`, daemon locale e modelli Cloud.
-- Proxy loopback autenticato e con allowlist: applica il budget, inoltra al daemon Ollama locale e non salva contenuti nei log/contatori. Nessuna API key manuale richiesta.
-- Budget conservativo: 400 richieste rolling/7 giorni, 80/24 ore, 8/minuto, una richiesta alla volta e cache RAM per retry identici.
-- Il curl propone una sola volta per Mac se conservare Claude (pulendo solo override GSD/Ollama) o disinstallare il client lasciando i dati personali.
-- `useOllamaForQuiz:false` resta il default: nessun consumo AI domanda-per-domanda durante l'autoplay.
+- Supervisore distribuito migrato a Claude Code **on-demand**: `openQuizRequests > 0` è l'unico gate; senza quiz non partono Claude, Ollama o proxy.
+- Runner one-shot `-p --bare --safe-mode --no-session-persistence`, soli tool WebSearch/WebFetch, payload senza CF/URL/token e output JSON Schema validato.
+- Proxy Anthropic-compatible (`/v1/messages`, `/v1/messages/count_tokens`) con token locale, budget rolling, serializzazione e massimo 8 generazioni per batch.
+- Scheduler `awaiting_ai` guidato da `workFingerprint`: niente TUI persistente e niente Chromium finché l'handoff non è risolto.
+- Sync banca locale-first: `known_answers_public.json` viene mergiato anche se il fetch remoto fallisce; risposte già note non aprono Claude.
+- Setup e diagnostica non eseguono le CLI AI con inbox vuota; installazione/verifica di Claude Code e Ollama, daemon/pull/login sono differiti al primo batch necessario.
+- Retry errori Claude al `retryAfter` di 30 minuti e share fleet durevole con marker locale/exit dedicato.
+- Le installazioni OpenCode preesistenti non vengono rimosse automaticamente.
 
 ## v1.1.0 (2026-07-20)
 

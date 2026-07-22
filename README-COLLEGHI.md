@@ -4,13 +4,11 @@
 
 Questo script completa in automatico le video-lezioni e i quiz del corso GSD Campus.
 
-**Per te servono solo due cose:**
-1. **Un comando solo** per installare, aggiornare e avviare (capitolo 1).
-2. **Parlarci dall'AI** per avviarlo e controllarlo (capitolo 2).
+**Per te serve una cosa sola:** il comando `curl` del capitolo 1 per installare, aggiornare e avviare. Lo scheduler prosegue da solo negli orari configurati; Claude viene chiamato solo quando incontra un quiz nuovo.
 
-Tutto il resto (requisiti, orari, manutenzione) è più in basso e di solito non ti serve.
+Tutto il resto (stato, requisiti e diagnostica) è più in basso e di solito non ti serve.
 
-> 🟡 **Regola d'oro.** L'unico comando manuale ammesso è il `curl` del capitolo 1 (e `./launch-ai-supervisor.sh` per riaprire l'AI). **Per tutto il resto — avviare, fermare, controllare lo stato, cambiare utente, cambiare orari, risolvere problemi — chiedi all'AI in chat.** Non lanciare a mano `start.sh`, `stop.sh`, `status.sh`, `setup.sh`, `members-cli` e simili: sono strumenti **interni** che usa l'AI, non comandi per te. Se ti viene in mente di lanciarne uno, fermati e scrivilo all'AI invece.
+> 🟡 **Regola d'oro.** Rilancia il `curl` per aggiornare o avviare. Non serve mantenere una finestra AI aperta: se l'inbox quiz è vuota, Claude, Ollama e proxy restano spenti.
 
 ---
 
@@ -19,11 +17,11 @@ Tutto il resto (requisiti, orari, manutenzione) è più in basso e di solito non
 
 | Scenario | Cosa fare |
 |----------|-----------|
-| **Un collega su questo Mac** | Install → “Chi sei?” → orari → l’AI avvia i corsi. |
-| **Più colleghi sullo stesso Mac** | Dopo il primo account: chiedi all’AI *“metti in coda anche MARIO e LUCA”* (o `members-cli queue set CF1 CF2`). A fine corsi passa da solo al prossimo. |
-| **Aggiornare risposte quiz da altri store** | “Aggiorna e avvia” (curl) **oppure** lascia che `./start.sh` / auto-update notturno mergino la banca pubblica. Non serve git. |
-| **Quiz bloccato** | L’AI risolve e condivide in automatico (`resolve` → Worker). Gli altri Mac le ricevono al prossimo update. |
-| **“Link scaduto”** | Spesso è solo `session_unstable` (rate-limit). L’AI deve verificare con la sonda live prima di chiedere un link nuovo. Vedi `docs/RUNBOOK-SESSION.md`. |
+| **Un collega su questo Mac** | Install → “Chi sei?” → orari → lo scheduler avvia i corsi. |
+| **Più colleghi sullo stesso Mac** | Il maintainer configura `memberQueue`; a fine corsi passa da solo al prossimo. |
+| **Aggiornare risposte quiz da altri store** | “Aggiorna e avvia” (curl) oppure auto-update notturno. Non serve git. |
+| **Quiz bloccato** | Il batch Claude on-demand risolve e condivide (`resolve` → Worker); gli altri Mac ricevono al prossimo update. |
+| **“Link scaduto”** | Verifica con `./status.sh --check`: `session_unstable` non significa token morto. |
 
 **Accesso al corso (come funziona per tutti):**
 
@@ -33,7 +31,7 @@ Tutto il resto (requisiti, orari, manutenzione) è più in basso e di solito non
 
 | Chi | Cosa fa |
 |-----|---------|
-| **Collega** | curl → Chi sei? (cerca il tuo nome) → orari → AI. Zero link da incollare, zero CSV. |
+| **Collega** | curl → Chi sei? → orari → scheduler. Zero link da incollare, zero CSV. |
 | **Coda multi-persona sul Mac** | Stesso DB: `queue set` con i CF già presenti in `members.db`. |
 | **Emergenza** | Solo se non sei in elenco o il token è morto: fallback “incolla link” o CSV aggiornato dal referente. |
 
@@ -52,18 +50,16 @@ curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main
 
 > Se dopo l'incolla non succede nulla, premi `Invio`: alcuni copia-incolla non includono l'"a capo" finale che avvia il comando.
 
-È l'unico comando che ti serve e vale per **tutte** le occasioni: prima installazione,
-aggiornamenti successivi e avvio quotidiano dell'AI. La prima volta scarica il progetto in
-`~/gsdcampus-autoplay`, installa tutto da solo e apre l'AI.
+È l'unico comando che ti serve per prima installazione, aggiornamenti e avvio quotidiano. La prima volta scarica il progetto in `~/gsdcampus-autoplay`, installa il runtime del corso e avvia lo scheduler; Ollama/Claude vengono preparati solo quando compare un quiz aperto.
 
-**Se lanci di nuovo lo stesso comando** quando il progetto è già installato, ti compare un menu
-che chiede cosa vuoi fare:
-1. **Aggiorna e avvia** — scarica fix e risposte quiz aggiornate, poi apre l'AI (consigliato).
-2. **Cambia link autologin/orari** — reinserisci accesso e orari, poi avvia.
-3. **Reinstallazione pulita** — riallinea il codice e reinstalla tutte le dipendenze.
-4. **Solo avvia** — apre l'AI senza modificare nulla.
-5. **Disinstalla** — rimuove tutto (con conferma).
-6. **Annulla**.
+Se lo rilanci su un'installazione esistente compare un menu:
+1. **Aggiorna e avvia** — scarica fix/risposte e avvia (consigliato).
+2. **Cambia collega o orari** — seleziona account e turni.
+3. **Ripara l'installazione** — riallinea codice e dipendenze.
+4. **Solo avvia** — non aggiorna codice, account o orari; riconcilia lo stato runtime e avvia.
+5. **Diagnostica on-demand** — controlla i componenti senza avviare processi AI.
+6. **Disinstalla** — rimuove i componenti scelti con conferma.
+7. **Esci**.
 
 In tutti i casi (tranne la disinstallazione) il tuo `config.json` con link e orari resta al suo posto.
 
@@ -73,7 +69,7 @@ Durante la prima installazione il Terminale ti chiederà alcune cose: rispondi c
 
 - La **password del Mac (sudo)**: una sola volta, all'inizio.
 - Eventuali conferme di **installazione/aggiornamento** (anche `y/n`) → rispondi **sempre sì**.
-- Il **login Ollama** (solo se necessario) → si apre il browser: accedi al tuo account e torna al Terminale. Non devi creare o incollare API key.
+- Il **login Ollama** compare solo quando esiste davvero un quiz aperto: si apre il browser, accedi e torna al Terminale. Non devi creare o incollare API key.
 - **Chi sei?** — cerchi il tuo **nome** (o cognome/CF) nell’elenco già presente sul Mac (`members.db` arriva con l’install) e premi Invio. **Non incolli link e non serve un CSV.** L’autologin è già associato al tuo nome.
 - I **giorni lavorativi** dello store (es. lun–ven).
 - La **modalità oraria**:
@@ -89,92 +85,43 @@ Non avere paura di confermare: serve tutto per far funzionare l'automazione.
 
 ---
 
-## ⭐ 2. Usare l'automazione con l'AI
+## ⭐ 2. Usare l'automazione
 
-**Cosa succede appena finita l'installazione:** parte da sola una sessione dell'**AI** — è
-**OpenCode collegato a Ollama** con il modello Cloud configurato nel progetto. Se l'account non è già autenticato, Ollama apre il browser una volta e poi prosegue da solo. Non devi
-lanciare nessun altro comando: la finestra dell'AI si apre da sé, con le istruzioni già caricate.
+**Dopo l'installazione il sistema parte da solo.** Il launcher aggiorna la banca risposte e l'inbox, avvia lo scheduler negli orari configurati e poi termina. Non resta aperta una chat AI.
 
-Da lì in poi **non devi ricordare comandi tecnici: parli con l'AI in italiano.** È l'AI che avvia,
-ferma e controlla lo script al posto tuo.
+Claude Code viene usato **solo on-demand**: se compare una domanda quiz nuova, parte un singolo batch protetto dal budget; se non ci sono quiz aperti, le chiamate AI sono zero e Ollama/proxy restano spenti. Se serve autenticazione, `ollama signin` apre il browser: accedi e torna al Terminale, senza creare API key.
 
-> Se hai chiuso la finestra dell'AI, riaprila con: `cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh`
+### Avviare o aggiornare nei giorni successivi
 
-Scrivi semplicemente, per esempio:
-
-```
-avvia il corso
-```
-oppure
-```
-controlla il corso
-```
-
-L'AI capisce, avvia/ferma/riavvia lo script al posto tuo e ti dice come sta andando.
-
-### Frasi che puoi usare
-
-- `avvia il corso`
-- `controlla il corso`
-- `come sta andando?`
-- `ferma tutto`
-- `status`
-- `riavvia`
-
-### Riaprire l'AI nei giorni successivi
-
-Se hai chiuso la finestra, riapri l'AI così (una sola riga):
-
-```bash
-cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
-```
-
-La seconda volta è molto più veloce: salta l'installazione e apre subito l'AI.
+Rilancia sempre il comando `curl` del capitolo 1 e scegli **Aggiorna e avvia**. È sufficiente farlo una volta: lo scheduler rispetta i turni, si ferma a fine turno e riparte automaticamente.
 
 ---
 
 ## 3. Vedere cosa sta facendo
 
-**Prima di tutto chiedi all'AI**: scrivi `come sta andando?` o `controlla il corso` e l'AI ti
-risponde con stato, corso/lezione, progresso ed eventuali errori. Quasi sempre non ti serve altro.
-
-Se vuoi davvero un'occhiata diretta (opzionale, non necessaria), puoi aprire un altro Terminale:
+Per un controllo rapido, apri un altro Terminale:
 
 ```bash
 cd ~/gsdcampus-autoplay && ./status.sh
 ```
 
-Vedrai: se è attivo e da quanto, se è orario lavorativo e quando parte il prossimo turno,
-quale corso/lezione sta facendo, il progresso del video, l'esito dell'ultimo quiz e gli errori.
-
-Per i log in tempo reale: `tail -f logs/autoplay.log`.
+Vedrai se lo scheduler è attivo, il prossimo turno, corso/lezione corrente, progresso video, ultimo quiz ed eventuali errori. Per i log live: `tail -f logs/autoplay.log`.
 
 ---
 
 ## 4. Se qualcosa non va
 
-1. Nella finestra dell'AI premi `Ctrl+C` per chiudere.
-2. Riapri il supervisore:
-   ```bash
-   cd ~/gsdcampus-autoplay && ./launch-ai-supervisor.sh
-   ```
-3. Scrivi: `controlla il corso`.
+Rilancia il comando `curl` del capitolo 1 e scegli **Aggiorna e avvia**: aggiorna il codice, riconcilia la banca e riavvia senza perdere progressi. Se viene richiesto il login Ollama, completa l'accesso nel browser.
 
-Se l'AI ti dice **"Autologin non valido/scaduto"**, il tuo link di accesso non funziona
-più: procurati un link aggiornato e chiedi all'AI di sostituirlo (lo fa lei in `config.json`).
+Se `./status.sh --check` conferma che l'autologin non è valido, scegli **Cambia collega o orari** dal menu `curl` per riselezionare l'account dal database.
 
-### Comandi di emergenza (di rado necessari)
-
-> 🟡 **Prima di qualsiasi comando qui sotto**, scrivi all'AI `controlla il corso` o `riavvia`:
-> quasi sempre risolve lei. Questi comandi servono **solo se l'AI non parte proprio**.
+### Comando di emergenza per manutentori
 
 ```bash
-# Reinstalla/aggiorna tutto e riapre l'AI
 cd ~/gsdcampus-autoplay && ./scripts/setup.sh --yes --force-update && ./launch-ai-supervisor.sh
 ```
 
-Per ricominciare da zero (reinserire link autologin e orari) **non cancellare `config.json` a mano**:
-chiedi all'AI "ricomincia da zero" e lei rifà la configurazione guidata per te.
+Per reinserire account e orari usa il menu del `curl`; non modificare `config.json` a mano.
 
 ---
 
@@ -191,15 +138,8 @@ chiedi all'AI "ricomincia da zero" e lei rifà la configurazione guidata per te.
 - **Corsi**: non devi inserire URL. Dopo il login, lo script scopre da solo i corsi assegnati al
   tuo account e li completa uno alla volta. Se un corso dà `MISSING_PERMISSION`, il link non è
   corretto o quel corso non è assegnato a te.
-- **Quiz**: usa una **banca risposte condivisa** (uguale per tutti i colleghi). Se la domanda è
-  nota risponde da sola; se è nuova chiede al modello AI. **Solo se il quiz viene superato**, le
-  risposte nuove entrano nella banca condivisa, che così cresce solo con risposte verificate.
-  L'esito (superato/non superato + punteggio) compare in `./status.sh`.
-- **Stato personale**: ogni Mac tiene i propri progressi in `data/accounts/<tuo codice fiscale>/`
-  (corsi, cookie di sessione, risposte quiz in attesa). La banca risposte `data/known_answers.json`
-  è condivisa. Per cambiare utente **basta chiedere all'AI** "cambia utente in Mario Rossi" (o
-  scrivi il nome/codice fiscale): l'AI seleziona il membro e riavvia. Lo stato del membro
-  precedente resta salvato.
+- **Quiz**: usa una banca risposte condivisa. Se una domanda è nuova, il quiz viene sospeso prima della conferma (nessun tentativo consumato) e il batch Claude on-demand prepara una risposta verificata. Solo risposte validate entrano nella banca condivisa.
+- **Stato personale**: ogni Mac tiene i progressi in `data/accounts/<codice fiscale>/`. Per cambiare utente rilancia il `curl` e scegli **Cambia collega o orari**; lo stato precedente resta salvato.
 
 ---
 
@@ -209,8 +149,8 @@ L'automazione segue i turni configurati in fase di installazione:
 
 - Default: lunedì–venerdì, 09:30–13:00 e 16:30–20:00 (puoi cambiarli).
 - A fine turno si ferma da sola e riprende al turno successivo.
-- Se chiedi all'AI `avvia il corso` fuori orario, aspetta automaticamente l'inizio del turno.
-- Per forzare l'avvio subito (anche di notte/weekend) chiedi all'AI: "avvia ignorando gli orari".
+- Fuori orario lo scheduler aspetta automaticamente il prossimo turno.
+- `--ignore-hours` è una modalità tecnica riservata al maintainer.
 
 ---
 
@@ -228,8 +168,7 @@ Il pacchetto è già ripulito dai dati personali (niente `config.json`, sessioni
 
 ## 9. Disinstallazione
 
-Il modo più semplice è **rilanciare il comando `curl` del capitolo 1** e scegliere la voce
-**5. Disinstalla** dal menu. In alternativa puoi chiedere all'AI "disinstalla tutto" e lei ti guida.
+Il modo più semplice è rilanciare il comando `curl` del capitolo 1 e scegliere **6. Disinstalla**.
 
 Se preferisci un comando diretto (manutentore):
 
@@ -237,7 +176,7 @@ Se preferisci un comando diretto (manutentore):
 cd ~/gsdcampus-autoplay && ./scripts/setup.sh --uninstall
 ```
 
-Rimuove dipendenze, Ollama, OpenCode, log e (se vuoi) la cartella del progetto. Ogni componente viene confermato separatamente, così puoi conservare ciò che usi anche per altro.
+Rimuove dipendenze, Ollama, Claude Code, log e (se vuoi) la cartella del progetto. Ogni componente viene confermato separatamente; configurazioni e conversazioni personali di Claude non vengono cancellate.
 Homebrew e Node.js restano, per non compromettere altri software.
 
 ---

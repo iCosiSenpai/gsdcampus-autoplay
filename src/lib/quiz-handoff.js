@@ -71,10 +71,10 @@ function saveNeedAnswer(root, questions, reason, ctx = null) {
   } catch (e) { /* ignora */ }
 }
 
-// Handoff arricchito per l'AI supervisore: per ogni domanda sconosciuta o a
-// bassa confidenza salva domanda + opzioni + guess Ollama + confidenza, così
-// l'AI può risolvere con WebSearch + ragionamento e scrivere la risposta
-// verificata nella banca TRUSTED (answers-cli set). Merge non overwrite.
+// Handoff arricchito per l'AI supervisore: per ogni domanda sconosciuta salva
+// domanda + opzioni + eventuale guess legacy, così il batch può risolverla con
+// WebSearch/ragionamento e scrivere la risposta verificata nella banca TRUSTED
+// (answers-cli resolve). Merge non overwrite.
 // Artefatto per-account: data/accounts/<CF>/ai_quiz_request.json.
 function saveAiQuizRequest(root, items, reason, ctx) {
   if (!items || items.length === 0) return 0;
@@ -102,52 +102,87 @@ function saveAiQuizRequest(root, items, reason, ctx) {
 // svuota da solo: niente dati stale, niente "reset dimenticato" (l'AI non
 // ri-lavora domande già fatte). Matching robusto via normKey (ignora numero
 // randomizzato/formattazione). Ritorna quante voci ha rimosso.
-function clearResolvedFromHandoff(root, resolvedQuestions) {
+function targetAccountIds(root, options = {}) {
+  if (options.cf) return [String(options.cf).toUpperCase()];
+  if (!options.allAccounts) return [account.stateFilePaths(root).codiceFiscale || null];
+  let ids = [];
+  try {
+    ids = fs.readdirSync(account.accountsDir(root))
+      .filter((name) => /^[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]$/.test(name));
+  } catch (_) {}
+  const active = account.stateFilePaths(root).codiceFiscale;
+  if (active && !ids.includes(active)) ids.push(active);
+  return ids.length > 0 ? ids : [null];
+}
+
+function clearResolvedFromHandoff(root, resolvedQuestions, options = {}) {
   if (!resolvedQuestions || resolvedQuestions.length === 0) return 0;
   const resolvedKeys = new Set(resolvedQuestions.map(q => normKey(q)));
-  const paths = account.stateFilePaths(root);
-  const files = [path.join(paths.accountDir, 'ai_quiz_request.json'), paths.needAnswer];
   let removed = 0;
-  for (const f of files) {
+  for (const cf of targetAccountIds(root, options)) {
+    const paths = account.stateFilePaths(root, cf);
+    const files = [path.join(paths.accountDir, 'ai_quiz_request.json'), paths.needAnswer];
+    const affectedCourseIds = new Set();
+    for (const f of files) {
+      try {
+        if (!fs.existsSync(f)) continue;
+        const data = readJsonSafe(f, null);
+        if (!data || !Array.isArray(data.questions)) continue;
+        const removedItems = data.questions.filter(q => resolvedKeys.has(normKey(q.question || '')));
+        const kept = data.questions.filter(q => !resolvedKeys.has(normKey(q.question || '')));
+        if (removedItems.length > 0) {
+          removed += removedItems.length;
+          for (const item of removedItems) {
+            const contexts = Array.isArray(item.contexts) ? item.contexts : [];
+            for (const ctx of contexts) {
+              if (ctx && ctx.courseId != null) affectedCourseIds.add(String(ctx.courseId));
+            }
+            // Handoff legacy: usa il corso top-level soltanto quando la domanda
+            // non aveva gia contesti propri, evitando associazioni spurie.
+            if (contexts.length === 0) {
+              const topLevelId = data.courseId
+                || String(data.courseUrl || '').match(/\/corso\/show\/(\d+)/)?.[1];
+              if (topLevelId != null) affectedCourseIds.add(String(topLevelId));
+            }
+          }
+          writeJsonAtomic(f, { ...data, questions: kept, savedAt: new Date().toISOString() });
+        }
+      } catch (e) { /* ignora */ }
+    }
+    // Riapre soltanto i corsi toccati dalle domande appena risolte e privi di
+    // altre domande aperte. Per handoff legacy senza corso, attende inbox vuota.
     try {
-      if (!fs.existsSync(f)) continue;
-      const data = readJsonSafe(f, null);
-      if (!data || !Array.isArray(data.questions)) continue;
-      const before = data.questions.length;
-      const kept = data.questions.filter(q => !resolvedKeys.has(normKey(q.question || '')));
-      if (kept.length !== before) {
-        removed += before - kept.length;
-        writeJsonAtomic(f, { ...data, questions: kept, savedAt: new Date().toISOString() });
-      }
-    } catch (e) { /* ignora */ }
+      unblockResolvedQuizCourses(root, { cf, affectedCourseIds: [...affectedCourseIds] });
+    } catch (_) { /* best-effort */ }
   }
-  // Se l'ultima domanda dell'inbox e stata risolta, riapri solo i corsi che
-  // erano bloccati dal gate quiz. I blocchi di sessione/parsing/lezioni restano
-  // intatti e richiedono una diagnosi diversa.
-  try { unblockResolvedQuizCourses(root); } catch (_) { /* best-effort */ }
   return removed;
 }
 
-function unblockResolvedQuizCourses(root) {
-  const paths = account.stateFilePaths(root);
+function unblockResolvedQuizCourses(root, options = {}) {
+  const cf = options.cf || null;
+  const affectedCourseIds = new Set((options.affectedCourseIds || []).map(String));
+  const paths = account.stateFilePaths(root, cf);
   const files = [path.join(paths.accountDir, 'ai_quiz_request.json'), paths.needAnswer];
-  const openQuestions = [];
+  let openQuestions = [];
   for (const f of files) {
     const data = readJsonSafe(f, null);
-    if (data && Array.isArray(data.questions)) openQuestions.push(...data.questions);
+    if (data && Array.isArray(data.questions)) {
+      openQuestions = mergeQuestionList(openQuestions, data.questions);
+    }
   }
-  const state = courseState.readState(root);
+  const state = courseState.readState(root, cf);
   const reopened = [];
   for (const [id, item] of Object.entries(state || {})) {
     if (!item || item.status !== 'need_help') continue;
     const quizBlocked = item.needHelpCode === 'quiz_answers_pending'
       || /domande non note|tentativo protetto|risposta.*serve/i.test(String(item.needHelpReason || ''));
     if (!quizBlocked) continue;
-    const hasContext = openQuestions.some(q => (q.contexts || []).some(ctx => String(ctx.courseId || '') === String(id)));
-    // Legacy handoff senza contesti: e sicuro riaprire solo quando l'inbox e
-    // completamente vuoto, cosi non si crea un retry prematuro.
-    if (openQuestions.length === 0 || !hasContext && openQuestions.every(q => !(q.contexts || []).length)) {
-      courseState.reopenCourse(root, state, `/corso/show/${id}`);
+    const hasOpenQuestionForCourse = openQuestions.some(q => (q.contexts || [])
+      .some(ctx => String(ctx.courseId || '') === String(id)));
+    const inboxEmpty = openQuestions.length === 0;
+    const resolvedForCourse = affectedCourseIds.has(String(id)) && !hasOpenQuestionForCourse;
+    if (inboxEmpty || resolvedForCourse) {
+      courseState.reopenCourse(root, state, `/corso/show/${id}`, cf);
       reopened.push(id);
     }
   }

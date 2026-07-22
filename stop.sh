@@ -101,6 +101,21 @@ if [ -n "$SCH_ORPHANS" ]; then
   ok "Orfani scheduler rimossi."
 fi
 
+# 3d. Componenti Claude on-demand registrati dal progetto. I PID file evitano
+# di toccare Claude/Ollama usati dall'utente per altri progetti. L'ordine e
+# intenzionale: runner e batch devono uscire prima dei servizi da cui dipendono.
+stop_tracked_component() {
+  local file="$1" pattern="$2" label="$3"
+  if stop_tracked_pid_file "$file" "$pattern"; then
+    ok "$label arrestato."
+  fi
+}
+stop_tracked_component "$DIR/.claude_runner_pid" "claude-quiz-runner\\.js" "Runner Claude"
+stop_tracked_component "$DIR/.claude_batch_pid" "run-claude-quiz-batch\\.sh" "Batch Claude"
+stop_tracked_component "$DIR/.ai_proxy_pid" "ollama-cloud-proxy\\.js" "Proxy budget"
+stop_tracked_component "$DIR/.ollama_pid" "ollama|Ollama" "Daemon Ollama del progetto"
+rm -rf "$DIR/logs/.claude-quiz-batch.lock" 2>/dev/null || true
+
 # Rimuovi il segnale di stop se ancora presente
 rm -f "$DIR/$STOP_FILE"
 autoplay_clean_stale_lock "$DIR" >/dev/null 2>&1 || true

@@ -2,9 +2,10 @@
 
 /**
  * Proxy loopback con budget per Ollama locale/Cloud.
- * - OpenCode usa un token casuale valido solo per questa sessione;
+ * - Claude Code usa un token casuale valido solo per questa sessione;
  * - il daemon Ollama locale gestisce il login Cloud effettuato con `ollama signin`;
- * - limite rolling 7 giorni/24 ore/minuto e una richiesta alla volta;
+ * - limite rolling 7 giorni/24 ore/minuto e una richiesta generativa alla volta;
+ * - `/v1/messages/count_tokens` non consuma budget;
  * - cache RAM breve per retry byte-identici, mai persistita;
  * - nessun log di prompt, risposta o credenziale.
  */
@@ -24,6 +25,8 @@ const ALLOWED = new Map([
   ['GET /v1/models', false],
   ['POST /v1/chat/completions', true],
   ['POST /v1/responses', true],
+  ['POST /v1/messages', true],
+  ['POST /v1/messages/count_tokens', false],
 ]);
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 const CACHE_MAX_BYTES = 2 * 1024 * 1024;
@@ -262,11 +265,16 @@ function pruneCache(cache, now = Date.now()) {
   while (cache.size > CACHE_MAX_ITEMS) cache.delete(cache.keys().next().value);
 }
 
-function authorized(req, expected) {
-  const actual = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  const left = Buffer.from(actual);
-  const right = Buffer.from(expected);
+function tokenMatches(actual, expected) {
+  const left = Buffer.from(String(actual || ''));
+  const right = Buffer.from(String(expected || ''));
   return left.length === right.length && left.length > 0 && crypto.timingSafeEqual(left, right);
+}
+
+function authorized(req, expected) {
+  const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const apiKey = String(req.headers['x-api-key'] || '');
+  return tokenMatches(bearer, expected) || tokenMatches(apiKey, expected);
 }
 
 async function main() {
@@ -280,10 +288,9 @@ async function main() {
   const limits = readLimits(args.root);
   const cache = new Map();
 
-  // OpenCode può avviare in parallelo il turno principale e attività ausiliarie
-  // (per esempio il titolo sessione). Il budget consente una sola generazione:
-  // accodiamo le richieste transitorie invece di mostrare un 429 che OpenCode
-  // ritenterebbe immediatamente.
+  // Claude Code puo eseguire piu turni nella stessa sessione one-shot quando
+  // usa WebSearch/WebFetch. Il budget consente una sola generazione per volta:
+  // le richieste vengono accodate invece di produrre retry/429 ravvicinati.
   const acquireGenerationTurn = createGenerationQueue(limits.minIntervalMs);
 
   const server = http.createServer(async (req, res) => {
@@ -332,6 +339,19 @@ async function main() {
     let releaseGeneration = null;
     if (generation) {
       releaseGeneration = await acquireGenerationTurn();
+      // Limite hard di sicurezza: la configurazione puo soltanto abbassare il
+      // tetto documentato di 8 generazioni per batch, mai aumentarlo.
+      const batchLimit = Math.max(1, Math.min(8, Number(cfg.aiClaudeMaxRequestsPerBatch) || 8));
+      const batchUsed = Number(server.generationRequests || 0);
+      if (batchUsed >= batchLimit) {
+        releaseGeneration();
+        releaseGeneration = null;
+        return json(res, 429, {
+          error: 'ai_batch_request_limit',
+          limit: batchLimit,
+          retryAfterSeconds: 1800,
+        }, { 'retry-after': '1800' });
+      }
       reservation = reserveRequest(args.root, { path: requestUrl.pathname, model });
       if (!reservation.ok) {
         releaseGeneration();
@@ -344,6 +364,7 @@ async function main() {
           usage: reservation.summary,
         }, { 'retry-after': String(seconds) });
       }
+      server.generationRequests = batchUsed + 1;
     }
 
     const abort = new AbortController();
@@ -359,6 +380,8 @@ async function main() {
           accept: req.headers.accept || 'application/json',
           'content-type': req.headers['content-type'] || 'application/json',
           'user-agent': 'gsdcampus-autoplay-budget-proxy/1',
+          ...(req.headers['anthropic-version'] ? { 'anthropic-version': req.headers['anthropic-version'] } : {}),
+          ...(req.headers['anthropic-beta'] ? { 'anthropic-beta': req.headers['anthropic-beta'] } : {}),
         },
         body: req.method === 'POST' ? bodyForUpstream : undefined,
         signal: abort.signal,

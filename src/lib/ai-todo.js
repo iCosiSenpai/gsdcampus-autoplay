@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const { readJsonSafe, writeJsonAtomic } = require('./io');
 const account = require('./account');
 const { bankLag } = require('./bank-sync');
+const { mergeQuestionList } = require('./quiz-handoff');
 const { getQueue, currentIndex, peekNextCf } = require('./member-queue');
 
 // Costruisce l'oggetto todo dallo stato su disco. Non lancia mai.
@@ -38,6 +39,7 @@ function buildAiTodo(root) {
   // Inbox fleet: non limitarsi all'account attivo. I file restano isolati per
   // account; qui aggreghiamo solo conteggi e contesti necessari al supervisore.
   const accounts = [];
+  const fingerprintQuestions = new Map();
   const validCf = /^[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]$/;
   try {
     const dir = account.accountsDir(root);
@@ -46,8 +48,13 @@ function buildAiTodo(root) {
       const aiReq = readJsonSafe(path.join(base, 'ai_quiz_request.json'), null);
       const need = readJsonSafe(path.join(base, 'need_answer.json'), null);
       const state = readJsonSafe(path.join(base, 'course_state.json'), {});
-      const questions = aiReq && Array.isArray(aiReq.questions) ? aiReq.questions : [];
+      const aiQuestions = aiReq && Array.isArray(aiReq.questions) ? aiReq.questions : [];
       const needQuestions = need && Array.isArray(need.questions) ? need.questions : [];
+      // need_answer e il fallback diagnostico storico: deve aprire lo stesso gate
+      // dell'handoff arricchito. Deduplica le due fonti per non contare due volte
+      // la stessa domanda, preservando opzioni/guess/contesti disponibili.
+      const questions = mergeQuestionList(aiQuestions, needQuestions);
+      fingerprintQuestions.set(cf, questions);
       const blockedCourses = Object.entries(state || {})
         .filter(([, c]) => c && c.status === 'need_help')
         .map(([id, c]) => ({ id, code: c.needHelpCode || null, reason: c.needHelpReason || null }));
@@ -117,7 +124,7 @@ function buildAiTodo(root) {
   const fingerprintPayload = accounts.map(a => ({
     cf: a.cf,
     requests: a.openQuizRequests,
-    questions: (readJsonSafe(path.join(account.accountsDir(root), a.cf, 'ai_quiz_request.json'), null)?.questions || [])
+    questions: (fingerprintQuestions.get(a.cf) || [])
       .map(q => [q.question, (q.contexts || []).map(c => c.courseId || '').sort()]).sort(),
     blocked: a.blockedCourses,
   }));

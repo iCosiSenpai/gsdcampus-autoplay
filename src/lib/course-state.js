@@ -14,20 +14,20 @@ const { createCourseStateBackup } = require('./state-backup');
 
 const STATE_FILE = 'course_state.json';
 
-function stateFile(root) {
-  // Per-account se il CF è noto; fallback al file flat legacy altrimenti.
-  return account.stateFilePaths(root).courseState;
+function stateFile(root, cf = null) {
+  // Per-account se il CF e noto; fallback al file flat legacy altrimenti.
+  return account.stateFilePaths(root, cf).courseState;
 }
 
-function readState(root) {
-  const file = stateFile(root);
+function readState(root, cf = null) {
+  const file = stateFile(root, cf);
   // readJsonSafe ritorna {} se assente; se il file è CORROTTO lo segnala su
   // stderr (non silenzioso) e ricomincia da stato vuoto.
   return readJsonSafe(file, {});
 }
 
-function writeState(root, state) {
-  const file = stateFile(root);
+function writeState(root, state, cf = null) {
+  const file = stateFile(root, cf);
   try {
     // Scrittura atomica (tmp + rename): un crash a metà non corrompe lo stato.
     writeJsonAtomic(file, state);
@@ -58,11 +58,11 @@ function getCourse(state, url) {
   return state[id] || { status: 'in_progress', quizAttempts: 0, completedLessons: [] };
 }
 
-function updateCourse(root, state, url, updates) {
+function updateCourse(root, state, url, updates, cf = null) {
   const id = courseIdFromUrl(url);
   if (!id) return state;
   state[id] = { ...getCourse(state, url), ...updates, updatedAt: new Date().toISOString() };
-  mergeWriteState(root, state, { currentId: id });
+  mergeWriteState(root, state, { currentId: id, cf });
   return state;
 }
 
@@ -77,8 +77,8 @@ function updateCourse(root, state, url, updates) {
  *   - removeId:  corso da rimuovere (resetCourse): non viene scritto.
  */
 function mergeWriteState(root, state, opts = {}) {
-  const { currentId = null, removeId = null } = opts;
-  const disk = readState(root);
+  const { currentId = null, removeId = null, cf = null } = opts;
+  const disk = readState(root, cf);
   const merged = { ...disk };
   if (removeId) delete merged[removeId];
   if (currentId && state[currentId]) merged[currentId] = state[currentId];
@@ -91,7 +91,7 @@ function mergeWriteState(root, state, opts = {}) {
   for (const k of Object.keys(merged)) {
     if (!(k in state)) state[k] = merged[k];
   }
-  try { writeJsonAtomic(stateFile(root), merged); } catch (e) { /* non bloccante */ }
+  try { writeJsonAtomic(stateFile(root, cf), merged); } catch (e) { /* non bloccante */ }
   return state;
 }
 
@@ -189,15 +189,15 @@ function allAssessmentsPassed(state, courseUrl, assessmentUrls = null) {
 // Riapre un corso mantenendo lezioni e ledger assessment. Diversamente da
 // resetCourse, e adatto allo sblocco automatico dopo la risoluzione delle
 // domande: non butta via evidenze utili e non tocca altri account.
-function reopenCourse(root, state, url) {
+function reopenCourse(root, state, url, cf = null) {
   const id = courseIdFromUrl(url);
   if (!id || !state[id]) return state;
-  try { createCourseStateBackup(root, state, { reason: 'before-reopen', courseId: id }); } catch (_) { /* non blocca il corso */ }
+  try { createCourseStateBackup(root, state, { reason: 'before-reopen', courseId: id, cf }); } catch (_) { /* non blocca il corso */ }
   return updateCourse(root, state, url, {
     status: 'in_progress',
     needHelpReason: null,
     needHelpCode: null,
-  });
+  }, cf);
 }
 
 function addCompletedLesson(root, state, url, lessonUrl) {

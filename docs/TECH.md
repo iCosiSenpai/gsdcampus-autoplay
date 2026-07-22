@@ -3,25 +3,42 @@
 ## Note tecniche
 
 - Lo script principale è `src/autoplay.js`; usa Playwright in modalità headless.
-- `start.sh` controlla requisiti, configurazione e integrità della banca prima di avviare. Il lock single-instance usa directory atomica + token nella command line: un PID riciclato non può essere scambiato per lo scheduler.
-- L'elenco membri è in `data/members.db` (SQLite, richiede Node >=22 per `node:sqlite` built-in). Lo stato per-account è in `data/accounts/<CF>/`. La dashboard aggregata è rigenerata in `data/dashboard.json` alla fine di ogni run.
-- I log sono in `logs/`.
-- `backups/accounts/<CF>/course-state/` contiene snapshot con SHA-256 creati prima di `reopenCourse`/`resetCourse`. Il restore verifica checksum e account e crea un ulteriore backup dello stato sostituito. Non include cookie, URL di login o `members.db`.
-- Fuori turno lo scheduler rinnova `status.json`/heartbeat con `phase: off_hours`; prima di ogni browser esegue `selector-probe.js` e usa `phase: preflight_failed` se il gate non passa.
-- `scripts/lib/schedule-cli.js` fornisce helper per leggere e validare gli orari dagli script shell. `scripts/lib/members-cli.js` e `scripts/lib/dashboard-cli.js` gestiscono membri e stato cross-utente.
+- `start.sh` verifica solo i requisiti **runtime**: Node, dipendenze, browser e configurazione. Ollama e Claude Code non sono necessari per riprodurre video o attendere il prossimo turno.
+- Il lock single-instance usa directory atomica + token nella command line: un PID riciclato non può essere scambiato per lo scheduler.
+- L'elenco membri è in `data/members.db` (SQLite, Node >=22). Lo stato per-account è in `data/accounts/<CF>/`; la dashboard aggregata è rigenerata in `data/dashboard.json`.
+- `backups/accounts/<CF>/course-state/` contiene snapshot SHA-256 creati prima di `reopenCourse`/`resetCourse`. Non include cookie, autologin o `members.db`.
+- Fuori turno lo scheduler mantiene `phase: off_hours`; prima di ogni browser esegue `selector-probe.js` e usa `phase: preflight_failed` se il gate non passa.
 
-## Permessi del supervisore AI
+## Claude Code on-demand
 
-`./launch-ai-supervisor.sh` avvia OpenCode con `--auto` e il provider custom `ollama-budget`. Il provider punta a un proxy solo-loopback (`127.0.0.1:11435`) che traduce il formato OpenAI-compatible in `/api/chat`, inoltra al daemon Ollama locale (`127.0.0.1:11434`) e applica 400 richieste/7 giorni, 80/24 ore, 8/minuto, una richiesta alla volta e una cache RAM breve per retry identici. Prima di aprire OpenCode viene verificato il ponte locale tramite `/v1/models`; il login Cloud è gestito dalla CLI Ollama. Prompt e risposte non vengono persistiti.
+`launch-ai-supervisor.sh` è un bootstrap deterministico, non una TUI: sincronizza la banca, aggiorna `logs/ai_todo.json` se è più vecchio di 15 minuti, esegue l'eventuale batch quiz e avvia `start.sh`. Poi termina.
 
-Quando il repository viene aperto direttamente con Codex, `AGENTS.md` espone lo stesso contratto operativo; i permessi sono quelli della sessione Codex e non vengono configurati da `launch-ai-supervisor.sh`.
+Il solo gate che può aprire l'AI è `buildAiTodo(root).openQuizRequests > 0`. Campi come `actions`, `need_help`, `bankLag` e `falseDones` descrivono lavoro deterministico e non avviano Claude. Prima del gate, le risposte già presenti in `data/known_answers_public.json`/`known_answers.json` vengono riconciliate localmente: se coprono l'intero handoff, le chiamate AI restano zero.
+
+Quando serve un batch, `scripts/run-claude-quiz-batch.sh`:
+
+1. acquisisce un lock e deduplica per `workFingerprint`;
+2. avvia Ollama e il proxy solo-loopback soltanto in quel momento;
+3. esegue `ollama pull` e, se la sessione non è autenticata, `ollama signin` nel browser;
+4. avvia una sola sessione `claude -p --bare --safe-mode --no-session-persistence`;
+5. chiude runner, proxy e l'eventuale daemon Ollama avviato dal batch.
+
+Claude ha soltanto `WebSearch` e `WebFetch`: niente `Read`, `Bash`, `Edit`, `Write`, subagent, MCP o persistenza sessione. Riceve esclusivamente ID effimeri, domanda, opzioni e guess legacy; non riceve CF, URL, cookie, token o contesti account. L'output è vincolato da JSON Schema. Una risposta viene applicata solo con confidenza almeno 0,7 e, quando esistono opzioni, se coincide esattamente con una delle opzioni di ogni occorrenza della domanda.
+
+In `phase: awaiting_ai` lo scheduler richiama lo stesso batch su un fingerprint nuovo e resta senza browser finché l'inbox non è vuota. Un errore Claude viene ritentato al `retryAfter` registrato (30 minuti), non al ricontrollo generico di 6 ore. Tra un tentativo e l'altro non rimane alcun processo AI persistente. Le risposte applicate usano un marker metadata-only per ritentare lo share fleet: il batch segnala separatamente un errore di distribuzione senza perdere la banca locale.
+
+## Proxy e budget
+
+`scripts/lib/ollama-cloud-proxy.js` accetta su loopback le API OpenAI legacy e le route Anthropic usate da Claude Code:
+
+- `POST /v1/messages` — generativa, conteggiata;
+- `POST /v1/messages/count_tokens` — non generativa, non conteggiata;
+- `GET /v1/models` — verifica del ponte.
+
+Il proxy accetta il token casuale del batch via `x-api-key` o Bearer, inoltra gli header `anthropic-version`/`anthropic-beta` e non persiste prompt o risposte. I limiti predefiniti sono 400 richieste rolling/7 giorni, 80/24 ore, 8/minuto, una generazione alla volta e massimo 8 generazioni per batch. La cache RAM breve evita di ricontare retry byte-identici.
 
 ## Requisito login Ollama
 
-Il modello da usare è **sempre quello indicato in `config.json` (`ollamaModel`)**. Il percorso standard installa Ollama CLI e OpenCode, avvia il daemon su `127.0.0.1:11434` e tenta il `pull` del modello Cloud. Se la sessione non è autenticata, `ollama signin` apre il browser; dopo il login la CLI autentica automaticamente le richieste Cloud ricevute dalla API locale. Non vengono richieste o salvate API key.
+Il modello è sempre `config.json.ollamaModel`, incluso il suffisso `-cloud`. Con inbox vuota setup e diagnostica controllano soltanto il runtime/presenza dei binari senza eseguire le CLI AI. Installazione/verifica di Ollama e Claude Code, daemon, pull e login partono soltanto dopo `openQuizRequests > 0`. Il login standard resta `ollama signin`: si apre il browser e non vengono richieste API key manuali.
 
-OpenCode usa il proxy budget su `127.0.0.1:11435`; il proxy traduce il formato OpenAI-compatible in `/api/chat` e inoltra al daemon Ollama locale, mantenendo il nome Cloud completo (per esempio `gemma4:31b-cloud`). Il conteggio locale è prudenziale: Ollama misura il tier gratuito anche in tempo GPU e può applicare limiti propri.
-
-### Migrazione una-tantum Claude → OpenCode
-
-Al primo `curl` dopo l'aggiornamento, ogni Mac mostra una domanda: Claude serve ancora? Se sì, Claude resta installato e `scripts/lib/migrate-claude-settings.js` rimuove soltanto override persistenti che citano Ollama/11434; login, conversazioni e preferenze personali restano. Se no, viene rimosso solo il client, non la cartella dati. Un marker in `~/Library/Application Support/gsdcampus-autoplay/` impedisce di ripetere la domanda.
+Le vecchie installazioni OpenCode non vengono disinstallate o modificate automaticamente; semplicemente non sono più invocate. Quando il repository viene aperto direttamente con Codex/Kiro, `AGENTS.md` espone il contratto operativo della sessione esterna, separato dal runner distribuito.

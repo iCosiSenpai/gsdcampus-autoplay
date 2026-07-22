@@ -15,6 +15,45 @@ pid_matches() {
   return 0
 }
 
+# stop_pid_tree <PID> <command-pattern>: termina un processo verificato e i
+# suoi figli diretti. I PID figli vengono catturati prima del TERM, cosi possono
+# essere forzati anche se il parent esce e vengono adottati da launchd.
+stop_pid_tree() {
+  local pid="$1" pattern="$2" children="" child="" attempt=0
+  pid_matches "$pid" "$pattern" || return 1
+  children="$(pgrep -P "$pid" 2>/dev/null || true)"
+  if [ -n "$children" ]; then
+    printf '%s\n' "$children" | while IFS= read -r child; do
+      [ -n "$child" ] && kill -TERM "$child" 2>/dev/null || true
+    done
+  fi
+  kill -TERM "$pid" 2>/dev/null || true
+  while [ "$attempt" -lt 10 ] && pid_matches "$pid" "$pattern"; do
+    sleep 0.2
+    attempt=$((attempt + 1))
+  done
+  if [ -n "$children" ]; then
+    printf '%s\n' "$children" | while IFS= read -r child; do
+      [ -n "$child" ] && kill -0 "$child" 2>/dev/null && kill -9 "$child" 2>/dev/null || true
+    done
+  fi
+  pid_matches "$pid" "$pattern" && kill -9 "$pid" 2>/dev/null || true
+  return 0
+}
+
+# stop_tracked_pid_file <pid-file> <command-pattern>: usa soltanto il PID
+# registrato e rimuove sempre il file stale.
+stop_tracked_pid_file() {
+  local file="$1" pattern="$2" pid=""
+  pid="$(cat "$file" 2>/dev/null || true)"
+  if [ -n "$pid" ] && stop_pid_tree "$pid" "$pattern"; then
+    rm -f "$file"
+    return 0
+  fi
+  rm -f "$file"
+  return 1
+}
+
 # PID dello scheduler verificato con lock+token. Fallback al PID file numerico
 # solo per compatibilità durante l'aggiornamento da versioni precedenti.
 autoplay_instance_pid() {

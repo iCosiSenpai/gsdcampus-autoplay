@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const account = require('./account');
-const { askQuizQuestion } = require('./ollama-quiz');
 const { writeJsonAtomic, readJsonSafe, readJsonCached } = require('./io');
 const { NeedHelpExit } = require('./errors');
 const { normKey, findKnownAnswer, similarity } = require('./quiz-match');
@@ -27,12 +26,6 @@ const {
 // piattaforma renderizza una nuova domanda a ogni iterazione senza mai finire.
 // 200 è abbondante per i quiz del corso (tipicamente <50); superato emette warning.
 const MAX_QUIZ_QUESTIONS = 200;
-
-// Soglia di confidenza Ollama sotto la quale una domanda (anche se Ollama ha
-// dato un best-guess e il quiz procede) viene segnalata all'AI supervisore in
-// ai_quiz_request.json, per far crescere la banca TRUSTED con risposte verificate
-// (WebSearch + ragionamento) prima che il collega successivo ci sbatta contro.
-const AI_REQUEST_CONFIDENCE_THRESHOLD = 0.8;
 
 // Locator delle opzioni risposta, scoped al form della domanda corrente.
 // Se il form id non è presente (layout anomalo), ricade sul selettore globale.
@@ -219,10 +212,10 @@ async function selectOption(page, optsLoc, index) {
 // finalizzazione (Conferma al Riepilogo). Quindi finalizziamo SOLO se OGNI
 // domanda ha una risposta NOTA nel glossario (known_answers). Qualunque domanda
 // non nota rende il quiz "incerto": non la rispondiamo, la passiamo all'AI, e al
-// Riepilogo usciamo SENZA finalizzare (nessun tentativo bruciato). L'AI risolve
-// le domande in ai_quiz_request → known_answers, poi il corso viene ritentato e
-// finalizzato con tutte le risposte note. Ollama qui serve solo come SUGGERIMENTO
-// per l'AI (ollamaGuess), non per finalizzare.
+// Riepilogo usciamo SENZA finalizzare (nessun tentativo bruciato). Il batch
+// Claude on-demand risolve le domande dell'inbox in known_answers; al retry il
+// corso finalizza con tutte le risposte note. Nessun modello viene invocato da
+// questo processo browser.
 async function solveActiveQuestions(page, root, log, monitor, context = null) {
   const sessionAnswers = {};       // risposte scelte in questo quiz (da note)
   const capturedAnswers = {};      // tutte le domande con la risposta scelta
@@ -306,23 +299,11 @@ async function solveActiveQuestions(page, root, log, monitor, context = null) {
       uncertainCount++;
     }
     log(`!!! DOMANDA NON NOTA: ${q.text.slice(0, 60)}... — non rispondo, la passo all'AI.`);
-    // Ollama = solo hint per l'AI. Non decide la finalizzazione (attempt-protective).
-    // useOllamaForQuiz:false → salta (il supervisore esterno riempie known_answers).
-    let ollamaGuess = null;
-    let useOllama = true;
-    try {
-      const cfg = JSON.parse(fs.readFileSync(path.join(root, 'config.json'), 'utf8'));
-      if (cfg && cfg.useOllamaForQuiz === false) useOllama = false;
-    } catch (_) {}
-    if (useOllama) {
-      try {
-        const a = await askQuizQuestion(q.text, q.opts.map(o => o.text), log, root);
-        if (a) ollamaGuess = { letter: a.letter, text: a.text, confidence: a.confidence, strategy: a.strategy };
-      } catch (_) { /* Ollama è solo un hint: se non risponde, pazienza */ }
-    } else {
-      log('useOllamaForQuiz=false: salto Ollama, handoff diretto al supervisore AI.');
-    }
-    aiRequests.push({ question: q.text, options: q.opts.map(o => o.text), ollamaGuess });
+    // L'autoplay non interroga mai Ollama direttamente: prima persiste
+    // l'handoff, poi il launcher/scheduler applica il gate openQuizRequests e
+    // avvia l'unico batch Claude protetto da proxy e budget.
+    log('Handoff diretto al supervisore Claude on-demand; nessun processo AI aperto dal browser autoplay.');
+    aiRequests.push({ question: q.text, options: q.opts.map(o => o.text) });
     saveNeedAnswer(root, [{ question: q.text, options: q.opts.map(o => o.text) }], 'domanda non nota (tentativo protetto)', context);
     // Avanti SENZA rispondere (consentito dalla piattaforma; non finalizza).
     await clickNextButton(page, log);
@@ -332,7 +313,7 @@ async function solveActiveQuestions(page, root, log, monitor, context = null) {
   return { sessionAnswers, capturedAnswers, aiRequests, status: 'max_iterations', finalized };
 }
 
-// Se solveActiveQuestions ha accumulato domande a bassa confidenza (aiRequests),
+// Se solveActiveQuestions ha accumulato domande aperte (aiRequests),
 // scrive l'handoff ai_quiz_request.json (merge) ed emette il marker di log
 // [AI_QUIZ_REQUEST] che il Monitor del supervisore cattura. Non blocca il corso:
 // l'AI risolve in autonomia (WebSearch + ragionamento) e popola la banca trusted.
@@ -345,7 +326,7 @@ function writeAiRequestIfAny(root, solveResult, reason, courseUrl, context, log,
     if (m) courseId = m[1];
   }
   const n = saveAiQuizRequest(root, items, reason, { courseUrl, courseId, ...(context || {}) });
-  log(`[AI_QUIZ_REQUEST] ${n} domande a bassa confidenza salvate in ai_quiz_request.json per verifica AI (reason: ${reason}).`);
+  log(`[AI_QUIZ_REQUEST] ${n} domande aperte salvate in ai_quiz_request.json per verifica AI (reason: ${reason}).`);
   // phase 'quiz_needs_answers' come segnale morbido: autoplay può poi
   // sovrascriverlo con done/need_help a seconda dell'esito. Il marker di log
   // sopra resta la fonte affidabile per il Monitor.
@@ -491,11 +472,9 @@ async function solveQuiz(page, root, log, monitor, courseUrl, assessmentUrl = nu
     const resultText = finalScoreText ? `superato (${finalScoreText})` : 'superato';
     log(`Quiz terminato con successo! Esito: ${resultText}`);
     monitor?.update({ lastQuizResult: resultText });
-    // NON promuoviamo i guess Ollama (sessionAnswers/capturedAnswers) nella banca
-    // trusted: un quiz superato al 24/30 = 80% contiene comunque ~6 risposte
-    // SBAGLIATE che, promosse, verrebbero riusate per tutti i colleghi. La banca
-    // trusted cresce SOLO da risposte verificate dalla piattaforma (scrape) o
-    // dall'AI supervisore. I guess restano in pending_quiz_answers.json.
+    // Non deduciamo nuove entry dalle selezioni della sessione: la banca cresce
+    // soltanto dallo scrape esplicito della piattaforma o da risposte validate
+    // dal supervisore. Gli eventuali pending legacy restano non trusted.
     const extracted = await extractCorrectAnswers(page);
     if (extracted.length > 0) {
       log(`Scrape post-quiz: ${extracted.length} risposte verificate dalla piattaforma.`);
@@ -505,10 +484,9 @@ async function solveQuiz(page, root, log, monitor, courseUrl, assessmentUrl = nu
       }
       mergeIntoKnown(root, extra, log);
     }
-    // Handoff AI per le domande a bassa confidenza: anche se il quiz è superato,
-    // l'AI può verificare i guess dubbi e far crescere la banca trusted (opportuno,
-    // non bloccante: il corso procede, niente reset).
-    writeAiRequestIfAny(root, solveResult, 'quiz superato con domande a bassa confidenza', courseUrl, context, log, monitor);
+    // Percorso difensivo: se restano aiRequests nonostante l'esito positivo,
+    // persistile per una verifica opportunistica senza riaprire il corso.
+    writeAiRequestIfAny(root, solveResult, 'quiz superato con domande aperte', courseUrl, context, log, monitor);
     return { outcome: 'solved', passed: true, score: finalScoreText, resultText, attemptConsumed: !!solveResult.finalized };
   }
 

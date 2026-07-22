@@ -14,10 +14,9 @@ cd "$DIR"
 # shellcheck source=scripts/setup/ollama.sh
 . "$DIR/scripts/setup/ollama.sh"
 
-# OpenCode installa il binario in ~/.local/bin o ~/.opencode/bin; assicuriamo che sia
-# subito disponibile nel PATH di questo script, anche negli shell non interattivi
-# che non caricano .zshrc.
-export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
+# Claude Code native installa il binario in ~/.local/bin. Lo rendiamo subito
+# disponibile anche negli shell non interattivi che non caricano .zshrc.
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
 MEMBERS_CLI="$DIR/scripts/lib/members-cli.js"
@@ -62,12 +61,12 @@ get_ollama_model() {
 }
 OLLAMA_MODEL="$(get_ollama_model)"
 
-# OpenCode installa in ~/.local/bin o ~/.opencode/bin. Negli shell non interattivi .zshrc
-# non viene letto, quindi assicuriamo il PATH sia attivo qui e persistito nei
-# principali file di configurazione dello shell (zsh e bash).
+# Claude Code native usa ~/.local/bin. Negli shell non interattivi .zshrc non
+# viene letto, quindi attiviamo e persistiamo quel path senza rimuovere eventuali
+# righe di altri tool gia presenti.
 ensure_local_bin_in_path() {
-  export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
-  local line='export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"'
+  export PATH="$HOME/.local/bin:$PATH"
+  local line='export PATH="$HOME/.local/bin:$PATH"'
   local f human
   for f in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc"; do
     if [ -f "$f" ] && ! grep -qF "$line" "$f" 2>/dev/null; then
@@ -126,7 +125,7 @@ print_header() {
   echo -e "  ${BOLD}2)${NC} Quando lavorare — giorni e orari in cui il corso deve andare avanti"
   echo ""
   echo "Al resto (programmi necessari, browser, modello AI) penso io in automatico:"
-  echo -e "  ${DIM}Homebrew · Node.js · Playwright · Chrome · Ollama CLI · OpenCode · gh${NC}"
+  echo -e "  ${DIM}Homebrew · Node.js · Playwright · Chrome · Ollama CLI · Claude Code · gh${NC}"
   echo "Quello che è già installato e aggiornato viene saltato."
   echo ""
   warn "Se il Terminale chiede di installare/aggiornare qualcosa (anche 'y/n'), rispondi SEMPRE sì."
@@ -177,6 +176,13 @@ step "0/7 - Configurazione personale"
 
 CONFIG_FILE="$DIR/config.json"
 EXAMPLE_FILE="$DIR/config.json.example"
+
+# Migrazione idempotente delle vecchie configurazioni OpenCode/Ollama. Non
+# avvia Claude/Ollama e crea backup prima di toccare impostazioni personali.
+if [ -f "$DIR/scripts/lib/migrate-claude-settings.js" ]; then
+  node "$DIR/scripts/lib/migrate-claude-settings.js" >/dev/null 2>&1 \
+    || warn "Migrazione impostazioni Claude non completata; riprovero al prossimo aggiornamento."
+fi
 
 mask_url() {
   local url="$1"
@@ -770,9 +776,19 @@ while true; do
         if (!cfg.baseUrl) cfg.baseUrl = 'https://tecsial.gsdcampus.it/';
         if (!Array.isArray(cfg.courseUrls)) cfg.courseUrls = [];
         if (!cfg.ollamaModel) cfg.ollamaModel = '${OLLAMA_MODEL}';
-        if (!cfg.aiSupervisorClient) cfg.aiSupervisorClient = 'opencode';
+        cfg.aiSupervisorClient = 'claude-on-demand';
+        cfg.useOllamaForQuiz = false;
         if (!cfg.ollamaLocalEndpoint) cfg.ollamaLocalEndpoint = 'http://127.0.0.1:11434';
         if (!cfg.aiCloudProxyPort) cfg.aiCloudProxyPort = 11435;
+        if (!cfg.aiWeeklyRequestLimit) cfg.aiWeeklyRequestLimit = 400;
+        if (!cfg.aiDailyRequestLimit) cfg.aiDailyRequestLimit = 80;
+        if (!cfg.aiPerMinuteRequestLimit) cfg.aiPerMinuteRequestLimit = 8;
+        if (!cfg.aiMinRequestIntervalMs) cfg.aiMinRequestIntervalMs = 1500;
+        if (!cfg.aiMaxConcurrentRequests) cfg.aiMaxConcurrentRequests = 1;
+        const configuredBatchLimit = Number(cfg.aiClaudeMaxRequestsPerBatch);
+        cfg.aiClaudeMaxRequestsPerBatch = Number.isFinite(configuredBatchLimit)
+          ? Math.max(1, Math.min(8, Math.floor(configuredBatchLimit))) : 8;
+        if (!cfg.aiClaudeTimeoutMs) cfg.aiClaudeTimeoutMs = 900000;
         cfg.workSchedule = {
           days: process.env.DAYS_JSON.split(',').map(Number).filter(Boolean),
           shifts: JSON.parse('[' + process.env.SHIFTS_JSON + ']')
@@ -797,7 +813,8 @@ while true; do
   "autologinUrl": "$AUTOLOGIN",
   "baseUrl": "https://tecsial.gsdcampus.it/",
   "ollamaModel": "${OLLAMA_MODEL}",
-  "aiSupervisorClient": "opencode",
+  "aiSupervisorClient": "claude-on-demand",
+  "useOllamaForQuiz": false,
   "ollamaLocalEndpoint": "http://127.0.0.1:11434",
   "aiCloudProxyPort": 11435,
   "aiWeeklyRequestLimit": 400,
@@ -805,6 +822,8 @@ while true; do
   "aiPerMinuteRequestLimit": 8,
   "aiMinRequestIntervalMs": 1500,
   "aiMaxConcurrentRequests": 1,
+  "aiClaudeMaxRequestsPerBatch": 8,
+  "aiClaudeTimeoutMs": 900000,
   "courseUrls": [],
   "reportIssues": true,
   "workSchedule": {
@@ -891,6 +910,13 @@ if [ "$FORCE_UPDATE" = true ] || [ "$NEEDS_NPM" = true ] || [ ! -f "$DIR/.packag
   save_package_hash
 fi
 
+# 5-7. Componenti AI strettamente on-demand. Senza handoff aperti non
+# eseguiamo neppure `ollama --version`/`claude --version`: presenza, install,
+# daemon, pull e login vengono verificati dopo che buildAiTodo apre il gate.
+AI_OPEN_REQUESTS=$(node -e "try{const t=require('./src/lib/ai-todo').buildAiTodo(process.cwd());process.stdout.write(String(t.openQuizRequests||0))}catch(e){process.stdout.write('0')}" 2>/dev/null || echo 0)
+if [ "$AI_OPEN_REQUESTS" -gt 0 ] 2>/dev/null; then
+  info "Rilevate $AI_OPEN_REQUESTS domanda/e quiz: preparo i componenti AI on-demand."
+
 # 5. Ollama CLI e daemon locale (gestisce il login Cloud)
 step "5/7 - Ollama"
 if ! command -v ollama &>/dev/null; then
@@ -928,76 +954,69 @@ if [ -z "$OLLAMA_VER" ] || ! version_ge "$OLLAMA_VER" "$MIN_OLLAMA"; then
   exit 1
 fi
 
-ensure_ollama_server || true
+# Il daemon, il pull del modello e il login browser restano differiti al primo
+# batch con domande aperte: un setup senza quiz non genera traffico AI.
 
-# 6. Modello Cloud: pull-first, login browser solo quando necessario
-step "6/7 - Modello Ollama ${OLLAMA_MODEL}"
-if [ "$OLLAMA_AVAILABLE" = false ]; then
-  err "Server Ollama non disponibile: non posso preparare il supervisore AI."
-  info "Rilancia il comando curl per riprovare l'avvio."
-  exit 1
-fi
+# 6. Ollama Cloud: nessun daemon/pull/login finche non esiste lavoro AI.
+step "6/7 - Ollama Cloud on-demand"
+ok "Ollama CLI pronta; daemon e modello restano spenti senza quiz aperti."
+info "Quando servira una risposta, il batch tentera il pull e, solo se necessario, aprira ollama signin nel browser."
 
-model_present_setup() {
-  ollama list 2>/dev/null | grep -F -c "${OLLAMA_MODEL}" >/dev/null
-}
-
-info "Verifico modello Cloud e sessione Ollama..."
-if ! ollama pull "${OLLAMA_MODEL}"; then
-  echo ""
-  warn "La sessione Ollama richiede il login. Si aprirà il browser: accedi e torna qui."
-  info "Non devi creare o incollare API key."
-  read_with_timer 3 "${BOLD}Tra 3s parte il login (Invio per saltare l'attesa).${NC}"
-  ollama signin || true
-  info "Riprovo il modello ${OLLAMA_MODEL}..."
-  if ! ollama pull "${OLLAMA_MODEL}"; then
-    err "Modello ${OLLAMA_MODEL} non disponibile dopo il login."
-    warn "Rilancia il comando curl per riprovare il login guidato."
-    exit 1
-  fi
-fi
-if ! model_present_setup; then
-  err "Il pull è terminato ma ${OLLAMA_MODEL} non compare nel catalogo locale."
-  exit 1
-fi
-ok "Sessione Ollama e modello ${OLLAMA_MODEL} pronti."
-
-# 7. OpenCode CLI
-step "7/7 - OpenCode CLI"
+# 7. Claude Code CLI (versione minima verificata per il runner one-shot).
+step "7/7 - Claude Code CLI"
 ensure_local_bin_in_path
-export PATH="$HOME/.opencode/bin:$PATH"
-NEED_OPENCODE_INSTALL=false
-if ! command -v opencode &>/dev/null; then
-  info "OpenCode non trovato. Installazione dal canale ufficiale..."
-  NEED_OPENCODE_INSTALL=true
+NEED_CLAUDE_INSTALL=false
+if ! command -v claude &>/dev/null; then
+  info "Claude Code non trovato. Installazione dal canale ufficiale..."
+  NEED_CLAUDE_INSTALL=true
 elif [ "$FORCE_UPDATE" = true ]; then
-  info "Aggiornamento OpenCode richiesto da --force-update..."
-  NEED_OPENCODE_INSTALL=true
+  info "Aggiornamento Claude Code richiesto da --force-update..."
+  NEED_CLAUDE_INSTALL=true
 else
-  OPENCODE_VER=$(opencode --version 2>/dev/null | extract_version)
-  if [ -z "$OPENCODE_VER" ] || ! version_ge "$OPENCODE_VER" "$MIN_OPENCODE"; then
-    warn "OpenCode ${OPENCODE_VER:-sconosciuto} è precedente alla versione minima $MIN_OPENCODE. Aggiorno..."
-    NEED_OPENCODE_INSTALL=true
+  CLAUDE_VER=$(claude --version 2>/dev/null | extract_version)
+  if [ -z "$CLAUDE_VER" ] || ! version_ge "$CLAUDE_VER" "$MIN_CLAUDE"; then
+    warn "Claude Code ${CLAUDE_VER:-sconosciuto} e precedente alla versione minima $MIN_CLAUDE. Aggiorno..."
+    NEED_CLAUDE_INSTALL=true
   fi
 fi
 
-if [ "$NEED_OPENCODE_INSTALL" = true ]; then
-  curl -fsSL https://opencode.ai/install | bash || warn "Installazione OpenCode non riuscita (rete?)."
-  ensure_local_bin_in_path
-  export PATH="$HOME/.opencode/bin:$PATH"
+if [ "$NEED_CLAUDE_INSTALL" = true ]; then
+  if ! command -v claude &>/dev/null; then
+    curl -fsSL https://claude.ai/install.sh | bash -s -- "$MIN_CLAUDE" || warn "Bootstrap Claude Code non riuscito (rete?)."
+    ensure_local_bin_in_path
+  fi
+  if command -v claude &>/dev/null; then
+    claude install --force "$MIN_CLAUDE" >/dev/null 2>&1 || warn "Installazione della versione Claude $MIN_CLAUDE non completata."
+  fi
 fi
 
-if command -v opencode &>/dev/null; then
-  OPENCODE_VER=$(opencode --version 2>/dev/null | extract_version)
-  if [ -n "$OPENCODE_VER" ] && version_ge "$OPENCODE_VER" "$MIN_OPENCODE"; then
-    ok "OpenCode CLI pronto: v$OPENCODE_VER"
+if command -v claude &>/dev/null; then
+  CLAUDE_VER=$(claude --version 2>/dev/null | extract_version)
+  if [ -n "$CLAUDE_VER" ] && version_ge "$CLAUDE_VER" "$MIN_CLAUDE"; then
+    ok "Claude Code pronto: v$CLAUDE_VER"
   else
-    err "OpenCode deve essere almeno v$MIN_OPENCODE (rilevata: ${OPENCODE_VER:-sconosciuta})."
+    err "Claude Code deve essere almeno v$MIN_CLAUDE (rilevata: ${CLAUDE_VER:-sconosciuta})."
     exit 1
   fi
 else
-  err "OpenCode CLI non trovato. Rilancia il comando curl quando la rete è disponibile."
+  err "Claude Code CLI non trovato. Rilancia il comando curl quando la rete e disponibile."
   exit 1
+fi
+else
+  step "5/7 - Ollama"
+  if command -v ollama >/dev/null 2>&1; then
+    ok "Ollama CLI presente; verifica versione differita al primo quiz."
+  else
+    ok "Ollama non necessario ora; installazione differita al primo quiz."
+  fi
+  step "6/7 - Ollama Cloud on-demand"
+  ok "Inbox quiz vuota: daemon, pull e login non vengono avviati."
+  step "7/7 - Claude Code CLI"
+  if command -v claude >/dev/null 2>&1; then
+    ok "Claude Code presente; nessun processo avviato senza quiz."
+  else
+    ok "Claude Code non necessario ora; installazione differita al primo quiz."
+  fi
 fi
 
 # Verifica LIVE dell'accesso solo quando l'utente ha appena (ri)configurato un

@@ -4,8 +4,8 @@ set -eu -o pipefail
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
 
-# Neutralizza FORCE_COLOR: alcuni ambienti (es. il supervisore AI / OpenCode)
-# esportano FORCE_COLOR=3, che fa colorizzare a `node` anche su pipe. Uno snippet
+# Neutralizza FORCE_COLOR: alcuni ambienti di supervisione AI possono esportare
+# FORCE_COLOR=3, che fa colorizzare a `node` anche su pipe. Uno snippet
 # `node -e "console.log(42)"` emetterebbe allora \x1b[33m42\x1b[39m, e l'aritmetica
 # shell `$((NEXT_MS / 60000))` crasherebbe sotto set -e uccidendo lo scheduler
 # silenziosamente a ogni fine turno (visto: scheduler morto dopo "Attendo prossimo
@@ -15,6 +15,7 @@ unset FORCE_COLOR
 export NO_COLOR=1
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
+AI_BATCH_RUNNER="$DIR/scripts/run-claude-quiz-batch.sh"
 
 # Cooldown post session_unstable (exit 4): leggibile da config.json
 # (sessionUnstableCooldownMin minuti, default 30). Pure helper Node.
@@ -188,22 +189,88 @@ work_fingerprint() {
   node -e "try{const t=require('./src/lib/ai-todo').buildAiTodo(process.cwd());process.stdout.write(t.workFingerprint||'')}catch(e){}" 2>/dev/null || echo ""
 }
 
+claude_retry_wait_ms() {
+  node -e "
+    const fs=require('fs');
+    try {
+      const s=JSON.parse(fs.readFileSync('./logs/claude-quiz-state.json','utf8'));
+      const ms=Date.parse(s.retryAfter||'')-Date.now();
+      process.stdout.write(String(Number.isFinite(ms) ? Math.max(60000, ms) : 1800000));
+    } catch (_) { process.stdout.write('1800000'); }
+  " 2>/dev/null || echo 1800000
+}
+
 wait_for_work_change() {
   local initial="$1"
-  local max_ms="${2:-21600000}" # 6h: reminder/ricontrollo massimo
-  local elapsed=0
+  local max_ms="${2:-21600000}" # 6h default; errori Claude usano retryAfter
+  local elapsed=0 slice_ms current wait_min
   while [[ "$elapsed" -lt "$max_ms" ]]; do
-    wait_ms 60000 awaiting_ai
-    elapsed=$((elapsed + 60000))
-    local current
+    slice_ms=60000
+    [[ "$((elapsed + slice_ms))" -gt "$max_ms" ]] && slice_ms=$((max_ms - elapsed))
+    wait_ms "$slice_ms" awaiting_ai
+    elapsed=$((elapsed + slice_ms))
     current=$(work_fingerprint)
     if [[ -n "$current" && "$current" != "$initial" ]]; then
       log "Rilevato cambiamento nell'inbox/stato locale: riprendo autoplay."
       return 0
     fi
   done
-  log "Nessun cambiamento inbox dopo 6h: eseguo un ricontrollo periodico."
+  wait_min=$(( (max_ms + 59999) / 60000 ))
+  log "Nessun cambiamento inbox dopo ${wait_min} min: eseguo il retry/ricontrollo previsto."
   return 0
+}
+
+# In awaiting_ai resta in un watcher deterministico: esegue al massimo un batch
+# per fingerprint e non riapre Chromium finche tutte le domande non sono state
+# rimosse dall'handoff. Tra i batch non resta attivo alcun processo AI.
+handle_awaiting_ai() {
+  local before after code remaining wait_limit_ms
+  while true; do
+    before=$(work_fingerprint)
+    code=0
+    wait_limit_ms=21600000
+    if [ -x "$AI_BATCH_RUNNER" ]; then
+      "$AI_BATCH_RUNNER" --non-interactive >> "$LOG_FILE" 2>&1 || code=$?
+    else
+      code=24
+    fi
+    after=$(work_fingerprint)
+    remaining=$(node -e "try{const t=require('./src/lib/ai-todo').buildAiTodo(process.cwd());process.stdout.write(String(t.openQuizRequests||0))}catch(e){process.stdout.write('0')}" 2>/dev/null || echo 0)
+    if [[ "$remaining" -eq 0 ]]; then
+      if [[ "$code" -eq 25 ]]; then
+        log "Inbox quiz vuota; risposte locali applicate ma share fleet ancora pending. Riprendo autoplay senza perdere il marker di retry."
+      else
+        log "Inbox quiz vuota: riprendo autoplay."
+      fi
+      return 0
+    fi
+    case "$code" in
+      20) log "awaiting_ai senza domande leggibili: attendo un cambiamento locale." ;;
+      21) log "Fingerprint quiz gia elaborato: nessuna nuova chiamata AI." ;;
+      22)
+        wait_limit_ms=$(claude_retry_wait_ms)
+        log "Output AI non valido: handoff preservato; ritento al retryAfter tra circa $(( (wait_limit_ms + 59999) / 60000 )) min."
+        ;;
+      23)
+        wait_limit_ms=$(claude_retry_wait_ms)
+        log "Batch AI fallito: retry automatico al retryAfter tra circa $(( (wait_limit_ms + 59999) / 60000 )) min."
+        ;;
+      24)
+        log "Batch AI non disponibile o login Ollama richiesto: rilanciare il comando curl."
+        notify_user "GSD Campus" "Serve il login Ollama per risolvere un quiz: rilancia il comando curl." ai_login_required || true
+        ;;
+      25)
+        wait_limit_ms=1800000
+        log "Risposte locali salve ma share fleet pending; ritento il batch tra 30 min senza perdere dati."
+        ;;
+      26)
+        wait_limit_ms=60000
+        log "Un altro batch AI e gia in esecuzione (contesa lock): ritento tra circa 1 min."
+        ;;
+      *) log "Restano $remaining domande; batch terminato con codice $code." ;;
+    esac
+    wait_for_work_change "${after:-$before}" "$wait_limit_ms"
+  done
 }
 
 # Controlla se siamo in orario lavorativo
@@ -376,9 +443,12 @@ while true; do
       if [[ "$PHASE" = "member_queue_advanced" ]]; then
         log "Autoplay: coda multi-CF avanzata. Riavvio tra 60s sul prossimo membro..."
         wait_ms 60000
-      elif [[ "$PHASE" = "awaiting_ai" || "$PHASE" = "complete" ]]; then
+      elif [[ "$PHASE" = "awaiting_ai" ]]; then
+        log "awaiting_ai: provo il batch Claude on-demand senza riaprire il browser..."
+        handle_awaiting_ai
+      elif [[ "$PHASE" = "complete" ]]; then
         FP=$(work_fingerprint)
-        log "${PHASE}: nessun browser necessario. Attendo cambiamenti locali prima del prossimo login..."
+        log "complete: nessun browser o processo AI necessario. Attendo cambiamenti locali..."
         wait_for_work_change "$FP"
       else
         log "Autoplay terminato con codice 0. Riavvio tra 10 minuti (evito loop a vuoto, need_help o fine turno)..."
@@ -414,9 +484,14 @@ while true; do
         wait_ms 60000
         continue
       fi
-      if [[ "$PHASE" = "awaiting_ai" || "$PHASE" = "complete" ]]; then
+      if [[ "$PHASE" = "awaiting_ai" ]]; then
+        log "awaiting_ai: provo il batch Claude on-demand senza riaprire il browser..."
+        handle_awaiting_ai
+        continue
+      fi
+      if [[ "$PHASE" = "complete" ]]; then
         FP=$(work_fingerprint)
-        log "${PHASE}: attendo cambiamenti locali prima di riaprire il browser..."
+        log "complete: attendo cambiamenti locali senza browser o processo AI persistente..."
         wait_for_work_change "$FP"
         continue
       fi

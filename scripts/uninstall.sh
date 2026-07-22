@@ -21,7 +21,7 @@ err()  { echo -e "${RED}${BOLD}[ERRORE]${NC} $1"; }
 # ask_yes "prompt" "default(y|n)" -> ritorna 0 se l'utente sceglie sì.
 # Default = comportamento di "disinstallazione completa": se il collega preme solo
 # Invio, viene applicato il default. Le conferme per-item servono proprio a lasciar
-# fuori ciò che gli serve ancora (es. OpenCode o Ollama usati per altro).
+# fuori cio che gli serve ancora (es. Claude Code o Ollama usati per altro).
 ask_yes() {
   local prompt="$1" def="$2"
   local REPLY=""
@@ -48,7 +48,7 @@ echo "Posso rimuovere:"
 echo "  - browser di Playwright + cache (~500 MB)"
 echo "  - dipendenze npm (node_modules)"
 echo "  - Ollama: app/binario, modelli scaricati e ~/.ollama (anche diversi GB)"
-echo "  - OpenCode CLI"
+echo "  - Claude Code CLI (configurazioni/conversazioni personali restano)"
 echo "  - log, dump, screenshot, backup e file temporanei"
 echo "  - riga PATH aggiunta da setup.sh nei file dello shell"
 echo "  - la cartella del progetto $DIR"
@@ -121,18 +121,24 @@ if [ "$HAS_OLLAMA" = true ]; then
   fi
 fi
 
-# 4. OpenCode CLI
+# 4. Claude Code CLI. Non tocchiamo ~/.claude: impostazioni e conversazioni
+# personali non appartengono al progetto.
 echo ""
-if command -v opencode &>/dev/null || [ -x "$HOME/.opencode/bin/opencode" ]; then
-  if ask_yes "Rimuovere OpenCode CLI?" "y"; then
-    echo "-> Rimozione OpenCode CLI..."
-    if command -v opencode >/dev/null 2>&1; then
-      opencode uninstall --force --keep-data --keep-config >/dev/null 2>&1 || true
+if command -v claude &>/dev/null || [ -x "$HOME/.local/bin/claude" ] || [ -d "$HOME/.local/share/claude" ]; then
+  if ask_yes "Rimuovere Claude Code CLI (conservando dati personali)?" "y"; then
+    echo "-> Rimozione Claude Code CLI..."
+    if command -v brew >/dev/null 2>&1; then
+      brew uninstall --cask claude-code 2>/dev/null || true
+      brew uninstall --cask claude 2>/dev/null || true
     fi
-    rm -f "$HOME/.opencode/bin/opencode" "$HOME/.local/bin/opencode" 2>/dev/null || true
-    ok "OpenCode CLI rimosso."
+    if command -v npm >/dev/null 2>&1; then
+      npm uninstall -g @anthropic-ai/claude-code 2>/dev/null || true
+    fi
+    rm -f "$HOME/.local/bin/claude" 2>/dev/null || true
+    rm -rf "$HOME/.local/share/claude" 2>/dev/null || true
+    ok "Claude Code CLI rimosso; impostazioni e conversazioni personali conservate."
   else
-    warn "OpenCode CLI conservato (lo usi anche per altro, lo lascio stare)."
+    warn "Claude Code conservato (lo usi anche per altro, lo lascio stare)."
   fi
 fi
 
@@ -173,7 +179,7 @@ fi
 
 # 7. Riga PATH aggiunta da setup.sh nei file di shell
 echo ""
-if ask_yes "Rimuovere le righe PATH OpenCode aggiunte da setup.sh nei file di shell?" "y"; then
+if ask_yes "Rimuovere le righe PATH aggiunte da setup.sh nei file di shell?" "y"; then
   echo "-> Rimozione riga PATH..."
   local_path_line='export PATH="$HOME/.local/bin:$PATH"'
   opencode_path_line='export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"'
