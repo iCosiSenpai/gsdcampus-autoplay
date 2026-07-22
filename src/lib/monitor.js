@@ -36,6 +36,7 @@ class Monitor {
       lastUpdate: this.startedAt,
       phase: 'starting',
       courseUrl: null,
+      courseTitle: null,
       lessonUrl: null,
       lessonTitle: null,
       videoProgress: null,
