@@ -1,13 +1,15 @@
 #!/bin/zsh
 #
-# install-launchd.sh — installa/rimuove il LaunchAgent dell'auto-update notturno.
+# install-launchd.sh — installa/rimuove il LaunchAgent dell'auto-update periodico.
 #
 # Uso:
 #   ./scripts/lib/install-launchd.sh install   # idempotente (no-op se già ok)
 #   ./scripts/lib/install-launchd.sh remove
 #
-# L'agent gira nel dominio gui/ dell'utente (NIENTE sudo) alle 05:30 di ogni
-# notte — finestra sicura fuori dai turni (09-20) — e lancia scripts/auto-update.sh.
+# L'agent gira nel dominio gui/ dell'utente (NIENTE sudo) ogni ~10 minuti e lancia
+# scripts/auto-update.sh, che aggiorna SOLO se c'è un commit nuovo su origin/main
+# (altrimenti esce in <1s) e NON interrompe un quiz in corso. Sostituisce il
+# vecchio job notturno delle 05:30 con un controllo continuo.
 # Opt-out: `"autoUpdate": false` in config.json → `install` rimuove l'agent.
 set -eu -o pipefail
 
@@ -46,11 +48,7 @@ install_agent() {
     <string>$DIR/scripts/auto-update.sh</string>
   </array>
   <key>WorkingDirectory</key><string>$DIR</string>
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key><integer>5</integer>
-    <key>Minute</key><integer>30</integer>
-  </dict>
+  <key>StartInterval</key><integer>600</integer>
   <key>RunAtLoad</key><false/>
   <key>StandardOutPath</key><string>$DIR/logs/auto-update-launchd.log</string>
   <key>StandardErrorPath</key><string>$DIR/logs/auto-update-launchd.log</string>
@@ -62,7 +60,7 @@ PLIST_EOF
   if [ -f "$PLIST" ] && cmp -s "$tmp" "$PLIST" \
      && launchctl print "gui/$UID_NUM/$LABEL" >/dev/null 2>&1; then
     rm -f "$tmp"
-    echo "auto-update notturno già attivo (05:30)."
+    echo "auto-update periodico già attivo (ogni 10 min)."
     return 0
   fi
 
@@ -70,12 +68,12 @@ PLIST_EOF
   # bootout prima di ri-bootstrap: evita "service already loaded".
   launchctl bootout "gui/$UID_NUM" "$PLIST" 2>/dev/null || true
   if launchctl bootstrap "gui/$UID_NUM" "$PLIST" 2>/dev/null; then
-    echo "auto-update notturno attivato (ogni notte alle 05:30)."
+    echo "auto-update periodico attivato (ogni 10 min)."
   elif launchctl load -w "$PLIST" 2>/dev/null; then
     # Fallback per macOS vecchi senza bootstrap.
-    echo "auto-update notturno attivato (load legacy)."
+    echo "auto-update periodico attivato (load legacy)."
   else
-    echo "impossibile attivare l'auto-update notturno (launchctl fallito)." >&2
+    echo "impossibile attivare l'auto-update periodico (launchctl fallito)." >&2
     return 1
   fi
 }

@@ -1026,10 +1026,10 @@ if [ "$CONFIG_CHANGED" = true ]; then
   verify_autologin_live
 fi
 
-# Auto-update notturno (launchd, 05:30): installazione idempotente, opt-out
+# Auto-update periodico (launchd, ~10 min): installazione idempotente, opt-out
 # con "autoUpdate": false in config.json. Non bloccante.
 if [ -x "$DIR/scripts/lib/install-launchd.sh" ]; then
-  "$DIR/scripts/lib/install-launchd.sh" install 2>/dev/null || warn "Auto-update notturno non attivato (riproverò al prossimo aggiornamento)."
+  "$DIR/scripts/lib/install-launchd.sh" install 2>/dev/null || warn "Auto-update periodico non attivato (riproverò al prossimo aggiornamento)."
 fi
 
 print_footer
