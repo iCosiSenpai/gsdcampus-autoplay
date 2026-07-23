@@ -9,6 +9,20 @@
 - `backups/accounts/<CF>/course-state/` contiene snapshot SHA-256 creati prima di `reopenCourse`/`resetCourse`. Non include cookie, autologin o `members.db`.
 - Fuori turno lo scheduler mantiene `phase: off_hours`; prima di ogni browser esegue `selector-probe.js` e usa `phase: preflight_failed` se il gate non passa.
 
+## Resilienza: keepalive LaunchAgent
+
+Lo scheduler non è più solo un processo `nohup` legato al Terminale: un LaunchAgent utente `com.gsdcampus.autoplay.keepalive` (RunAtLoad + KeepAlive, `scripts/keepalive-agent.sh`) gira h24 nella sessione di launchd e garantisce che lo scheduler sia vivo. Effetti:
+
+- **Chiusura finestra / Cmd+Q / crash**: il watchdog rilancia lo scheduler via `./start.sh` entro ~2 minuti.
+- **Riavvio del Mac**: `RunAtLoad` riporta su il watchdog, che riavvia lo scheduler.
+- Lo scheduler continua a **rispettare gli orari** internamente (il watchdog garantisce solo la presenza del processo, non decide i turni).
+- **Stop esplicito** (`./stop.sh`, tasto F): crea `.keepalive_disabled` e fa `bootout` dell'agent, così il watchdog NON resuscita. Il launcher (comando curl) lo riabilita al successivo "Aggiorna e avvia".
+- **crash_loop**: dopo 5 crash consecutivi lo scheduler NON esce più (uscire sotto KeepAlive = restart immediato = martellamento): segnala `crash_loop`, attende 30 min e riprova da solo.
+- Opt-out: `"keepAlive": false` in `config.json`. No-op sui sistemi senza `launchctl`.
+- Installazione idempotente dal launcher dopo `start.sh` (`scripts/lib/install-scheduler-agent.sh install|remove`); rimosso da `uninstall.sh`.
+
+> Il percorso di avvio (`start.sh`, lock/token, `caffeinate`) è **invariato**: il keepalive lo usa così com'è. Se il watchdog fallisce, il comportamento degrada a quello attuale (serve il comando curl), mai peggio.
+
 ## Claude Code on-demand
 
 `launch-ai-supervisor.sh` è un bootstrap deterministico, non una TUI: sincronizza la banca, aggiorna `logs/ai_todo.json` se è più vecchio di 15 minuti, esegue l'eventuale batch quiz e avvia `start.sh`. Poi termina.

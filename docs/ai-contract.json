@@ -140,6 +140,7 @@
     "notifications": "boolean default true",
     "autoShareAnswers": "boolean default true (resolve → Worker)",
     "autoUpdate": "boolean default true",
+    "keepAlive": "boolean default true (LaunchAgent watchdog che tiene vivo lo scheduler h24)",
     "browserChannel": "chrome | chromium | auto | null"
   },
   "limits": {

@@ -17,6 +17,14 @@ ui_header "Arresto GSD Campus Autoplay"
 # 1. Segnala allo scheduler di fermarsi se in attesa
 touch "$DIR/$STOP_FILE"
 
+# Impedisci al keepalive di far ripartire lo scheduler durante/dopo lo stop:
+# flag (race-guard) + bootout dell'agent watchdog. Il launcher lo riabilita al
+# prossimo avvio; ./start.sh manuale riparte senza keepalive (path manutentore).
+touch "$DIR/.keepalive_disabled" 2>/dev/null || true
+if [ -x "$DIR/scripts/lib/install-scheduler-agent.sh" ]; then
+  "$DIR/scripts/lib/install-scheduler-agent.sh" remove >/dev/null 2>&1 || true
+fi
+
 step "1/3" "Lettura PID dello scheduler"
 PID=""
 PID=$(autoplay_instance_pid "$DIR" 2>/dev/null || echo "")
