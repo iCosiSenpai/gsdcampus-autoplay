@@ -99,7 +99,7 @@ I tuoi dati (nome e orari) restano sempre al loro posto.
 
 Quando incontra un **quiz nuovo** che non sa risolvere, un'AI (Claude) prepara la risposta — **solo in quel momento e per pochi secondi**. Se non ci sono quiz da risolvere, l'AI resta spenta e non consuma niente. Nella plancia lo vedi: compare *"Claude sta risolvendo…"* mentre lavora.
 
-La prima volta che serve davvero, potrebbe aprirsi il browser per un **accesso**: fai il login e torna al Terminale. Non devi creare o copiare nessuna chiave.
+La prima volta che serve davvero, si apre il browser per un **accesso all'AI**: fai il **login** se hai già un account, oppure **registrati** (sign up) se è la prima installazione o non l'hai mai configurata su questo Mac. **Consiglio: accedi con Google usando il tuo account aziendale @cec.com.** È rapido e si fa **una volta sola**; poi torni al Terminale. Non devi creare o copiare nessuna chiave.
 
 ---
 
