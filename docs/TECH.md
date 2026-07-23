@@ -23,6 +23,16 @@ Lo scheduler non è più solo un processo `nohup` legato al Terminale: un Launch
 
 > Il percorso di avvio (`start.sh`, lock/token, `caffeinate`) è **invariato**: il keepalive lo usa così com'è. Se il watchdog fallisce, il comportamento degrada a quello attuale (serve il comando curl), mai peggio.
 
+## Auto-update continuo (ogni ~10 min)
+
+Il LaunchAgent `com.gsdcampus.autoplay.autoupdate` (`scripts/lib/install-launchd.sh`) non gira più alle 05:30: usa `StartInterval` (600s) e lancia `scripts/auto-update.sh` **ogni ~10 minuti**. Così un push del maintainer arriva alla flotta in pochi minuti, non la notte dopo.
+
+- **Costo quasi nullo quando non c'è nulla**: `auto-update.sh` fa un `git fetch` e, se `HEAD == origin/main`, esce in <1s. Solo con un commit nuovo procede.
+- **Sicurezza update**: stop scheduler → `update_repo` (ff/reset) → **GATE `dev-check`** → se rotto, **rollback** al commit precedente + issue automatica al maintainer + notifica → restart + riabilita keepalive. Un push difettoso viene scartato, non stende la flotta.
+- **Mai durante un quiz**: prima di fermare, `phase_is_busy` controlla `status.json` (fresco); se la fase è `quiz_dashboard`/`quiz_needs_answers`/`checking` rimanda al giro dopo. Un **video** invece si interrompe (la piattaforma salva la posizione).
+- **Restart**: `auto-update.sh` chiama `stop.sh` + `start.sh` (già collaudato); il keepalive copre il resto. Lock `noclobber` anti-doppio-run; il file si ricopia in `$TMPDIR` prima del `git` per non corrompersi.
+- Opt-out: `"autoUpdate": false` in `config.json` → l'agent viene rimosso.
+
 ## Claude Code on-demand
 
 `launch-ai-supervisor.sh` è un bootstrap deterministico, non una TUI: sincronizza la banca, aggiorna `logs/ai_todo.json` se è più vecchio di 15 minuti, esegue l'eventuale batch quiz e avvia `start.sh`. Poi termina.

@@ -1,12 +1,12 @@
 #!/bin/zsh
 #
-# auto-update.sh — aggiornamento notturno UNATTENDED (lanciato da launchd, 05:30).
+# auto-update.sh — aggiornamento periodico UNATTENDED (lanciato da launchd, ~10 min).
 #
-# Flusso: fetch → (novità?) → stop scheduler se attivo → update codice + banca
-# risposte → GATE dev-check → se il nuovo codice è rotto: rollback al commit
-# precedente + issue automatica al maintainer + notifica → riavvio scheduler
-# se era attivo. Niente sudo, niente interazione: ogni problema degrada con
-# log + notifica, mai un prompt.
+# Flusso: fetch → (novità?) → se lo scheduler è in un quiz/setup lo rimando →
+# stop scheduler se attivo → update codice + banca risposte → GATE dev-check → se
+# il nuovo codice è rotto: rollback al commit precedente + issue automatica al
+# maintainer + notifica → riavvio scheduler se era attivo. Niente sudo, niente
+# interazione: ogni problema degrada con log + notifica, mai un prompt.
 #
 # Log: logs/auto-update.log (senza ANSI). Opt-out: "autoUpdate": false in config.json.
 #
@@ -34,6 +34,22 @@ source "$DIR/scripts/lib/ui.sh"
 source "$DIR/scripts/lib/pid-utils.sh"
 source "$DIR/scripts/lib/notify.sh"
 source "$DIR/scripts/lib/update-repo.sh"
+
+# phase_is_busy: exit 0 se status.json (fresco, <5 min) segnala una fase da NON
+# interrompere — un quiz o il setup di un corso. Fasi interrompibili (exit 1):
+# video (la piattaforma salva la posizione), attese, off_hours, ecc. Stato vecchio
+# = non ci fidiamo (scheduler forse morto) → non blocca (exit 1).
+phase_is_busy() {
+  node -e '
+    const fs = require("fs");
+    try {
+      const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const fresh = s.lastUpdate && (Date.now() - Date.parse(s.lastUpdate) < 5 * 60 * 1000);
+      const busy = ["quiz_dashboard", "quiz_needs_answers", "checking"].includes(s.phase);
+      process.exit(fresh && busy ? 0 : 1);
+    } catch (_) { process.exit(1); }
+  ' "$DIR/logs/status.json" 2>/dev/null
+}
 
 LOG="$DIR/logs/auto-update.log"
 mkdir -p "$DIR/logs"
@@ -68,16 +84,26 @@ trap 'rm -f "$LOCK" "$SELF_COPY" 2>/dev/null' EXIT
 
 # ── 4. Rete + c'è qualcosa di nuovo? ────────────────────────────────────────
 if ! curl -m 5 -fsS -o /dev/null https://raw.githubusercontent.com 2>/dev/null; then
-  # Niente rete: esci in silenzio (niente log-spam ogni notte offline).
+  # Niente rete: esci in silenzio (niente log-spam a ogni giro offline).
   exit 0
 fi
 git fetch --quiet origin main 2>/dev/null || exit 0
 OLD=$(git rev-parse HEAD 2>/dev/null || echo "")
 NEW=$(git rev-parse origin/main 2>/dev/null || echo "")
 if [ -z "$OLD" ] || [ -z "$NEW" ] || [ "$OLD" = "$NEW" ]; then
-  exit 0   # già aggiornati: notte tranquilla, zero rumore.
+  rm -f "$DIR/logs/.update_available" 2>/dev/null || true
+  exit 0   # già aggiornati: zero rumore.
 fi
 alog "Aggiornamento disponibile: ${OLD:0:7} → ${NEW:0:7}"
+
+# ── 4b. Non interrompere un quiz / operazione critica ───────────────────────
+# Un update non è urgente: se lo scheduler è vivo ed è in una fase delicata
+# (quiz o setup corso), rimando al prossimo giro (~10 min). Un video invece si
+# può interrompere: la piattaforma salva la posizione e si riprende dal punto.
+if autoplay_instance_alive "$DIR" && phase_is_busy; then
+  alog "Update rimandato: scheduler in fase delicata (quiz/setup corso). Riprovo al prossimo giro."
+  exit 0
+fi
 
 # ── 5. Ferma lo scheduler se attivo (i suoi .sh stanno per cambiare) ────────
 WAS_RUNNING=false
@@ -95,7 +121,7 @@ restart_if_needed() {
     alog "Riavvio lo scheduler (modalità normale)."
     "$DIR/start.sh" >> "$LOG" 2>&1 || alog "ATTENZIONE: riavvio scheduler fallito (serve il comando curl)."
     # stop.sh (chiamato sopra) ha sospeso/rimosso il keepalive: lo riattivo, così
-    # lo scheduler resta protetto h24 anche dopo un aggiornamento notturno.
+    # lo scheduler resta protetto h24 anche dopo un aggiornamento periodico.
     rm -f "$DIR/.keepalive_disabled" 2>/dev/null || true
     "$DIR/scripts/lib/install-scheduler-agent.sh" install >> "$LOG" 2>&1 || true
   fi
@@ -110,7 +136,7 @@ if ! "$DIR/scripts/dev-check.sh" >> "$LOG" 2>&1; then
   alog "dev-check FALLITO su ${NEW:0:7}: ROLLBACK a ${OLD:0:7}."
   git reset --hard "$OLD" >> "$LOG" 2>&1 || alog "ATTENZIONE: rollback fallito!"
   # Issue automatica al maintainer (una sola per versione rotta: marker anti-
-  # duplicato — ogni notte l'update ritenta finché il maintainer non pusha il fix).
+  # duplicato — a ogni giro l'update ritenta finché il maintainer non pusha il fix).
   RB_MARKER="$DIR/logs/.rollback_${NEW:0:12}"
   if [ ! -f "$RB_MARKER" ]; then
     touch "$RB_MARKER" 2>/dev/null || true
@@ -118,7 +144,7 @@ if ! "$DIR/scripts/dev-check.sh" >> "$LOG" 2>&1; then
       && node "$DIR/scripts/lib/issue-report.js" send >> "$LOG" 2>&1 \
       || alog "Invio issue di rollback non riuscito (receiver non configurato?)."
   fi
-  notify_user "GSD Campus" "Aggiornamento notturno annullato: la nuova versione era difettosa. Segnalato al responsabile, tutto continua a funzionare." auto_update_rollback || true
+  notify_user "GSD Campus" "Aggiornamento annullato: la nuova versione era difettosa. Segnalato al responsabile, tutto continua a funzionare." auto_update_rollback || true
   restart_if_needed
   exit 0
 fi
@@ -131,6 +157,7 @@ if [ -x "$DIR/scripts/check-requirements.sh" ] && ! "$DIR/scripts/check-requirem
   exit 0
 fi
 
+rm -f "$DIR/logs/.update_available" 2>/dev/null || true
 alog "Aggiornato con successo a ${NEW:0:7}."
 restart_if_needed
 exit 0

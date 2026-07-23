@@ -426,7 +426,7 @@ case "$MODE" in
         ok "Codice e dipendenze già allineati."
       fi
     fi
-    # Auto-update notturno: attivato/aggiornato a ogni "Aggiorna e avvia"
+    # Auto-update periodico: attivato/aggiornato a ogni "Aggiorna e avvia"
     # (guarded: sui Mac con la versione vecchia lo script appare dopo l'update).
     if [ -x "$TARGET/scripts/lib/install-launchd.sh" ]; then
       "$TARGET/scripts/lib/install-launchd.sh" install 2>/dev/null || true

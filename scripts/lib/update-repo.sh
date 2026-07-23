@@ -4,7 +4,7 @@
 # install.sh (che NON può sourcare questo file: install.sh arriva fresco da
 # raw.githubusercontent e gira anche PRIMA che il repo esista/sia aggiornato —
 # chicken-egg). Se modifichi la logica qui, aggiorna anche install.sh e viceversa.
-# Usata da: scripts/auto-update.sh (job notturno, sempre post-clone).
+# Usata da: scripts/auto-update.sh (job periodico, sempre post-clone).
 #
 # Richiede: $DIR (root progetto) definito dal chiamante; git disponibile.
 # Non usa `set -e` proprio: ogni fallimento degrada con warning (unattended-safe).
