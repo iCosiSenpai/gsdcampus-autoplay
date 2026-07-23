@@ -69,7 +69,7 @@ Con un tasto solo:
 - **R** — aggiorna subito i dati mostrati.
 - **F** — **ferma tutto e chiude la tab** del Terminale.
 
-Non devi tenere niente aperto: una volta avviato, lavora da solo anche a finestra chiusa.
+Non devi tenere niente aperto: se chiudi la finestra — o se il Mac si riavvia — l'automazione **riparte da sola** e continua in background.
 
 ---
 
@@ -119,7 +119,7 @@ Se davvero non si sblocca, avvisa chi ti ha dato l'automazione.
 ## Buono a sapersi
 
 - Il Mac dello store va lasciato **acceso**; l'automazione rispetta gli orari e non lavora fuori turno.
-- Non serve tenere aperta nessuna finestra: dopo l'avvio lavora in background.
+- Non serve tenere aperta nessuna finestra: se la chiudi (o il Mac si riavvia) l'automazione riparte da sola.
 - I tuoi progressi e le risposte ai quiz vengono salvati e condivisi con gli altri store, così un quiz risolto una volta vale per tutti.
 
 ---
