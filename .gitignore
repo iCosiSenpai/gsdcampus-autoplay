@@ -54,6 +54,7 @@ PROMPT-per-altra-AI.md
 .autoplay_lock/
 .ollama_pid
 .scheduler_stop
+.keepalive_disabled
 .supervisor_prompt.txt
 # stato hash dipendenze (rigenerato localmente da setup.sh)
 .package_hash

@@ -22,6 +22,10 @@ ui_header "GSD Campus — Avvio autonomo" "Claude on-demand: zero chiamate senza
 echo ""
 
 info "Controllo e arresto eventuali istanze precedenti..."
+# Sospendi e scarica il keepalive PRIMA di fermare lo scheduler, così non lo
+# resuscita durante la pulizia/riavvio (race-guard: flag + bootout dell'agent).
+touch "$DIR/.keepalive_disabled" 2>/dev/null || true
+"$DIR/scripts/lib/install-scheduler-agent.sh" remove >/dev/null 2>&1 || true
 if autoplay_instance_alive "$DIR"; then
   OLD_PID="$(autoplay_instance_pid "$DIR" 2>/dev/null || echo "")"
   if pid_matches "$OLD_PID" "scheduler|autoplay"; then
@@ -131,6 +135,11 @@ ui_kv "Orari" "$SCHEDULE_LINE"
 ui_kv "AI" "Claude Code on-demand · gate openQuizRequests · proxy budget temporaneo"
 
 if GSD_LAUNCHER=1 "$DIR/start.sh"; then
+  # Riabilita e (re)installa il keepalive: mantiene vivo lo scheduler h24 anche
+  # a finestra chiusa, dopo Cmd+Q o un riavvio del Mac. Idempotente; no-op su
+  # non-macOS (senza launchctl).
+  rm -f "$DIR/.keepalive_disabled" 2>/dev/null || true
+  "$DIR/scripts/lib/install-scheduler-agent.sh" install >/dev/null 2>&1 || true
   # Plancia interattiva del collega: si aggiorna da sola, azioni a tasto singolo
   # (L guarda dal vivo · F ferma · R aggiorna · Q chiudi). In ambiente non
   # interattivo stampa un solo riquadro ed esce. Non tiene in vita nulla: lo

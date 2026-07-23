@@ -94,6 +94,10 @@ restart_if_needed() {
     # per un riavvio non presidiato).
     alog "Riavvio lo scheduler (modalità normale)."
     "$DIR/start.sh" >> "$LOG" 2>&1 || alog "ATTENZIONE: riavvio scheduler fallito (serve il comando curl)."
+    # stop.sh (chiamato sopra) ha sospeso/rimosso il keepalive: lo riattivo, così
+    # lo scheduler resta protetto h24 anche dopo un aggiornamento notturno.
+    rm -f "$DIR/.keepalive_disabled" 2>/dev/null || true
+    "$DIR/scripts/lib/install-scheduler-agent.sh" install >> "$LOG" 2>&1 || true
   fi
 }
 

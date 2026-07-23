@@ -357,11 +357,16 @@ preflight_selectors() {
 
 # Contatore crash consecutivi (exit code diverso da 0 e 4). Backoff crescente per
 # evitare di martellare autoplay quando crasha di fila (es. bug o piattaforma giù):
-# 60 -> 120 -> 300 -> 1800s. Dopo MAX_CRASHES crash consecutivi, esponiamo la fase
-# `crash_loop` in logs/status.json (atomico) e usciamo, così l'AI supervisore lo
-# nota e avvisa l'utente invece di restare invisibile in retry infiniti.
+# 60 -> 120 -> 300 -> 1800s. Dopo MAX_CRASHES crash consecutivi esponiamo la fase
+# `crash_loop` in logs/status.json (atomico), avvisiamo l'utente, aspettiamo un
+# cooldown lungo e RIPRENDIAMO il loop (niente uscita: sotto il keepalive
+# LaunchAgent uscire = restart immediato = martellamento).
 CRASH_COUNT=0
 MAX_CRASHES=5
+# Cooldown dopo crash_loop. Sotto il keepalive LaunchAgent NON usciamo (uscire =
+# restart immediato da launchd = martellamento): segnaliamo, aspettiamo a lungo
+# e riproviamo. 30 min, come il cooldown session_unstable.
+CRASH_LOOP_COOLDOWN=1800
 
 # Scrive logs/status.json con phase=$1 in modo atomico, mergendo i campi
 # preesistenti. DIR passa via argv (niente interpolazione shell dentro il JS:
@@ -380,11 +385,25 @@ mark_crash_loop() {
   ' "$phase" "$DIR" 2>/dev/null || true
 }
 
+# Azzera il flag crashLoop in status.json dopo il cooldown: lo scheduler NON è
+# più fermo (sta per riprovare), quindi lasciarlo true sarebbe fuorviante per la
+# plancia / l'AI supervisore.
+clear_crash_loop() {
+  node -e '
+    const dir = process.argv[1];
+    const { writeJsonAtomic, readJsonSafe } = require(require("path").join(dir, "scripts", "lib", "write-json.js"));
+    const f = require("path").join(dir, "logs", "status.json");
+    const s = readJsonSafe(f, {}, { warn: false });
+    if (s && s.crashLoop) { s.crashLoop = false; s.lastUpdate = new Date().toISOString(); writeJsonAtomic(f, s); }
+  ' "$DIR" 2>/dev/null || true
+}
+
 # Backoff per crash consecutivi (exit code diverso da 0 e 4). Ladder 60 -> 120 ->
-# 300 -> 1800s. A MAX_CRASHES consecutivi scrive crash_loop in status.json e
-# retorna 1 (il caller esce, così l'AI supervisore interviene invece di restare in
-# retry invisibile). Resetta CRASH_COUNT a 0 per exit 0/4. Va chiamato per OGNI
-# run di autoplay (entrambi i branch). Ritorna 1 se crash_loop, 0 dopo aver dormito.
+# 300 -> 1800s. A MAX_CRASHES consecutivi scrive crash_loop in status.json,
+# avvisa, aspetta un cooldown lungo e RIPRENDE il loop (niente uscita: v. sopra).
+# Resetta CRASH_COUNT a 0 per exit 0/4. Va chiamato per OGNI run di autoplay
+# (entrambi i branch). Ritorna sempre 0 (il `|| exit 1` del caller resta come
+# guardia difensiva ma non scatta più).
 apply_crash_backoff() {
   local code="$1"
   if [[ "$code" -eq 0 || "$code" -eq 4 ]]; then
@@ -401,10 +420,18 @@ apply_crash_backoff() {
   esac
   log "Autoplay terminato con codice $code. Crash consecutivi: $CRASH_COUNT. Attesa ${BACKOFF}s..."
   if [[ "$CRASH_COUNT" -ge "$MAX_CRASHES" ]]; then
-    log "Raggiunti $MAX_CRASHES crash consecutivi: crash_loop. Scrivo status.json ed esco (l'AI supervisore deve intervenire)."
+    # NON usciamo: sotto il keepalive LaunchAgent uscire = restart immediato da
+    # launchd = martellamento. Segnaliamo crash_loop, aspettiamo a lungo, poi
+    # riprendiamo il loop (auto-guarigione se la causa è transitoria, es.
+    # piattaforma giù). In modalità nohup (senza keepalive) il risultato è lo
+    # stesso: riprova da solo più tardi invece di restare morto.
+    log "Raggiunti $MAX_CRASHES crash consecutivi: crash_loop. Segnalo, attendo $((CRASH_LOOP_COOLDOWN / 60)) min e riprovo (nessuna uscita)."
     mark_crash_loop "crash_loop"
-    notify_user "GSD Campus" "L'automazione si è fermata per errori ripetuti: apri il Terminale e rilancia il comando di avvio." crash_loop || true
-    return 1
+    notify_user "GSD Campus" "L'automazione ha avuto errori ripetuti: riproverà da sola più tardi. Se persiste, apri il Terminale e rilancia il comando di avvio." crash_loop || true
+    sleep "$CRASH_LOOP_COOLDOWN"
+    CRASH_COUNT=0
+    clear_crash_loop
+    return 0
   fi
   sleep "$BACKOFF"
   return 0
