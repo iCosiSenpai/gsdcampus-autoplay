@@ -454,13 +454,16 @@ while true; do
         log "Autoplay terminato con codice 0. Riavvio tra 10 minuti (evito loop a vuoto, need_help o fine turno)..."
         wait_ms 600000
       fi
-    elif [[ "$EXIT_CODE" -eq 4 ]]; then
-      # session_unstable: token valido ma sessione instabile. Cooldown configurabile
-      # (config.sessionUnstableCooldownMin, default 30) — non martellare l'autologin.
+    elif [[ "$EXIT_CODE" -eq 4 || "$EXIT_CODE" -eq 3 ]]; then
+      # Accesso in timeout temporaneo. Il link e unico e stabile: un login fallito
+      # (autologin_invalid, exit 3) o una sessione instabile dopo la dashboard
+      # (session_unstable, exit 4) sono trattati allo stesso modo — cooldown e
+      # ritento, senza arrendersi e senza suggerire di cambiare il link. Cooldown
+      # configurabile (config.sessionUnstableCooldownMin, default 30).
       CRASH_COUNT=0
       COOLDOWN_MS=$(session_unstable_cooldown_ms)
       COOLDOWN_MIN=$((COOLDOWN_MS / 60000))
-      log "Autoplay terminato con codice 4 (session_unstable): token valido ma sessione instabile. Cooldown ${COOLDOWN_MIN} minuti..."
+      log "Autoplay terminato con codice ${EXIT_CODE} (accesso in timeout temporaneo): cooldown ${COOLDOWN_MIN} minuti e ritento (link stabile, non lo cambio)..."
       wait_ms "$COOLDOWN_MS"
     else
       apply_crash_backoff "$EXIT_CODE" || exit 1
@@ -496,11 +499,11 @@ while true; do
         continue
       fi
       log "Autoplay terminato con codice 0 (fine turno). Calcolo prossimo turno..."
-    elif [[ "$EXIT_CODE" -eq 4 ]]; then
+    elif [[ "$EXIT_CODE" -eq 4 || "$EXIT_CODE" -eq 3 ]]; then
       CRASH_COUNT=0
       COOLDOWN_MS=$(session_unstable_cooldown_ms)
       COOLDOWN_MIN=$((COOLDOWN_MS / 60000))
-      log "Autoplay terminato con codice 4 (session_unstable). Cooldown ${COOLDOWN_MIN} minuti..."
+      log "Autoplay terminato con codice ${EXIT_CODE} (accesso in timeout temporaneo): cooldown ${COOLDOWN_MIN} minuti e ritento (link stabile)..."
       wait_ms "$COOLDOWN_MS"
       continue
     else
