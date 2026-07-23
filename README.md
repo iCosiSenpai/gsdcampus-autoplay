@@ -71,6 +71,8 @@ Con un tasto solo:
 
 Non devi tenere niente aperto: se chiudi la finestra — o se il Mac si riavvia — l'automazione **riparte da sola** e continua in background.
 
+**Per rivederla o controllare come va**, riapri il Terminale e rilancia **lo stesso comando** di sopra, poi scegli **"Aggiorna e avvia"**: riconosce la sessione già in corso, ricompare la schermata di stato e i corsi riprendono dal punto salvato. È sempre lo stesso comando, per tutto.
+
 ---
 
 ## 📅 Ogni giorno
