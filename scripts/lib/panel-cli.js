@@ -207,8 +207,13 @@ function readModel(root, now = Date.now()) {
 // Stato principale in una frase onesta in italiano.
 function computeHeadline(m) {
   const phase = m.status.phase || '';
-  if (phase === 'autologin_invalid' || phase === 'session_lost') {
-    return { level: 'attention', text: 'Il link di accesso sembra non valido — potrebbe servire rinnovarlo.', hint: 'Premi  C  per cambiare collega / riselezionare l’account.' };
+  if (phase === 'autologin_invalid' || phase === 'session_lost' || phase === 'session_unstable') {
+    return {
+      level: 'attention',
+      text: 'Accesso in pausa: il link è stato usato troppo e la piattaforma l’ha messo in timeout temporaneo.',
+      hint: 'Non serve cambiare il link: lascialo raffreddare e riprova più tardi o domani.',
+      cooldown: true,
+    };
   }
   if (m.claudeWorking) {
     const n = (m.claudeState && Number.isFinite(m.claudeState.remaining)) ? m.claudeState.remaining : (m.openQuiz || null);
@@ -257,6 +262,12 @@ function renderFrame(model, opts = {}) {
   const headMark = head.level === 'attention' ? GLYPH.warn : head.level === 'work' ? SPIN[spinIndex % SPIN.length] : GLYPH.dot;
   L.push(`  ${c(headColor, headMark)} ${c(ANSI.bold, head.text)}`);
   if (head.hint) L.push(`     ${c(ANSI.dim, head.hint)}`);
+  if (head.cooldown) {
+    L.push(`     ${c(ANSI.dim, 'Cosa puoi fare:')}`);
+    L.push(`       ${c(ANSI.gray, GLYPH.bul)} lascia questa finestra aperta: riprova da sola.`);
+    L.push(`       ${c(ANSI.bold, 'Q')} chiudi la finestra: continua in background e riprova.`);
+    L.push(`       ${c(ANSI.bold, 'F')} ferma tutto e chiudi.`);
+  }
   L.push('');
 
   const row = (label, value) => L.push(`   ${c(ANSI.dim, label.padEnd(10))} ${c(ANSI.gray, GLYPH.arrow)} ${value}`);
