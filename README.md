@@ -9,19 +9,26 @@ Tu lanci **un comando**, al resto pensa lui: segue i corsi negli orari di lavoro
 
 ## 🚀 Come si avvia
 
-È l'**unica** cosa che devi ricordare.
+Due modi, scegli quello che preferisci. **Entrambi fanno tutto**: la prima volta installano, le volte dopo aggiornano, e ogni volta avviano i corsi.
+
+### ⭐️ Modo A — Scarica e doppio clic (consigliato: non copi né scrivi niente)
+
+1. Scarica il file: **[⬇︎ Scarica "GSD Avvia"](https://gsd.lookatale95.workers.dev/avvia)**
+2. Fai **doppio clic** sul file scaricato (di solito finisce in *Download*).
+   - *Solo la primissima volta* il Mac può bloccarlo ("sviluppatore non identificato"): allora **tasto destro sul file → Apri → Apri**. Dopo, basta il doppio clic.
+
+Le volte successive: doppio clic sullo stesso file. Fine.
+
+### ⌨️ Modo B — Comando nel Terminale
 
 1. Apri il **Terminale** (in alto a destra clicca la lente 🔍 → scrivi `Terminale` → Invio).
-2. **Scrivi** (o copia dal riquadro qui sotto) questo comando **su una riga sola**, poi premi **Invio**:
+2. **Scrivi** (o copia dal riquadro) questo comando **su una riga sola**, poi premi **Invio**:
 
 ```bash
 curl -fsSL https://gsd.lookatale95.workers.dev | bash
 ```
 
-> ⚠️ **Copialo dal riquadro** qui sopra, oppure **scrivilo a mano**: non copiare un link "azzurro" cliccabile, perché alcune app ci aggiungono l'indirizzo tra parentesi e il comando non parte.
-> Se sembra che non parta, premi di nuovo **Invio**.
-
-Questo comando fa **tutto**: la prima volta installa, le volte dopo aggiorna, e ogni volta avvia i corsi. Non ci sono altri comandi da imparare.
+> ⚠️ **Copialo dal riquadro** o **scrivilo a mano**: non copiare un link "azzurro" cliccabile — alcune app aggiungono l'indirizzo tra parentesi e il comando non parte. Se sembra che non parta, premi di nuovo **Invio**.
 
 Se il comando corto non dovesse funzionare, l'equivalente completo è:
 `curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash`
