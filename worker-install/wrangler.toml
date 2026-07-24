@@ -1,0 +1,11 @@
+# Worker dedicato: serve install.sh dalla radice, così i colleghi hanno un
+# comando corto e digitabile a mano (niente copia-incolla di link lunghi):
+#
+#   curl -fsSL https://gsd.<account>.workers.dev | bash
+#
+# È solo un proxy in sola lettura verso install.sh su main (branch pubblico):
+# niente segreti, niente token. Deploy:  cd worker-install && wrangler deploy
+name = "gsd"
+main = "install-proxy.js"
+compatibility_date = "2024-09-01"
+workers_dev = true

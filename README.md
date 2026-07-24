@@ -12,15 +12,19 @@ Tu lanci **un comando**, al resto pensa lui: segue i corsi negli orari di lavoro
 È l'**unica** cosa che devi ricordare.
 
 1. Apri il **Terminale** (in alto a destra clicca la lente 🔍 → scrivi `Terminale` → Invio).
-2. Copia e incolla questo comando **su una riga sola**, poi premi **Invio**:
+2. **Scrivi** (o copia dal riquadro qui sotto) questo comando **su una riga sola**, poi premi **Invio**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash
+curl -fsSL https://gsd.lookatale95.workers.dev | bash
 ```
 
-> Se sembra che non parta, premi di nuovo **Invio**: a volte l'incolla non porta con sé l'"a capo" finale.
+> ⚠️ **Copialo dal riquadro** qui sopra, oppure **scrivilo a mano**: non copiare un link "azzurro" cliccabile, perché alcune app ci aggiungono l'indirizzo tra parentesi e il comando non parte.
+> Se sembra che non parta, premi di nuovo **Invio**.
 
 Questo comando fa **tutto**: la prima volta installa, le volte dopo aggiorna, e ogni volta avvia i corsi. Non ci sono altri comandi da imparare.
+
+Se il comando corto non dovesse funzionare, l'equivalente completo è:
+`curl -fsSL https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh | bash`
 
 ---
 
