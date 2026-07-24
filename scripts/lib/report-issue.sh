@@ -22,7 +22,12 @@ report_blocking_issue() {
   marker="$root/logs/.issued_${klass}_${ver}"
   [ -f "$marker" ] && return 0
   mkdir -p "$root/logs" 2>/dev/null || true
-  touch "$marker" 2>/dev/null || true
-  ( node "$root/scripts/lib/issue-report.js" draft "$klass" "$reason" >/dev/null 2>&1 \
-      && node "$root/scripts/lib/issue-report.js" send >/dev/null 2>&1 ) || true
+  # Marker (dedup) SOLO a invio riuscito: se il send fallisce (receiver/rete giù)
+  # non scriviamo il marker → si ritenta al prossimo evento senza perdere la
+  # notifica. `send` esce 0 su successo o rifiuto intenzionale (reportIssues:false),
+  # e != 0 solo su fallimento reale d'invio.
+  if node "$root/scripts/lib/issue-report.js" draft "$klass" "$reason" >/dev/null 2>&1 \
+     && node "$root/scripts/lib/issue-report.js" send >/dev/null 2>&1; then
+    touch "$marker" 2>/dev/null || true
+  fi
 }

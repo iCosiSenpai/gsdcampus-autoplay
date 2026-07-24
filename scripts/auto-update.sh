@@ -30,6 +30,12 @@ cd "$DIR" || exit 1
 # La copia di se stesso si ripulisce in uscita (insieme al lock, v. sotto).
 SELF_COPY="$0"
 
+# Se fermiamo lo scheduler (WAS_RUNNING), stop.sh sospende il keepalive creando
+# .keepalive_disabled. Questo flag ci ricorda di RIABILITARLO in uscita — anche
+# se veniamo interrotti (TERM/INT da launchd) prima del riavvio — così il
+# watchdog fa ripartire lo scheduler e il nodo non resta mai giù. (fix #1/#2)
+KEEPALIVE_SUSPENDED=false
+
 source "$DIR/scripts/lib/ui.sh"
 source "$DIR/scripts/lib/pid-utils.sh"
 source "$DIR/scripts/lib/notify.sh"
@@ -80,7 +86,22 @@ if ! (set -o noclobber; echo "$$" > "$LOCK") 2>/dev/null; then
   alog "Lock non acquisito: esco."
   exit 0
 fi
-trap 'rm -f "$LOCK" "$SELF_COPY" 2>/dev/null' EXIT
+au_cleanup() {
+  rm -f "$LOCK" "$SELF_COPY" 2>/dev/null
+  # Se avevamo sospeso il keepalive per l'update, riabilitalo SEMPRE in uscita:
+  # su interruzione (TERM/INT) restart_if_needed non gira, ma il watchdog
+  # riabilitato rilancia ./start.sh entro ~120s (recovery). Idempotente sui
+  # path che hanno già riavviato; rispetta keepAlive:false (install lo rimuove).
+  if [ "$KEEPALIVE_SUSPENDED" = true ]; then
+    rm -f "$DIR/.keepalive_disabled" 2>/dev/null || true
+    "$DIR/scripts/lib/install-scheduler-agent.sh" install >/dev/null 2>&1 || true
+  fi
+}
+trap au_cleanup EXIT
+# launchd può mandarci TERM (logout, unload dell'agent): convertiamo TERM/INT in
+# un exit così il trap EXIT (recovery keepalive) gira comunque.
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 # ── 4. Rete + c'è qualcosa di nuovo? ────────────────────────────────────────
 if ! curl -m 5 -fsS -o /dev/null https://raw.githubusercontent.com 2>/dev/null; then
@@ -111,6 +132,7 @@ if autoplay_instance_alive "$DIR"; then
   WAS_RUNNING=true
   alog "Scheduler attivo: lo fermo per l'aggiornamento."
   "$DIR/stop.sh" >> "$LOG" 2>&1 || true
+  KEEPALIVE_SUSPENDED=true   # stop.sh ha creato .keepalive_disabled → riabilitalo in uscita
 fi
 
 restart_if_needed() {
@@ -139,10 +161,15 @@ if ! "$DIR/scripts/dev-check.sh" >> "$LOG" 2>&1; then
   # duplicato — a ogni giro l'update ritenta finché il maintainer non pusha il fix).
   RB_MARKER="$DIR/logs/.rollback_${NEW:0:12}"
   if [ ! -f "$RB_MARKER" ]; then
-    touch "$RB_MARKER" 2>/dev/null || true
-    node "$DIR/scripts/lib/issue-report.js" draft "auto_update_rollback" "dev-check KO su ${NEW:0:7}, rollback automatico a ${OLD:0:7}" >> "$LOG" 2>&1 \
-      && node "$DIR/scripts/lib/issue-report.js" send >> "$LOG" 2>&1 \
-      || alog "Invio issue di rollback non riuscito (receiver non configurato?)."
+    # Marker (anti-duplicato per la SHA rotta) SOLO a invio riuscito: se il send
+    # fallisce (receiver giù) ritentiamo al prossimo giro senza perdere la
+    # notifica. `send` esce !=0 solo su fallimento reale d'invio.
+    if node "$DIR/scripts/lib/issue-report.js" draft "auto_update_rollback" "dev-check KO su ${NEW:0:7}, rollback automatico a ${OLD:0:7}" >> "$LOG" 2>&1 \
+       && node "$DIR/scripts/lib/issue-report.js" send >> "$LOG" 2>&1; then
+      touch "$RB_MARKER" 2>/dev/null || true
+    else
+      alog "Invio issue di rollback non riuscito (receiver non configurato?)."
+    fi
   fi
   notify_user "GSD Campus" "Aggiornamento annullato: la nuova versione era difettosa. Segnalato al responsabile, tutto continua a funzionare." auto_update_rollback || true
   restart_if_needed
