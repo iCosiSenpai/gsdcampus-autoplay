@@ -21,6 +21,11 @@ source "$DIR/scripts/lib/pid-utils.sh"
 ui_header "GSD Campus — Avvio autonomo" "Claude on-demand: zero chiamate senza quiz" "⚡"
 echo ""
 
+# Ping diagnostico della versione (best-effort, in background, non blocca; opt-out
+# diagnostics:false): il maintainer vede nei log del Worker quale versione gira su
+# ogni store — utile per accorgersi dei Mac rimasti su codice vecchio.
+node "$DIR/scripts/lib/diag-ping.js" start >/dev/null 2>&1 &
+
 info "Controllo e arresto eventuali istanze precedenti..."
 # Sospendi e scarica il keepalive PRIMA di fermare lo scheduler, così non lo
 # resuscita durante la pulizia/riavvio (race-guard: flag + bootout dell'agent).
@@ -120,8 +125,14 @@ case "$BATCH_RC" in
   20) ok "Nessun quiz aperto: Claude, Ollama e proxy non sono stati avviati." ;;
   21) ok "Inbox invariata gia elaborata: nessuna nuova chiamata AI." ;;
   22) warn "Alcune risposte non hanno superato la validazione; restano nell'inbox senza consumare tentativi quiz." ;;
-  23) warn "Claude non ha completato il batch; handoff intatto e retry protetto da cooldown." ;;
-  24) warn "Componenti AI/login non pronti; autoplay parte comunque e conserva l'handoff." ;;
+  23)
+    warn "Claude non ha completato il batch; handoff intatto e retry protetto da cooldown."
+    node "$DIR/scripts/lib/diag-ping.js" error ai_batch_failed >/dev/null 2>&1 &
+    ;;
+  24)
+    warn "Componenti AI/login non pronti; autoplay parte comunque e conserva l'handoff."
+    node "$DIR/scripts/lib/diag-ping.js" error ai_not_ready >/dev/null 2>&1 &
+    ;;
   25) warn "Risposte salvate localmente, ma distribuzione fleet non riuscita; il retry resta persistente." ;;
   *) warn "Batch AI terminato con codice $BATCH_RC; autoplay parte comunque." ;;
 esac

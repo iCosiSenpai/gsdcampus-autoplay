@@ -25,6 +25,7 @@
   "autoShareAnswers": true,
   "autoUpdate": true,
   "keepAlive": true,
+  "diagnostics": true,
   "sessionUnstableCooldownMin": 30,
   "shareMetrics": false,
   "storeTag": "",

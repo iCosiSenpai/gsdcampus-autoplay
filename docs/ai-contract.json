@@ -141,6 +141,7 @@
     "autoShareAnswers": "boolean default true (resolve → Worker)",
     "autoUpdate": "boolean default true",
     "keepAlive": "boolean default true (LaunchAgent watchdog che tiene vivo lo scheduler h24)",
+    "diagnostics": "boolean default true (ping versione+errorClass al Worker, ZERO PII, no issue)",
     "browserChannel": "chrome | chromium | auto | null"
   },
   "limits": {
