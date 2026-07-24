@@ -18,3 +18,9 @@ compatibility_date = "2024-09-01"
 
 [vars]
 KEY = "gsd-autoplay-report-key-2026-7f3a9c"
+
+# Workers Logs: conserva i console.log (inclusi i [diag]) nella dashboard
+# Cloudflare per qualche giorno, consultabili SENZA tenere `wrangler tail` acceso.
+# Volume bassissimo (pochi ping per store): resta nel piano free.
+[observability]
+enabled = true
