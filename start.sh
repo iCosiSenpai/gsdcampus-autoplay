@@ -21,6 +21,11 @@ OUT_FILE="logs/autoplay.out"
 
 mkdir -p logs
 
+# Avvio ESPLICITO dell'utente: azzera l'eventuale sentinella di stop volontario
+# (.user_stopped) così l'auto-update torna a poter riavviare/proteggere lo
+# scheduler dopo un aggiornamento. Lo stop la ricrea; questo la annulla. (fix #5)
+rm -f "$DIR/.user_stopped" 2>/dev/null || true
+
 IGNORE_HOURS=false
 if [ "${1:-}" = "--ignore-hours" ]; then
   IGNORE_HOURS=true
