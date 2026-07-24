@@ -88,11 +88,13 @@ if ! (set -o noclobber; echo "$$" > "$LOCK") 2>/dev/null; then
 fi
 au_cleanup() {
   rm -f "$LOCK" "$SELF_COPY" 2>/dev/null
-  # Se avevamo sospeso il keepalive per l'update, riabilitalo SEMPRE in uscita:
-  # su interruzione (TERM/INT) restart_if_needed non gira, ma il watchdog
-  # riabilitato rilancia ./start.sh entro ~120s (recovery). Idempotente sui
-  # path che hanno già riavviato; rispetta keepAlive:false (install lo rimuove).
-  if [ "$KEEPALIVE_SUSPENDED" = true ]; then
+  # Se avevamo sospeso il keepalive per l'update, riabilitalo in uscita — MA solo
+  # se l'utente non ha chiesto uno stop volontario nel frattempo (.user_stopped):
+  # in quel caso rispettiamo "resta spento" e non resuscitiamo nulla. Copre anche
+  # i path che NON passano da restart_if_needed (dipendenze mancanti, TERM/INT):
+  # su interruzione il watchdog riabilitato rilancia ./start.sh entro ~120s
+  # (recovery). Idempotente; rispetta keepAlive:false (install lo rimuove). (fix #1/#2/#5)
+  if [ "$KEEPALIVE_SUSPENDED" = true ] && [ ! -f "$DIR/.user_stopped" ]; then
     rm -f "$DIR/.keepalive_disabled" 2>/dev/null || true
     "$DIR/scripts/lib/install-scheduler-agent.sh" install >/dev/null 2>&1 || true
   fi
@@ -131,12 +133,24 @@ WAS_RUNNING=false
 if autoplay_instance_alive "$DIR"; then
   WAS_RUNNING=true
   alog "Scheduler attivo: lo fermo per l'aggiornamento."
-  "$DIR/stop.sh" >> "$LOG" 2>&1 || true
+  # GSD_INTERNAL_STOP=1: stop TECNICO (non scrive la sentinella .user_stopped),
+  # così dopo l'update possiamo riavviare. Lo stop dell'UTENTE, invece, scrive
+  # la sentinella e ci impedisce di resuscitare lo scheduler. (fix #5)
+  GSD_INTERNAL_STOP=1 "$DIR/stop.sh" >> "$LOG" 2>&1 || true
   KEEPALIVE_SUSPENDED=true   # stop.sh ha creato .keepalive_disabled → riabilitalo in uscita
 fi
 
 restart_if_needed() {
   if [ "$WAS_RUNNING" = true ]; then
+    # Stop volontario dell'utente nel frattempo (.user_stopped)? Rispetta
+    # "resta spento": niente riavvio scheduler, niente keepalive. La sentinella
+    # la rimuove solo un avvio esplicito (start.sh o il launcher). Azzero anche
+    # KEEPALIVE_SUSPENDED così au_cleanup non riabilita il keepalive in uscita. (fix #5)
+    if [ -f "$DIR/.user_stopped" ]; then
+      alog "Stop volontario dell'utente (.user_stopped): non riavvio lo scheduler."
+      KEEPALIVE_SUSPENDED=false
+      return 0
+    fi
     # Modalità NORMALE (un eventuale --ignore-hours precedente NON viene
     # ripristinato: scelta deliberata, la modalità autonoma è quella giusta
     # per un riavvio non presidiato).

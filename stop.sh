@@ -25,6 +25,16 @@ if [ -x "$DIR/scripts/lib/install-scheduler-agent.sh" ]; then
   "$DIR/scripts/lib/install-scheduler-agent.sh" remove >/dev/null 2>&1 || true
 fi
 
+# Sentinella di INTENTO utente. Uno stop lanciato dall'utente (o dalla plancia
+# "F ferma") significa "resta spento finché non riavvio esplicitamente": la
+# scriviamo così l'auto-update NON resuscita lo scheduler al prossimo giro.
+# Lo stop TECNICO interno all'auto-update passa invece GSD_INTERNAL_STOP=1 e
+# NON scrive la sentinella (deve poter riavviare dopo l'aggiornamento).
+# La rimuovono solo start.sh / il launcher, cioè un avvio esplicito.
+if [ "${GSD_INTERNAL_STOP:-0}" != "1" ]; then
+  touch "$DIR/.user_stopped" 2>/dev/null || true
+fi
+
 step "1/3" "Lettura PID dello scheduler"
 PID=""
 PID=$(autoplay_instance_pid "$DIR" 2>/dev/null || echo "")
