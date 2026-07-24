@@ -205,14 +205,21 @@ function labelExists(token) {
 /** Path primario: HTTP POST al receiver server-side. Nessun token, nessun gh. */
 async function postToReceiver(endpoint, key, draft) {
   let res;
+  // Timeout: senza AbortController un receiver/rete lento bloccherebbe il
+  // chiamante (scheduler in crash_loop/preflight, launcher) per minuti.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
     res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, title: draft.title, body: draft.body, phase: draft.phase || '' })
+      body: JSON.stringify({ key, title: draft.title, body: draft.body, phase: draft.phase || '' }),
+      signal: controller.signal
     });
   } catch (e) {
     return { error: 'receiver non raggiungibile (' + redactText(e.message || String(e)).slice(0, 200) + '). Verifica connessione e che il Worker sia online (worker/README.md).' };
+  } finally {
+    clearTimeout(timer);
   }
   const text = await res.text();
   let json; try { json = JSON.parse(text); } catch (_) { json = null; }
@@ -294,7 +301,7 @@ async function cmdSend() {
   const key = String(cfg.issueReportKey || DEFAULT_ISSUE_KEY || '').trim();
   if (endpoint) {
     const r = await postToReceiver(endpoint, key, draft);
-    if (r.error) { console.log('Invio issue fallito: ' + r.error); process.exit(0); }
+    if (r.error) { console.log('Invio issue fallito: ' + r.error); process.exit(3); }
     try { fs.unlinkSync(file); } catch (_) {}
     console.log('Issue creata: ' + r.url);
     process.exit(0);

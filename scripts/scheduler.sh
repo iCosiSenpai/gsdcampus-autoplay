@@ -440,12 +440,17 @@ apply_crash_backoff() {
     notify_user "GSD Campus" "L'automazione ha avuto errori ripetuti: riproverà da sola più tardi. Se persiste, apri il Terminale e rilancia il comando di avvio." crash_loop || true
     node "$DIR/scripts/lib/diag-ping.js" error crash_loop >/dev/null 2>&1 &
     report_blocking_issue "$DIR" crash_loop "Automazione ferma per $MAX_CRASHES crash consecutivi; auto-retry tra $((CRASH_LOOP_COOLDOWN / 60)) min."
-    sleep "$CRASH_LOOP_COOLDOWN"
+    # wait_ms (non sleep) così ./stop.sh viene onorato entro ~60s invece di
+    # restare bloccati fino a 30 min; l'heartbeat "crash_loop" tiene fresco lo
+    # status (crashLoop resta true via ...prev in buildSchedulerStatus). (fix #6)
+    wait_ms $((CRASH_LOOP_COOLDOWN * 1000)) crash_loop
     CRASH_COUNT=0
     clear_crash_loop
     return 0
   fi
-  sleep "$BACKOFF"
+  # wait_ms (non sleep): anche il backoff lungo (fino a 1800s a CRASH_COUNT=4)
+  # deve poter essere interrotto da ./stop.sh entro ~60s. (fix #6)
+  wait_ms $((BACKOFF * 1000))
   return 0
 }
 
