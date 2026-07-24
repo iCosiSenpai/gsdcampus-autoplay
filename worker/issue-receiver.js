@@ -6,6 +6,8 @@
  *   POST /answers            → merge additivo di risposte quiz su
  *                              data/known_answers_public.json (Contents API)
  *   POST /metrics            → batch phase-only (privacy-safe, no CF); ack only
+ *   POST /diag               → ping diagnostico (versione + errorClass, no PII);
+ *                              solo console.log, nessuna issue/persistenza
  *
  * PAT in secret ISSUE_TOKEN (e opz. ANSWERS_TOKEN). Scope necessari:
  *   Issues: Read and write
@@ -295,6 +297,36 @@ async function handleMetrics(data, env) {
   });
 }
 
+// --- Diagnostica (privacy-safe: solo versione + errorClass, MAI PII) --------
+// Canale silenzioso per la salute della flotta: NON apre issue, NON persiste.
+// Fa solo un console.log compatto (visibile con `wrangler tail` / dashboard CF).
+// Serve a sapere quale VERSIONE gira su ogni store e quali errorClass capitano.
+
+function diagSlug(value, max) {
+  return String(value == null ? '' : value).replace(/[^a-zA-Z0-9_.:+-]/g, '').slice(0, max);
+}
+
+function handleDiag(data, env) {
+  if (!checkKey(data, env)) {
+    return jsonResp(401, { ok: false, error: 'bad_key' });
+  }
+  // Difesa extra: se un campo somiglia a PII (CF/autologin/token) lo azzera.
+  const safe = (v) => (looksLikePii(v) ? '' : v);
+  const line = {
+    t: 'diag',
+    event: diagSlug(data.event, 32) || 'diag',
+    version: safe(diagSlug(data.version, 40)),
+    errorClass: safe(diagSlug(data.errorClass, 64)),
+    store: safe(diagSlug(data.storeTag, 32)),
+    phase: safe(diagSlug(data.phase, 48)),
+    at: new Date().toISOString(),
+  };
+  // Solo log: niente persistenza GitHub, niente issue. Il maintainer legge i
+  // log del Worker (wrangler tail / dashboard). Zero rumore.
+  console.log('[diag] ' + JSON.stringify(line));
+  return jsonResp(200, { ok: true, accepted: true });
+}
+
 // --- Rate limit (in-memory per isolate; best-effort) -------------------------
 // Target: ~10/min /answers, ~5/min /report, ~20/min /metrics.
 // Su CF multi-isolate non è globale: affiancare WAF rules in dashboard (8.5).
@@ -339,6 +371,16 @@ export default {
       return handleMetrics(data, env);
     }
 
+    if (request.method === 'POST' && (path === '/diag')) {
+      if (!rateLimitOk('diag', 30)) {
+        return jsonResp(429, { ok: false, error: 'rate_limited' });
+      }
+      let data;
+      try { data = await request.json(); }
+      catch { return jsonResp(400, { ok: false, error: 'invalid_json' }); }
+      return handleDiag(data, env);
+    }
+
     if (request.method === 'POST' && (path === '/' || path === '/report')) {
       if (!rateLimitOk('report', 5)) {
         return jsonResp(429, { ok: false, error: 'rate_limited' });
@@ -353,7 +395,7 @@ export default {
       return jsonResp(200, {
         ok: true,
         service: 'gsdcampus-autoplay-receiver',
-        routes: ['POST /report', 'POST /answers', 'POST /metrics'],
+        routes: ['POST /report', 'POST /answers', 'POST /metrics', 'POST /diag'],
       });
     }
 

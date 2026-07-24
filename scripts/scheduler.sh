@@ -46,7 +46,9 @@ notify_on_exit() {
         notify_user "GSD Campus" "Il corso ha bisogno di aiuto: apri il Terminale e rilancia il comando di avvio." need_help || true
       fi
       ;;
-    3) notify_user "GSD Campus" "Il link di accesso al corso è scaduto: serve quello nuovo dal referente." autologin_invalid || true ;;
+    3) notify_user "GSD Campus" "Il link di accesso al corso è scaduto: serve quello nuovo dal referente." autologin_invalid || true
+       node "$DIR/scripts/lib/diag-ping.js" error autologin_invalid >/dev/null 2>&1 &
+       ;;
   esac
   return 0
 }
@@ -428,6 +430,7 @@ apply_crash_backoff() {
     log "Raggiunti $MAX_CRASHES crash consecutivi: crash_loop. Segnalo, attendo $((CRASH_LOOP_COOLDOWN / 60)) min e riprovo (nessuna uscita)."
     mark_crash_loop "crash_loop"
     notify_user "GSD Campus" "L'automazione ha avuto errori ripetuti: riproverà da sola più tardi. Se persiste, apri il Terminale e rilancia il comando di avvio." crash_loop || true
+    node "$DIR/scripts/lib/diag-ping.js" error crash_loop >/dev/null 2>&1 &
     sleep "$CRASH_LOOP_COOLDOWN"
     CRASH_COUNT=0
     clear_crash_loop

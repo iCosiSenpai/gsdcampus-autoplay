@@ -33,6 +33,15 @@ Il LaunchAgent `com.gsdcampus.autoplay.autoupdate` (`scripts/lib/install-launchd
 - **Restart**: `auto-update.sh` chiama `stop.sh` + `start.sh` (già collaudato); il keepalive copre il resto. Lock `noclobber` anti-doppio-run; il file si ricopia in `$TMPDIR` prima del `git` per non corrompersi.
 - Opt-out: `"autoUpdate": false` in `config.json` → l'agent viene rimosso.
 
+## Diagnostica flotta (silenziosa)
+
+`scripts/lib/diag-ping.js` manda un ping **privacy-safe** al Worker (`POST /diag`): solo `version` (git short sha), `event`, `errorClass`, `storeTag` — **mai** CF, autologin, token, cookie o URL (slug-only + redazione lato Worker). Il Worker fa un semplice `console.log` (niente issue, niente persistenza): lo leggi con `wrangler tail` o dalla dashboard Cloudflare.
+
+- Inviato dal launcher all'avvio (`event: start` con la versione) → sai quale versione gira su ogni store, così noti i Mac rimasti su codice vecchio.
+- Inviato su eventi che contano: `crash_loop`, `autologin_invalid` (scheduler), `ai_batch_failed`/`ai_not_ready` (launcher).
+- Best-effort: non blocca mai, esce sempre 0, ignora offline/timeout. Opt-out: `"diagnostics": false` in `config.json`.
+- Le **issue** GitHub restano riservate ai casi rari e azionabili (es. rollback auto-update, deduplicato): la diagnostica di routine passa da qui, senza rumore.
+
 ## Claude Code on-demand
 
 `launch-ai-supervisor.sh` è un bootstrap deterministico, non una TUI: sincronizza la banca, aggiorna `logs/ai_todo.json` se è più vecchio di 15 minuti, esegue l'eventuale batch quiz e avvia `start.sh`. Poi termina.
