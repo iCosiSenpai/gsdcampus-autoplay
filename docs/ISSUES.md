@@ -17,3 +17,15 @@ Quando l'AI **non riesce a risolvere in loco** un problema **codice/infra** — 
 **Fallback maintainer (opzionale)**: sul proprio Mac il maintainer può mettere in `config.json` (gitignored) `issueReporterToken` = fine-grained PAT GitHub (scope **Issues: Read and write**, solo `iCosiSenpai/gsdcampus-autoplay`): se `issueEndpoint` non è configurato, `send` usa `GH_TOKEN=<token> gh issue create` (richiede `gh`, nessun `gh auth login`). Comodo se il receiver non è ancora deployato o è down. Per i colleghi non serve: usano il receiver.
 
 **Strumento**: `node scripts/lib/issue-report.js draft "<phase>" ["<short-reason>"] | send`.
+
+## Issue automatiche per problemi BLOCCANTI (senza conferma)
+
+Oltre al flusso sopra (avviato dall'AI, con conferma umana), alcuni problemi **bloccanti** — che fermano il comando, il terminale o il lavoro — aprono un'issue **da soli**, così il maintainer riceve una notifica push senza dover leggere i log dal vivo:
+
+- `crash_loop` (`scheduler.sh`) — l'automazione si è fermata per crash ripetuti.
+- `preflight_failed` (`scheduler.sh`) — i selettori DOM non combaciano (serve un fix del codice).
+- `scheduler_start_failed` (`launch-ai-supervisor.sh`) — il launcher non è riuscito ad avviare lo scheduler.
+
+Meccanismo: `scripts/lib/report-issue.sh` → `report_blocking_issue <root> <klass> <reason>` riusa lo stesso `issue-report.js` (draft+send, redazione PII, gate `reportIssues:false`) e lo stesso receiver Worker. **Deduplica** per classe+versione (marker `logs/.issued_<klass>_<sha>`, gitignorato): una sola issue per problema finché non cambia la versione (nuovo deploy = nuovo tentativo). Best-effort, non blocca l'automazione.
+
+Perché **senza conferma**: sono problemi che *bloccano*, quindi potrebbe non esserci nessuno a confermare; sono rari e azionabili → la notifica push è appropriata. La diagnostica di routine (versione, errori non bloccanti) resta invece sul canale **silenzioso** `/diag` (log del Worker), senza aprire issue.

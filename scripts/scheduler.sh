@@ -33,6 +33,8 @@ session_unstable_cooldown_ms() {
 
 # Notifiche macOS (best-effort, mai bloccanti; throttle interno 6h per tipo).
 source "$DIR/scripts/lib/notify.sh"
+# Issue GitHub automatiche per problemi BLOCCANTI (dedup per classe+versione).
+source "$DIR/scripts/lib/report-issue.sh"
 
 # Mappa gli exit code che richiedono intervento umano su una notifica macOS.
 # SOLO side-effect: non tocca EXIT_CODE né i rami decisionali (l'exit-code API
@@ -354,6 +356,7 @@ preflight_selectors() {
   log "Preflight selettori FALLITO: autoplay non avviato."
   node "$SCHEDULER_STATUS_CLI" mark "$DIR" preflight_failed "" "Probe selettori fallito; browser non aperto." "selector_probe_failed" >/dev/null 2>&1 || true
   notify_user "GSD Campus" "Controllo pagine fallito: aggiorna con il comando curl prima di riprovare." preflight_failed || true
+  report_blocking_issue "$DIR" preflight_failed "selector-probe fallito: i marker DOM delle pagine non combaciano (serve un fix del codice)."
   return 1
 }
 
@@ -369,6 +372,11 @@ MAX_CRASHES=5
 # restart immediato da launchd = martellamento): segnaliamo, aspettiamo a lungo
 # e riproviamo. 30 min, come il cooldown session_unstable.
 CRASH_LOOP_COOLDOWN=1800
+
+# Cooldown dopo un preflight fallito (selettori DOM non allineati): NON usciamo
+# (sotto keepalive uscire = restart immediato = loop), aspettiamo e riproviamo.
+# In ms perché usa wait_ms (che onora anche lo STOP_FILE). 30 min.
+PREFLIGHT_COOLDOWN_MS=1800000
 
 # Scrive logs/status.json con phase=$1 in modo atomico, mergendo i campi
 # preesistenti. DIR passa via argv (niente interpolazione shell dentro il JS:
@@ -431,6 +439,7 @@ apply_crash_backoff() {
     mark_crash_loop "crash_loop"
     notify_user "GSD Campus" "L'automazione ha avuto errori ripetuti: riproverà da sola più tardi. Se persiste, apri il Terminale e rilancia il comando di avvio." crash_loop || true
     node "$DIR/scripts/lib/diag-ping.js" error crash_loop >/dev/null 2>&1 &
+    report_blocking_issue "$DIR" crash_loop "Automazione ferma per $MAX_CRASHES crash consecutivi; auto-retry tra $((CRASH_LOOP_COOLDOWN / 60)) min."
     sleep "$CRASH_LOOP_COOLDOWN"
     CRASH_COUNT=0
     clear_crash_loop
@@ -456,7 +465,11 @@ while true; do
 
   if [[ "$IGNORE_HOURS" = true ]]; then
     log "Avvio autoplay (modalità ignore-hours)..."
-    preflight_selectors || exit 1
+    if ! preflight_selectors; then
+      log "Preflight fallito: attendo $((PREFLIGHT_COOLDOWN_MS / 60000)) min e riprovo (niente uscita: evito il loop sotto keepalive; issue già aperta)."
+      wait_ms "$PREFLIGHT_COOLDOWN_MS" preflight_failed
+      continue
+    fi
     node "$SCHEDULER_STATUS_CLI" mark "$DIR" scheduler_launching "" "Preflight superato; avvio browser." >/dev/null 2>&1 || true
     # zsh: l'exit code dei comandi in pipe è in $pipestatus (1-indexed), NON in
     # $PIPESTATUS (bash-ism). Il `|| EXIT_CODE=...` va nella STESSA riga: sotto
@@ -503,7 +516,11 @@ while true; do
 
   if is_in_hours; then
     log "In orario lavorativo. Avvio autoplay..."
-    preflight_selectors || exit 1
+    if ! preflight_selectors; then
+      log "Preflight fallito: attendo $((PREFLIGHT_COOLDOWN_MS / 60000)) min e riprovo (issue già aperta)."
+      wait_ms "$PREFLIGHT_COOLDOWN_MS" preflight_failed
+      continue
+    fi
     node "$SCHEDULER_STATUS_CLI" mark "$DIR" scheduler_launching "" "Preflight superato; avvio browser." >/dev/null 2>&1 || true
     # zsh pipestatus (1-indexed): v. commento nel ramo ignore-hours.
     EXIT_CODE=0

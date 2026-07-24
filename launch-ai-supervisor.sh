@@ -17,6 +17,7 @@ TODO_FILE="$DIR/logs/ai_todo.json"
 
 source "$DIR/scripts/lib/ui.sh"
 source "$DIR/scripts/lib/pid-utils.sh"
+source "$DIR/scripts/lib/report-issue.sh"
 
 ui_header "GSD Campus — Avvio autonomo" "Claude on-demand: zero chiamate senza quiz" "⚡"
 echo ""
@@ -158,5 +159,6 @@ if GSD_LAUNCHER=1 "$DIR/start.sh"; then
   node "$DIR/scripts/lib/panel-cli.js" || true
 else
   err "Scheduler non avviato. Controlla logs/autoplay.out e rilancia il comando curl."
+  report_blocking_issue "$DIR" scheduler_start_failed "Il launcher non è riuscito ad avviare lo scheduler (start.sh ha fallito)."
   exit 1
 fi
