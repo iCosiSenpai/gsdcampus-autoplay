@@ -30,6 +30,14 @@ const SELECTORS = {
   login: {
     password: 'input[type="password"]',
   },
+  // Informativa che precede alcuni corsi. La piattaforma la serve sia su
+  // /corso/informativa/<id> sia direttamente su /corso/show/<id>: il
+  // riconoscimento deve essere sul FORM, non sull'URL (vedi login-flow.js).
+  informativa: {
+    courseForm: 'form#informativa_form, form[action*="acceptInformativa"]',
+    acceptBoxes: 'input[type="checkbox"].form-check-input.accept',
+    submit: 'form#informativa_form button[type="submit"], button[type="submit"].btn.btn-primary',
+  },
 };
 
 /**
@@ -57,10 +65,28 @@ const PROBES = [
     test: (html) => /href=["'][^"']*\/lezione\/show\/\d+/.test(html),
   },
   {
+    id: 'course.async_lesson_link',
+    page: 'course',
+    required: true,
+    test: (html) => /href=["'][^"']*\/lezioneAsincrona\/show\/\d+/.test(html),
+  },
+  {
     id: 'course.quiz_or_open',
     page: 'course',
     required: false,
     test: (html) => /questionario|btn-primary|Apri/i.test(html),
+  },
+  {
+    id: 'informativa.course_form',
+    page: 'informativa',
+    required: true,
+    test: (html) => /id=["']informativa_form["']|action=["'][^"']*acceptInformativa/i.test(html),
+  },
+  {
+    id: 'informativa.accept_boxes',
+    page: 'informativa',
+    required: true,
+    test: (html) => /class=["'][^"']*form-check-input[^"']*accept/i.test(html),
   },
   {
     id: 'quiz.form',
@@ -114,7 +140,9 @@ function probeHtml(html, pageKind = null) {
 function probeFixtures(dir) {
   const fs = require('fs');
   const path = require('path');
-  const pages = ['dashboard', 'course', 'quiz', 'usage'];
+  // Le pagine derivano dai PROBES: aggiungere un probe con `page: 'x'` richiede
+  // (e verifica) la fixture test/fixtures/selectors/x.snippet.html.
+  const pages = [...new Set(PROBES.map((p) => p.page))];
   const report = { ok: true, pages: [], missing: [] };
   for (const page of pages) {
     const file = path.join(dir, `${page}.snippet.html`);

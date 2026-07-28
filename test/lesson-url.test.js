@@ -67,3 +67,18 @@ describe('selettore link lezione', () => {
     assert.match(SELECTORS.course.lessonLinks, /\/lezioneAsincrona\/show\//);
   });
 });
+
+
+describe('LESSON_RE come stringa', () => {
+  it('regge il viaggio fino al browser', () => {
+  // course-runner passa LESSON_RE.source dentro page.evaluate e lì ricostruisce
+  // la regex: se questo giro si rompe, le lezioni tornano invisibili. Prima le
+  // copie erano due (modulo + literal dentro l'evaluate) e divergevano.
+    const { LESSON_RE } = require('../src/lib/lesson-url');
+    const inBrowser = new RegExp(LESSON_RE.source, 'i');
+    assert.ok(inBrowser.test('https://tecsial.gsdcampus.it/lezione/show/13275'));
+    assert.ok(inBrowser.test('https://tecsial.gsdcampus.it/lezioneAsincrona/show/14062'));
+    assert.ok(!inBrowser.test('https://tecsial.gsdcampus.it/corso/show/17162'));
+    assert.ok(!inBrowser.test('https://tecsial.gsdcampus.it/questionario/show/68'));
+  });
+});

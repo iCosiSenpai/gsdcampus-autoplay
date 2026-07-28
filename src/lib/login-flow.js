@@ -7,6 +7,7 @@
 
 const { redactUrl } = require('./logger');
 const { INTERSTITIAL_CLICK_MS, POST_SUBMIT_MS } = require('./platform');
+const { SELECTORS } = require('./selectors');
 
 // Gestisce eventuali pagine intermedie post-autologin, come:
 // - scelta utente/ruolo;
@@ -82,12 +83,26 @@ async function handlePostLoginInterstitial(page, log) {
 
 // Gestisce la pagina di informativa/accettazione che precede alcuni corsi.
 // Spunta le checkbox della privacy/scheda tecnica e clicca "Prosegui".
+//
+// ATTENZIONE (verificato sul corso 17162 di più account): la piattaforma serve
+// l'informativa a DUE indirizzi diversi:
+//   - /corso/informativa/<id>
+//   - /corso/show/<id>            ← stessa pagina, URL del corso, nessun redirect
+// Riconoscerla solo dall'URL faceva sì che sul secondo caso le checkbox non
+// venissero mai spuntate: il corso non si apriva mai e il parsing trovava zero
+// link, con l'errore "No lesson/quiz links found" e un dump HTML che era, di
+// fatto, la pagina di informativa. Ora il riconoscimento è sul DOM (il form).
 async function handleCourseInformativa(page, log) {
   const url = page.url();
-  if (!url.includes('/corso/informativa/')) return false;
+  const onInformativaUrl = url.includes('/corso/informativa/');
+  const hasForm = onInformativaUrl || await page
+    .locator(SELECTORS.informativa.courseForm).count()
+    .then((n) => n > 0)
+    .catch(() => false);
+  if (!hasForm) return false;
   log(`Pagina informativa rilevata (${redactUrl(url)}). Cerco checkbox da accettare...`);
   try {
-    const checkboxes = await page.locator('input[type="checkbox"].form-check-input.accept').all();
+    const checkboxes = await page.locator(SELECTORS.informativa.acceptBoxes).all();
     if (checkboxes.length === 0) {
       log('Nessuna checkbox di accettazione trovata.');
       return false;
@@ -97,7 +112,10 @@ async function handleCourseInformativa(page, log) {
     }
     log(`Spuntate ${checkboxes.length} checkbox. Attendo abilitazione bottone...`);
     await page.waitForTimeout(1000);
-    const submitBtn = page.locator('button[type="submit"].btn.btn-primary');
+    // Il bottone del FORM viene prima del generico .btn-primary della pagina:
+    // su /corso/show/<id> ci sono altri bottoni primari (Precedente/Successiva
+    // dei PDF) e cliccare quelli non accettava nulla.
+    const submitBtn = page.locator(SELECTORS.informativa.submit).first();
     const exists = await submitBtn.count().catch(() => 0) > 0;
     if (!exists) {
       log('Bottone Prosegui non trovato.');
@@ -106,10 +124,10 @@ async function handleCourseInformativa(page, log) {
     const isDisabled = await submitBtn.isDisabled().catch(() => true);
     if (isDisabled) {
       log('Bottone ancora disabilitato; forzo enabled via JS.');
-      await page.evaluate(() => {
-        const btn = document.querySelector('button[type="submit"].btn.btn-primary');
+      await page.evaluate((sel) => {
+        const btn = document.querySelector(sel);
         if (btn) btn.disabled = false;
-      });
+      }, SELECTORS.informativa.submit);
     }
     await submitBtn.click().catch(e => log(`Errore click submit: ${e.message}`));
     await page.waitForTimeout(POST_SUBMIT_MS);

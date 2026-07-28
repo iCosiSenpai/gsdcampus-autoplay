@@ -16,7 +16,8 @@ const {
   acceptUsageDeclaration,
 } = require('./login-flow');
 const { isLoginPage, isDashboardLoaded } = require('./page-detect');
-const { isLessonUrl, sameLesson } = require('./lesson-url');
+const { isLessonUrl, sameLesson, LESSON_RE } = require('./lesson-url');
+const { diagnoseEmptyCoursePage } = require('./course-page-diag');
 const { OffHoursExit, SessionError } = require('./errors');
 const {
   dashboardUrl,
@@ -41,6 +42,68 @@ function courseLinkSelector(courseId) {
 
 function lessonLinkSelector() {
   return SELECTORS.course.lessonLinks; // a[href*="/lezione/show/"]
+}
+
+/**
+ * Link lezione/questionario della pagina corso, nell'ordine in cui stanno in
+ * pagina (il runner li segue sequenzialmente).
+ *
+ * La regex delle lezioni vive in un posto solo — LESSON_RE in lesson-url.js — e
+ * viene passata al browser come stringa: prima ne esistevano due copie (qui e
+ * nel modulo) e la copia dentro page.evaluate era rimasta indietro, rendendo
+ * invisibili le lezioni asincrone.
+ *
+ * @param {any} page
+ * @returns {Promise<Array<{href:string,text:string,linkText:string,kind:string,pct:number}>>}
+ */
+async function parseCourseLinks(page) {
+  return page.evaluate((lessonReSource) => {
+    const isLesson = (href) => new RegExp(lessonReSource, 'i').test(href);
+    const allLinks = [...document.querySelectorAll('a')];
+    const lessonOrQuiz = allLinks.filter((a) => {
+      const href = a.href || '';
+      return isLesson(href) || href.includes('/questionario/');
+    });
+    let links = lessonOrQuiz.length > 0 ? lessonOrQuiz : [];
+    // Fallback sui bottoni "Apri" se non abbiamo trovato href diretti.
+    if (links.length === 0) {
+      links = [...document.querySelectorAll('a.btn.btn-sm.btn-primary, a.btn-primary, button.btn-primary')]
+        .filter((a) => /apri|inizia|guarda|avvia|visualizza/i.test(a.innerText));
+    }
+    return links.map((a) => {
+      const block = (a.closest('tr, .row, li, .card-body, .card') || a.parentElement || a);
+      const text = (block.innerText || '');
+      const m = text.match(/(\d+[.,]\d+)\s*%/);
+      const pct = m ? parseFloat(m[1].replace(',', '.')) : 100;
+      const href = a.href || '';
+      const linkText = (a.innerText || '').trim();
+      const kind = isLesson(href) ? 'lezione' : (/\/questionario\//.test(href) ? 'questionario' : 'altro');
+      return { href, text: text.slice(0, 120), linkText, kind, pct };
+    });
+  }, LESSON_RE.source);
+}
+
+/**
+ * Indizi sulla pagina corso, per capire perché non contiene lezioni.
+ * Li interpreta diagnoseEmptyCoursePage (course-page-diag.js), che è puro e testato.
+ *
+ * @param {any} page
+ */
+async function collectCoursePageFlags(page) {
+  return page.evaluate((args) => {
+    const anchors = [...document.querySelectorAll('a')];
+    const bodyText = document.body ? document.body.innerText : '';
+    const isLesson = (href) => new RegExp(args.lessonReSource, 'i').test(href);
+    return {
+      hasInformativaForm: !!document.querySelector(args.informativaForm),
+      hasCertificate: anchors.some((a) => /\/attestato\/download\//.test(a.href || '')),
+      hasLessonOrQuiz: anchors.some((a) => isLesson(a.href || '') || (a.href || '').includes('/questionario/')),
+      hasPdf: anchors.some((a) => /scarica\s+il\s+pdf|\.pdf|data:application\/pdf/i.test((a.href || '') + ' ' + (a.innerText || ''))),
+      isLoginPage: !!document.querySelector('input[type="password"]'),
+      hasGateNotice: /completa l['’]attivit[aà] corrente/i.test(bodyText),
+      anchorCount: anchors.length,
+    };
+  }, { lessonReSource: LESSON_RE.source, informativaForm: SELECTORS.informativa.courseForm });
 }
 
 /**
@@ -260,56 +323,53 @@ function createCourseRunner(deps) {
 
       let scoredLinks = [];
       let courseParseFailed = false;
-      try {
-        scoredLinks = await page.evaluate(() => {
-          const allLinks = [...document.querySelectorAll('a')];
-          const isLesson = (href) => /\/lezione[A-Za-z]*\/show\/\d+/.test(href);
-          const lessonOrQuiz = allLinks.filter(a => {
-            const href = a.href || '';
-            return isLesson(href) || href.includes('/questionario/');
-          });
-          let links = lessonOrQuiz.length > 0 ? lessonOrQuiz : [];
-          // Fallback sui bottoni "Apri" se non abbiamo trovato href diretti.
-          if (links.length === 0) {
-            links = [...document.querySelectorAll('a.btn.btn-sm.btn-primary, a.btn-primary, button.btn-primary')]
-              .filter(a => /apri|inizia|guarda|avvia|visualizza/i.test(a.innerText));
-          }
-          return links.map(a => {
-            const block = (a.closest('tr, .row, li, .card-body, .card') || a.parentElement || a);
-            const text = (block.innerText || '');
-            const m = text.match(/(\d+[.,]\d+)\s*%/);
-            const pct = m ? parseFloat(m[1].replace(',', '.')) : 100;
-            const href = a.href || '';
-            const linkText = (a.innerText || '').trim();
-            const kind = isLesson(href) ? 'lezione' : (/\/questionario\//.test(href) ? 'questionario' : 'altro');
-            return { href, text: text.slice(0, 120), linkText, kind, pct };
-          });
-        });
+      let parseError = null;
+      // Due tentativi: il primo può cadere sull'informativa servita all'URL del
+      // corso (vedi login-flow.handleCourseInformativa). In quel caso la
+      // accettiamo e rileggiamo la pagina, invece di dichiarare il corso illeggibile.
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          scoredLinks = await parseCourseLinks(page);
+        } catch (e) {
+          parseError = e;
+          break;
+        }
         const lessonCount = scoredLinks.filter(l => l.kind === 'lezione').length;
         const quizCount = scoredLinks.filter(l => l.kind === 'questionario').length;
         log(`Trovati ${scoredLinks.length} link nel corso (${lessonCount} lezioni, ${quizCount} quiz): ${JSON.stringify(scoredLinks)}`);
-        if (scoredLinks.length === 0) {
-          log('ATTENZIONE: nessun link lezione/questionario trovato. Salvo dump HTML per analisi.');
+        if (scoredLinks.length > 0) break;
+
+        const diag = diagnoseEmptyCoursePage(await collectCoursePageFlags(page));
+        log(`Nessuna lezione in pagina — ${diag.message}`);
+        if (diag.retryInformativa && attempt === 1) {
+          const accepted = await handleCourseInformativa(page, log);
+          if (accepted) {
+            await acceptUsageDeclaration(page, log);
+            await page.waitForTimeout(COURSE_SETTLE_MS);
+            continue;
+          }
+          log('Informativa non accettata al primo colpo: salvo il dump per analisi.');
           courseParseFailed = true;
-          await monitor.recordError(page, new Error('No lesson/quiz links found'), 'courseParsing');
+          await monitor.recordError(page, new Error('Informativa non accettata'), 'courseInformativa');
+          break;
         }
-      } catch (e) {
-        log(`Errore parsing link: ${e.message}`);
+        if (diag.recordError) {
+          courseParseFailed = true;
+          await monitor.recordError(page, new Error(`No lesson/quiz links found (${diag.reason})`), 'courseParsing');
+        }
+        break;
+      }
+      if (parseError) {
+        log(`Errore parsing link: ${parseError.message}`);
         await page.waitForTimeout(DASHBOARD_POLL_MS * 4);
         continue;
       }
 
-      // Rileva corsi PDF-only guardando il DOM globale: utile quando il corso apre una
-      // pagina informativa con solo link "Scarica il PDF" e nessuna lezione/quiz.
-      const pageHasPdfOnly = await page.evaluate(() => {
-        const anchors = [...document.querySelectorAll('a')];
-        const hasLessonOrQuiz = anchors.some(a => {
-          const h = a.href || '';
-          return /\/lezione[A-Za-z]*\/show\/\d+/.test(h) || h.includes('/questionario/');
-        });
-        if (hasLessonOrQuiz) return false;
-        return anchors.some(a => /scarica\s+il\s+pdf|\.pdf|data:application\/pdf/i.test((a.href || '') + ' ' + (a.innerText || '')));
-      });
+      // Corso "solo dispensa": nessuna lezione/quiz in pagina ma un PDF da scaricare.
+      // I flag arrivano da collectCoursePageFlags, così la regex delle lezioni
+      // resta una sola (LESSON_RE) anche per questo controllo.
+      const coursePageFlags = await collectCoursePageFlags(page);
+      const pageHasPdfOnly = !coursePageFlags.hasLessonOrQuiz && coursePageFlags.hasPdf;
       const hasLessonsOrQuizzes = scoredLinks.some(l => l.kind === 'lezione' || l.kind === 'questionario');
       if ((!hasLessonsOrQuizzes && pageHasPdfOnly) || (scoredLinks.length === 0 && pageHasPdfOnly)) {
         log(`Corso ${courseUrl} contiene solo PDF (nessuna lezione/video/quiz). Lo marco come completato.`);

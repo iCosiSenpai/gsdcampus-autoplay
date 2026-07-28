@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<!--
+  Informativa che precede alcuni corsi, ricalcata sulla pagina reale
+  (corso 17162, dump del 2026-07-28). Punti che contano per il runner:
+   - la piattaforma serve questa pagina ANCHE su /corso/show/<id>, senza
+     redirect: riconoscerla dall'URL non basta, si riconosce dal form;
+   - le tre checkbox hanno classe "form-check-input accept";
+   - il bottone "Prosegui" nasce disabled: va abilitato dopo le spunte.
+  Token CSRF sostituito da un placeholder: nelle fixture non entrano segreti.
+-->
+<html lang="it">
+<body>
+  <h1>Informativa</h1>
+  <p>TRASFORMAZIONE DIGITALE, WELFARE E BENESSERE ORGANIZZATIVO — modulo di esempio</p>
+  <form id="informativa_form" method="POST" action="https://tecsial.gsdcampus.it/corso/acceptInformativa">
+    <input type="hidden" name="id_licenza" value="17162">
+    <input type="hidden" name="csrf_token" value="PLACEHOLDER">
+    <div class="mb-2">
+      <input type="checkbox" id="privacy_policy_checkbox" name="privacy_policy" class="form-check-input accept" value="0">
+      <label for="privacy_policy_checkbox" class="form-check-label">* Ho letto, compreso e accettato l'informativa sulla privacy</label>
+    </div>
+    <div class="mb-2">
+      <input type="checkbox" id="piano_formativo_checkbox" name="piano_formativo" class="form-check-input accept" value="0">
+      <label for="piano_formativo_checkbox" class="form-check-label">* Dichiaro di aver letto e compreso il piano formativo</label>
+    </div>
+    <div class="mb-2">
+      <input type="checkbox" id="scheda_tecnica_checkbox" name="scheda_tecnica" class="form-check-input accept" value="0">
+      <label for="scheda_tecnica_checkbox" class="form-check-label">* Dichiaro di aver letto e compreso la scheda tecnica</label>
+    </div>
+    <div class="form-text mt-4">* È obbligatorio accettare per poter proseguire</div>
+    <button type="submit" class="btn btn-primary" disabled="">Prosegui</button>
+  </form>
+</body>
+</html>
