@@ -12,7 +12,7 @@ STOP_FILE=".scheduler_stop"
 
 source "$DIR/scripts/lib/pid-utils.sh"
 
-ui_header "Arresto GSD Campus Autoplay"
+ui_header "Arresto GSD Campus Autoplay" "" "ᗣ"
 
 # 1. Segnala allo scheduler di fermarsi se in attesa
 touch "$DIR/$STOP_FILE"

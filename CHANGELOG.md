@@ -7,6 +7,8 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-28
 
+- **Plancia in stile Pac-Man**: la barra dell'avanzamento ora prende tutta la larghezza della finestra e ha un vero Pac-Man giallo che mastica (bocca spalancata → media → chiusa, come nel gioco) mentre mangia le pastiglie. I corsi in attesa di risposte diventano **fantasmini** in coda, coi colori dei quattro originali. Muri del labirinto blu, pastiglie bianche, tasti in giallo, e la mascotte nell'intestazione di tutti i comandi.
+
 - **Corsi bloccati sbloccati**: la stessa lezione vive su due indirizzi (elenco e riproduttore) e le lezioni "asincrone" erano invisibili all'automazione. Aprendo una lezione la piattaforma dice "Completa l'attività corrente" e porta su quella asincrona: il programma guardava quel video (20+ minuti) ma poi controllava la lezione sbagliata, che restava a 0% — tre tentativi a vuoto e corso fermo. Ora segue la lezione giusta, la porta a termine e riprende quella che voleva aprire.
 - **Se chiudi Chrome per sbaglio** l'automazione lo dice in chiaro, riapre un browser e riprende dal punto salvato, invece di registrare un errore critico.
 - Il **checkup** avvisa se la cartella del progetto è stata spostata o rinominata: in quel caso i servizi in background morivano in silenzio (niente aggiornamenti, niente riavvio automatico).

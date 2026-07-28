@@ -41,7 +41,7 @@ done
 render() {
   # clear solo su TTY (su pipe sporcherebbe l'output con escape).
   [ -t 1 ] && { clear 2>/dev/null || true; } || true
-  ui_header "Monitor corso GSD Campus" "aggiornato alle $(date '+%H:%M:%S')"
+  ui_header "Monitor corso GSD Campus" "aggiornato alle $(date '+%H:%M:%S')" "ᗧ"
 
   # ── Processo ── (pid_matches: un PID recyclato non risulta "ATTIVO")
   LIVE_PID=$(autoplay_instance_pid "$DIR" 2>/dev/null || echo "")

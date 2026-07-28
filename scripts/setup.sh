@@ -118,7 +118,7 @@ verify_autologin_live() {
 }
 
 print_header() {
-  ui_header "Setup GSD Campus Autopilot" "versione $(ui_version "$DIR")" "⚡"
+  ui_header "Setup GSD Campus Autopilot" "versione $(ui_version "$DIR")" "ᗧ"
   echo ""
   echo "Ti guido in pochi passi a configurare l'automazione del corso."
   echo "Ti chiederò solo 2 cose semplici:"

@@ -32,7 +32,7 @@ if [ "${1:-}" = "--ignore-hours" ]; then
   warn "Modalità IGNORE-HOURS: avvia anche fuori orario lavorativo."
 fi
 
-ui_header "Avvio GSD Campus Autoplay" "versione $(ui_version "$DIR")"
+ui_header "Avvio GSD Campus Autoplay" "versione $(ui_version "$DIR")" "ᗧ"
 
 # Verifica che config.json esista e non sia placeholder
 step "1/5" "Verifica configurazione"

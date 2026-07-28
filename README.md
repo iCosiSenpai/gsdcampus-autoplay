@@ -59,25 +59,28 @@ Fatto questo, parte da solo. Le volte successive queste domande non ricompaiono.
 
 ## 🖥️ Cosa vedi quando è avviato
 
-Alla fine si apre una **plancia** che ti dice a colpo d'occhio come sta andando, si aggiorna da sola e si muove (il Pac-Man mangia la strada che resta da fare):
+Alla fine si apre una **plancia** che ti dice a colpo d'occhio come sta andando, si aggiorna da sola e si muove:
 
 ```
- ᗧ GSD Campus · IL TUO NOME · v1.1.0-63                    ● attivo
- ────────────────────────────────────────────────────────────────
+ ᗧ GSD CAMPUS · IL TUO NOME · v1.1.0                         ● attivo
+ ════════════════════════════════════════════════════════════════════
    ● Sto seguendo: Sicurezza sul lavoro · modulo 3 · video 62%
 
-   Corsi     ▸ 7 totali · 5 fatti · 1 in corso
-   Avanzam.  ▸ ──────────────ᗧ··ᗣ  81%
-   Video     ▸ ⣾ ██████████░░░░░░  62%  0:59 / 16:00
+   Corsi     ▸ 7 totali · 5 fatti · 1 in attesa · 1 in corso
+
+   Avanzamento di tutti i corsi
+   ▕──────────────────────────ᗧ···•···•···•···•··ᗣ▏   81%
+
+   Video     ▸ ⣾ ████████████████░░░░░░░░  62%  0:59 / 16:00
    Quiz      ▸ nessuno in attesa
    Claude    ▸ inattivo — entra da solo solo se serve
    Turni     ▸ 09:00–13:00 · 16:00–20:00  · in orario
    Aggiorn.  ▸ controllato 4m fa · già all'ultima versione
- ────────────────────────────────────────────────────────────────
+ ════════════════════════════════════════════════════════════════════
   L guarda dal vivo   R aggiorna ora   Q chiudi la scheda   F ferma tutto
 ```
 
-In alto trovi sempre la **versione** installata, accanto al tuo nome.
+Il **Pac-Man giallo** mangia la strada che resta da fare: quando arriva in fondo i corsi sono finiti. I **fantasmini** in coda sono i corsi in attesa di risposte ai quiz (uno per corso, coi colori dei quattro originali). In alto trovi sempre la **versione** installata, accanto al tuo nome.
 
 Con un tasto solo:
 

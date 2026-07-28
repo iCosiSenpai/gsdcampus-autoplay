@@ -40,18 +40,38 @@ const IS_UTF = /(utf-?8)/i.test(process.env.LC_ALL || process.env.LC_CTYPE || pr
 const GLYPH = IS_UTF
   ? {
     ok: '✓', warn: '⚠', err: '✗', dot: '●', arrow: '▸', h: '─', bar: '█', barOff: '░', bul: '·',
-    pacOpen: 'ᗧ', pacClosed: '●', ghost: 'ᗣ', pellet: '•', track: '·', pause: '❙❙',
+    // Tema Pac-Man: bocca spalancata → media → chiusa (ciclo di 4 frame, come
+    // l'originale) + labirinto, pastiglie e fantasmi.
+    pacWide: '◖', pacOpen: 'ᗧ', pacClosed: '●', ghost: 'ᗣ',
+    pellet: '•', power: '◉', track: '·', eaten: '─',
+    wall: '═', capL: '▕', capR: '▏', pause: '❙❙',
   }
   : {
     ok: '+', warn: '!', err: 'x', dot: '*', arrow: '>', h: '-', bar: '#', barOff: '.', bul: '-',
-    pacOpen: 'C', pacClosed: 'o', ghost: 'M', pellet: 'o', track: '.', pause: '||',
+    pacWide: 'C', pacOpen: 'c', pacClosed: 'o', ghost: 'M',
+    pellet: 'o', power: '0', track: '.', eaten: '-',
+    wall: '=', capL: '[', capR: ']', pause: '||',
   };
+// Ciclo bocca: spalancata, media, chiusa, media → si legge come un morso, non
+// come un puntino che lampeggia.
+const PAC_FRAMES = [GLYPH.pacWide, GLYPH.pacOpen, GLYPH.pacClosed, GLYPH.pacOpen];
 const SPIN = IS_UTF ? ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'] : ['-', '\\', '|', '/'];
 
 const ANSI = {
   reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
   green: '\x1b[32m', yellow: '\x1b[33m', red: '\x1b[31m', cyan: '\x1b[36m', blue: '\x1b[34m', gray: '\x1b[90m',
+  // Palette 256 colori del gioco: giallo Pac-Man, pastiglie bianche, corridoio
+  // e labirinto blu. Sui terminali a 8 colori i codici 256 degradano da soli.
+  pac: '\x1b[1;38;5;226m',
+  pellet: '\x1b[38;5;231m',
+  power: '\x1b[1;38;5;229m',
+  track: '\x1b[38;5;240m',
+  eaten: '\x1b[38;5;237m',
+  maze: '\x1b[38;5;33m',
+  cherry: '\x1b[38;5;196m',
 };
+// I quattro fantasmi originali: Blinky (rosso), Pinky (rosa), Inky (ciano), Clyde (arancio).
+const GHOST_COLORS = ['\x1b[38;5;203m', '\x1b[38;5;213m', '\x1b[38;5;87m', '\x1b[38;5;214m'];
 
 // ── Helper puri ───────────────────────────────────────────────────────────
 function stripAnsi(s) { return String(s).replace(/\x1b\[[0-9;]*m/g, ''); }
@@ -81,23 +101,87 @@ function progressBar(pct, width, glyph = GLYPH) {
 }
 
 /**
- * Barra "Pac-Man": mangia la pista di pallini man mano che l'avanzamento cresce.
- * Pura (testabile): `frame` fa aprire/chiudere la bocca, `ghost` mette un
- * fantasmino in coda quando qualcosa è in attesa.
+ * Corridoio Pac-Man come sequenza di celle tipizzate: Pac-Man mangia le
+ * pastiglie man mano che l'avanzamento cresce, e i fantasmi lo aspettano in
+ * fondo. Pura e testabile; il colore lo mette chi disegna (vedi paintPacman).
+ * @param {number} pct 0..100
+ * @param {number} width celle
+ * @param {number} frame contatore di animazione (ciclo bocca a 4 frame)
+ * @param {{ ghosts?: number, glyph?: object }} [opts] ghosts = quanti fantasmi in coda
+ * @returns {Array<{ ch: string, kind: 'eaten'|'pac'|'pellet'|'power'|'track'|'ghost', ghost?: number }>}
  */
-function pacmanBar(pct, width, frame = 0, opts = {}) {
+function pacmanSegments(pct, width, frame = 0, opts = {}) {
   const glyph = opts.glyph || GLYPH;
-  const cells = Math.max(6, Number(width) || 12);
+  const frames = glyph === GLYPH
+    ? PAC_FRAMES
+    : [glyph.pacWide, glyph.pacOpen, glyph.pacClosed, glyph.pacOpen];
+  const cells = Math.max(8, Number(width) || 12);
+  const ghosts = Math.max(0, Math.min(4, Math.floor(Number(opts.ghosts) || 0)));
   const p = Math.max(0, Math.min(100, Number(pct) || 0));
   const pos = Math.round((p / 100) * (cells - 1));
-  const mouth = (Math.abs(Math.floor(frame)) % 2 === 0) ? glyph.pacOpen : glyph.pacClosed;
-  let out = '';
+  const mouth = frames[Math.abs(Math.floor(frame)) % frames.length];
+  const out = [];
   for (let i = 0; i < cells; i += 1) {
-    if (i < pos) out += glyph.h;                               // pista già mangiata
-    else if (i === pos) out += mouth;                          // Pac-Man
-    else if (opts.ghost && i === cells - 1) out += glyph.ghost; // inseguitore
-    else out += ((i - pos) % 5 === 0 ? glyph.pellet : glyph.track);
+    const fromEnd = cells - 1 - i;
+    if (i < pos) {
+      out.push({ ch: glyph.eaten, kind: 'eaten' });            // corridoio già ripulito
+    } else if (i === pos) {
+      out.push({ ch: mouth, kind: 'pac' });                    // Pac-Man che mastica
+    } else if (ghosts > 0 && fromEnd < ghosts) {
+      out.push({ ch: glyph.ghost, kind: 'ghost', ghost: fromEnd });
+    } else if (fromEnd === 0) {
+      out.push({ ch: glyph.power, kind: 'power' });            // pastiglia grande in fondo
+    } else if ((i - pos) % 4 === 0) {
+      out.push({ ch: glyph.pellet, kind: 'pellet' });
+    } else {
+      out.push({ ch: glyph.track, kind: 'track' });
+    }
   }
+  return out;
+}
+
+/** Barra Pac-Man in testo semplice (senza colori). */
+function pacmanBar(pct, width, frame = 0, opts = {}) {
+  const o = { ...opts };
+  if (o.ghost && !o.ghosts) o.ghosts = 1;   // compat: ghost:true = un fantasma
+  return pacmanSegments(pct, width, frame, o).map((c) => c.ch).join('');
+}
+
+/** Colore ANSI per tipo di cella del corridoio. */
+function pacmanCellColor(cell) {
+  switch (cell.kind) {
+    case 'pac': return ANSI.pac;
+    case 'ghost': return GHOST_COLORS[(cell.ghost || 0) % GHOST_COLORS.length];
+    case 'pellet': return ANSI.pellet;
+    case 'power': return ANSI.power;
+    case 'eaten': return ANSI.eaten;
+    default: return ANSI.track;
+  }
+}
+
+/**
+ * Dipinge il corridoio: giallo Pac-Man, pastiglie bianche, fantasmi coi colori
+ * dei quattro originali. Le celle consecutive dello stesso tipo condividono una
+ * sola sequenza di colore (meno byte per frame: si ridisegna 4 volte al secondo).
+ */
+function paintPacman(segments, color) {
+  if (!color) return segments.map((c) => c.ch).join('');
+  let out = '';
+  let runColor = null;
+  let run = '';
+  const flush = () => {
+    if (run) out += `${runColor}${run}${ANSI.reset}`;
+    run = '';
+  };
+  for (const cell of segments) {
+    const col = pacmanCellColor(cell);
+    if (col !== runColor) {
+      flush();
+      runColor = col;
+    }
+    run += cell.ch;
+  }
+  flush();
   return out;
 }
 
@@ -329,10 +413,14 @@ function computeHeadline(m) {
 // ── Rendering (puro) ────────────────────────────────────────────────────────
 function renderFrame(model, opts = {}) {
   const color = !!opts.color;
-  const width = Math.max(48, Math.min(96, opts.width || 72));
+  const width = Math.max(48, Math.min(110, opts.width || 72));
   const spinIndex = opts.spinIndex || 0;
   const c = (code, s) => (color ? `${code}${s}${ANSI.reset}` : String(s));
-  const rule = ' ' + GLYPH.h.repeat(width);
+  const rule = ' ' + c(ANSI.maze, GLYPH.wall.repeat(width));   // muro del labirinto
+  const thin = ' ' + c(ANSI.eaten, GLYPH.h.repeat(width));
+  // Corridoio largo: prende tutto lo spazio utile della finestra (prima erano
+  // 18 celle fisse e Pac-Man sembrava un puntino).
+  const trackWidth = Math.max(24, Math.min(72, width - 12));
   const L = [];
   const head = computeHeadline(model);
 
@@ -341,12 +429,12 @@ function renderFrame(model, opts = {}) {
     ? (model.workNow ? c(ANSI.green, `${GLYPH.dot} attivo`) : c(ANSI.yellow, `${GLYPH.pause} in pausa`))
     : c(ANSI.red, `${GLYPH.dot} fermo`);
   let mascot;
-  if (!model.schedAlive) mascot = c(ANSI.red, GLYPH.ghost);
-  else if (head.level === 'attention') mascot = c(ANSI.yellow, GLYPH.ghost);
-  else if (!model.workNow) mascot = c(ANSI.yellow, GLYPH.pacClosed);
-  else mascot = c(ANSI.green, spinIndex % 2 === 0 ? GLYPH.pacOpen : GLYPH.pacClosed);
+  if (!model.schedAlive) mascot = c(GHOST_COLORS[0], GLYPH.ghost);
+  else if (head.level === 'attention') mascot = c(GHOST_COLORS[1], GLYPH.ghost);
+  else if (!model.workNow) mascot = c(ANSI.pac, GLYPH.pacClosed);
+  else mascot = c(ANSI.pac, PAC_FRAMES[spinIndex % PAC_FRAMES.length]);
   const version = model.version ? ` ${c(ANSI.dim, GLYPH.bul)} ${c(ANSI.dim, model.version)}` : '';
-  const title = `${mascot} ${c(ANSI.bold, 'GSD Campus')} ${c(ANSI.dim, GLYPH.bul)} ${model.member}${version}`;
+  const title = `${mascot} ${c(ANSI.pac, 'GSD CAMPUS')} ${c(ANSI.maze, GLYPH.bul)} ${c(ANSI.bold, model.member)}${version}`;
   const pad = Math.max(1, width - visLen(title) - visLen(badge));
   L.push(` ${title}${' '.repeat(pad)}${badge}`);
   L.push(rule);
@@ -378,8 +466,13 @@ function renderFrame(model, opts = {}) {
   if (model.census && Array.isArray(model.census.courses) && model.census.courses.length) {
     const pcts = model.census.courses.map((x) => (Number.isFinite(x.pct) ? x.pct : 0));
     const avg = Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
-    const ghost = !!(s && s.needHelp > 0);
-    row('Avanzam.', `${c(ANSI.yellow, pacmanBar(avg, 18, spinIndex, { ghost }))} ${String(avg).padStart(3)}%`);
+    // Un fantasma per corso in attesa di risposte (max 4, come nel gioco).
+    const ghosts = s && s.needHelp > 0 ? Math.min(4, s.needHelp) : 0;
+    const corridor = paintPacman(pacmanSegments(avg, trackWidth, spinIndex, { ghosts }), color);
+    L.push('');
+    L.push(`   ${c(ANSI.dim, 'Avanzamento di tutti i corsi')}`);
+    L.push(`   ${c(ANSI.maze, GLYPH.capL)}${corridor}${c(ANSI.maze, GLYPH.capR)}  ${c(ANSI.pac, String(avg).padStart(3) + '%')}`);
+    L.push('');
   }
 
   // Video in corso: barra + tempo, con spinner che si muove ad ogni frame.
@@ -388,7 +481,10 @@ function renderFrame(model, opts = {}) {
     const vp = model.videoPct != null ? model.videoPct : 0;
     const clock = model.status.videoProgress ? `  ${c(ANSI.dim, model.status.videoProgress)}` : '';
     const live = model.schedAlive && model.workNow ? `${c(ANSI.cyan, SPIN[spinIndex % SPIN.length])} ` : '';
-    row('Video', `${live}${progressBar(vp, 16)} ${String(vp).padStart(3)}%${clock}`);
+    const vw = Math.max(16, Math.min(40, trackWidth - 8));
+    const filled = Math.round((vp / 100) * vw);
+    const vbar = c(ANSI.cyan, GLYPH.bar.repeat(filled)) + c(ANSI.eaten, GLYPH.barOff.repeat(Math.max(0, vw - filled)));
+    row('Video', `${live}${vbar} ${String(vp).padStart(3)}%${clock}`);
   }
 
   // Quiz
@@ -434,6 +530,7 @@ function renderFrame(model, opts = {}) {
   // Eventi recenti
   if (model.events && model.events.length) {
     L.push('');
+    L.push(thin);
     L.push(`   ${c(ANSI.dim, 'Ultimi eventi')}`);
     for (const ev of model.events) L.push(`     ${c(ANSI.gray, GLYPH.bul)} ${c(ANSI.dim, ev)}`);
   }
@@ -441,7 +538,7 @@ function renderFrame(model, opts = {}) {
   // Footer azioni
   L.push('');
   L.push(rule);
-  const key = (k, label) => `${c(ANSI.bold, k)} ${label}`;
+  const key = (k, label) => `${c(ANSI.pac, k)} ${c(ANSI.dim, label)}`;
   const actions = [
     key('L', 'guarda dal vivo'),
     key('R', 'aggiorna ora'),
@@ -464,7 +561,7 @@ function renderFrame(model, opts = {}) {
   const clock = new Date(model.now || Date.now());
   const hhmmss = [clock.getHours(), clock.getMinutes(), clock.getSeconds()]
     .map((n) => String(n).padStart(2, '0')).join(':');
-  L.push(` ${c(ANSI.dim, `${SPIN[spinIndex % SPIN.length]} dati aggiornati alle ${hhmmss} ${GLYPH.bul} questa schermata si aggiorna da sola`)}`);
+  L.push(` ${c(ANSI.maze, SPIN[spinIndex % SPIN.length])} ${c(ANSI.dim, `dati aggiornati alle ${hhmmss} ${GLYPH.bul} questa schermata si aggiorna da sola`)}`);
   return L.join('\n');
 }
 
@@ -475,13 +572,13 @@ function renderLogView(root, opts = {}) {
   const c = (code, s) => (color ? `${code}${s}${ANSI.reset}` : String(s));
   const lines = tailLines(path.join(root, 'logs', 'autoplay.log')).slice(-18).map((l) => redactSensitiveText(l).slice(0, width));
   const out = [
-    ` ${c(ANSI.cyan, SPIN[spinIndex % SPIN.length])} ${c(ANSI.bold, 'Log dal vivo')} ${c(ANSI.dim, '(autoplay.log)')}`,
-    ' ' + GLYPH.h.repeat(width),
+    ` ${c(ANSI.pac, PAC_FRAMES[spinIndex % PAC_FRAMES.length])} ${c(ANSI.pac, 'LOG DAL VIVO')} ${c(ANSI.dim, '(autoplay.log)')}`,
+    ' ' + c(ANSI.maze, GLYPH.wall.repeat(width)),
   ];
   if (!lines.length) out.push(c(ANSI.dim, '   (nessun log ancora)'));
   else for (const l of lines) out.push('  ' + c(ANSI.dim, l));
-  out.push(' ' + GLYPH.h.repeat(width));
-  out.push(`  ${c(ANSI.bold, 'Q')} torna alla plancia ${GLYPH.bul} sola lettura: guardare non ferma niente ${GLYPH.bul} si aggiorna da solo`);
+  out.push(' ' + c(ANSI.maze, GLYPH.wall.repeat(width)));
+  out.push(`  ${c(ANSI.pac, 'Q')} torna alla plancia ${GLYPH.bul} sola lettura: guardare non ferma niente ${GLYPH.bul} si aggiorna da solo`);
   return out.join('\n');
 }
 
@@ -654,7 +751,9 @@ if (require.main === module) {
 }
 
 module.exports = {
-  parseClockSeconds, videoPercent, progressBar, pacmanBar, formatDuration, relativeTime, formatWhen,
+  parseClockSeconds, videoPercent, progressBar, pacmanBar, pacmanSegments, paintPacman, pacmanCellColor,
+  PAC_FRAMES, GLYPH,
+  formatDuration, relativeTime, formatWhen,
   courseIdFromUrl, computeHeadline, readModel, renderFrame, renderLogView, stripAnsi, visLen,
   terminalCloseScript, readVersion, keepAliveInstalled,
 };

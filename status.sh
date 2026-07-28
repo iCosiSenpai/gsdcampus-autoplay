@@ -28,7 +28,7 @@ source "$DIR/scripts/lib/ui.sh"
 
 source "$DIR/scripts/lib/pid-utils.sh"
 
-ui_header "Stato GSD Campus Autoplay" "versione $(ui_version "$DIR")"
+ui_header "Stato GSD Campus Autoplay" "versione $(ui_version "$DIR")" "ᗧ"
 echo ""
 
 # ── Aggiornamento disponibile ──

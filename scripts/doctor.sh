@@ -43,7 +43,7 @@ chk_err()  {
   CRIT=$((CRIT + 1))
 }
 
-ui_header "Checkup sistema" "$([ "$FULL" = true ] && echo 'completo (con sonda link)' || echo 'controlli rapidi')"
+ui_header "Checkup sistema" "$([ "$FULL" = true ] && echo 'completo (con sonda link)' || echo 'controlli rapidi')" "ᗧ"
 echo ""
 
 # 1. Internet (captive.apple.com: endpoint di test ufficiale macOS, sempre su).

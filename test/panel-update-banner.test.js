@@ -14,7 +14,7 @@ const path = require('path');
 process.env.LANG = 'en_US.UTF-8';
 
 const {
-  renderFrame, stripAnsi, pacmanBar, terminalCloseScript,
+  renderFrame, stripAnsi, pacmanBar, pacmanSegments, paintPacman, PAC_FRAMES, terminalCloseScript,
 } = require('../scripts/lib/panel-cli');
 const { readHeadSha } = require('../src/lib/update-state');
 
@@ -47,13 +47,13 @@ const baseModel = {
 const frame = (model, opts = {}) => stripAnsi(renderFrame(model, { color: false, width: 72, ...opts }));
 
 describe('plancia: header e versione', () => {
-  it('mostra la versione release accanto al nome', () => {
-    assert.match(frame(baseModel), /GSD Campus · MARIO ROSSI · v1\.1\.0-63/);
+  it('mostra il marchio e la versione accanto al nome', () => {
+    assert.match(frame(baseModel), /GSD CAMPUS · MARIO ROSSI · v1\.1\.0-63/);
   });
 
   it('senza versione non stampa separatori vuoti', () => {
     const out = frame({ ...baseModel, version: null });
-    assert.match(out, /GSD Campus · MARIO ROSSI\s{2,}/);
+    assert.match(out, /GSD CAMPUS · MARIO ROSSI\s{2,}/);
   });
 });
 
@@ -95,28 +95,51 @@ describe('plancia: tasti Q e F', () => {
   });
 });
 
-describe('pacmanBar', () => {
+describe('corridoio Pac-Man', () => {
+  const posOf = (bar) => [...bar].findIndex((ch) => PAC_FRAMES.includes(ch));
+
   it('a 0% Pac-Man è all\'inizio, a 100% in fondo', () => {
-    const start = pacmanBar(0, 10, 0);
-    const end = pacmanBar(100, 10, 0);
-    assert.equal(start.length, 10);
-    assert.equal(end.length, 10);
-    assert.equal(start.indexOf('ᗧ'), 0);
-    assert.equal(end.indexOf('ᗧ'), 9);
+    assert.equal(pacmanBar(0, 12, 0).length, 12);
+    assert.equal(posOf(pacmanBar(0, 12, 0)), 0);
+    assert.equal(posOf(pacmanBar(100, 12, 0)), 11);
   });
 
-  it('la bocca si apre e chiude al cambio di frame', () => {
-    assert.notEqual(pacmanBar(50, 12, 0), pacmanBar(50, 12, 1));
+  it('la bocca fa un ciclo di 4 frame (spalancata, media, chiusa, media)', () => {
+    assert.equal(PAC_FRAMES.length, 4);
+    assert.equal(PAC_FRAMES[0], '◖');
+    assert.equal(PAC_FRAMES[1], 'ᗧ');
+    assert.equal(PAC_FRAMES[2], '●');
+    assert.equal(PAC_FRAMES[3], 'ᗧ');
+    const frames = [0, 1, 2, 3].map((f) => pacmanBar(50, 16, f));
+    assert.equal(new Set(frames).size, 3); // 3 forme distinte, la media si ripete
   });
 
-  it('il fantasmino compare solo se richiesto', () => {
-    assert.match(pacmanBar(30, 12, 0, { ghost: true }), /ᗣ$/);
-    assert.equal(/ᗣ/.test(pacmanBar(30, 12, 0)), false);
+  it('quanti fantasmi chiedo, tanti compaiono (max 4)', () => {
+    assert.equal((pacmanBar(20, 24, 0, { ghosts: 3 }).match(/ᗣ/g) || []).length, 3);
+    assert.equal((pacmanBar(20, 24, 0, { ghosts: 9 }).match(/ᗣ/g) || []).length, 4);
+    assert.equal(/ᗣ/.test(pacmanBar(20, 24, 0)), false);
+  });
+
+  it('senza fantasmi in fondo c\'è la pastiglia grande', () => {
+    assert.match(pacmanBar(20, 24, 0), /◉$/);
+  });
+
+  it('compatibilità: ghost:true = un fantasma', () => {
+    assert.match(pacmanBar(30, 16, 0, { ghost: true }), /ᗣ$/);
   });
 
   it('percentuali fuori scala non rompono la larghezza', () => {
     assert.equal(pacmanBar(-40, 14, 0).length, 14);
     assert.equal(pacmanBar(999, 14, 0).length, 14);
+  });
+
+  it('paintPacman colora Pac-Man di giallo e i fantasmi coi colori originali', () => {
+    const painted = paintPacman(pacmanSegments(40, 20, 1, { ghosts: 2 }), true);
+    assert.match(painted, /\x1b\[1;38;5;226mᗧ/);      // giallo Pac-Man
+    assert.match(painted, /\x1b\[38;5;213m/);          // Pinky (rosa)
+    assert.match(painted, /\x1b\[38;5;203m/);          // Blinky (rosso)
+    // Senza colori resta testo puro (README, terminali senza colore).
+    assert.equal(paintPacman(pacmanSegments(40, 20, 1), false), pacmanBar(40, 20, 1));
   });
 });
 

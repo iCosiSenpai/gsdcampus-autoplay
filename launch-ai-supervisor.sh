@@ -20,7 +20,7 @@ source "$DIR/scripts/lib/ui.sh"
 source "$DIR/scripts/lib/pid-utils.sh"
 source "$DIR/scripts/lib/report-issue.sh"
 
-ui_header "GSD Campus — Avvio autonomo" "Claude on-demand: zero chiamate senza quiz" "⚡"
+ui_header "GSD Campus — Avvio autonomo" "Claude on-demand: zero chiamate senza quiz" "ᗧ"
 echo ""
 
 # Ping diagnostico della versione (best-effort, in background, non blocca; opt-out
