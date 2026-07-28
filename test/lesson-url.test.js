@@ -7,24 +7,26 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { lessonKey, isLessonUrl, sameLesson, lessonId } = require('../src/lib/lesson-url');
+const { lessonKey, isLessonUrl, sameLesson, lessonId, lessonFamily } = require('../src/lib/lesson-url');
 const { SELECTORS } = require('../src/lib/selectors');
 
 const BASE = 'https://tecsial.gsdcampus.it';
 
 describe('lessonKey / isLessonUrl', () => {
   it('riconosce la lezione classica', () => {
-    assert.equal(lessonKey(`${BASE}/lezione/show/14065`), 'lezione:14065');
+    assert.equal(lessonKey(`${BASE}/lezione/show/14065`), '14065');
     assert.equal(isLessonUrl(`${BASE}/lezione/show/14065`), true);
+    assert.equal(lessonFamily(`${BASE}/lezione/show/14065`), 'lezione');
   });
 
-  it('riconosce la lezione asincrona (il caso che bloccava i corsi)', () => {
-    assert.equal(lessonKey(`${BASE}/lezioneAsincrona/show/14062`), 'lezioneasincrona:14062');
+  it('riconosce la lezione asincrona (la rotta che bloccava i corsi)', () => {
+    assert.equal(lessonKey(`${BASE}/lezioneAsincrona/show/14062`), '14062');
     assert.equal(isLessonUrl(`${BASE}/lezioneAsincrona/show/14062`), true);
+    assert.equal(lessonFamily(`${BASE}/lezioneAsincrona/show/14062`), 'lezioneAsincrona');
   });
 
   it('ignora query e hash', () => {
-    assert.equal(lessonKey(`${BASE}/lezione/show/14065?from=corso#top`), 'lezione:14065');
+    assert.equal(lessonKey(`${BASE}/lezione/show/14065?from=corso#top`), '14065');
   });
 
   it('non confonde corsi e questionari con le lezioni', () => {
@@ -46,8 +48,12 @@ describe('sameLesson', () => {
     assert.equal(sameLesson(`${BASE}/lezione/show/14065`, `${BASE}/lezione/show/14066`), false);
   });
 
-  it('lezione classica e asincrona con lo stesso numero NON sono la stessa', () => {
-    assert.equal(sameLesson(`${BASE}/lezione/show/14062`, `${BASE}/lezioneAsincrona/show/14062`), false);
+  it('stesso id su rotte diverse = STESSA lezione (elenco vs viewer)', () => {
+    assert.equal(sameLesson(`${BASE}/lezione/show/14062`, `${BASE}/lezioneAsincrona/show/14062`), true);
+  });
+
+  it('id diverso = lezione diversa (è il reindirizzamento al cancello)', () => {
+    assert.equal(sameLesson(`${BASE}/lezione/show/14065`, `${BASE}/lezioneAsincrona/show/14062`), false);
   });
 
   it('URL non-lezione non combaciano mai (nemmeno fra loro)', () => {
