@@ -16,6 +16,7 @@ const {
   acceptUsageDeclaration,
 } = require('./login-flow');
 const { isLoginPage, isDashboardLoaded } = require('./page-detect');
+const { isLessonUrl, sameLesson } = require('./lesson-url');
 const { OffHoursExit, SessionError } = require('./errors');
 const {
   dashboardUrl,

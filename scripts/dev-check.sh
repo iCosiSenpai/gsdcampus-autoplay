@@ -43,6 +43,18 @@ for f in src/*.js src/lib/*.js scripts/*.js scripts/lib/*.js worker/*.js worker-
 done
 [ "$JS_FAIL" -eq 0 ] && ok "Sintassi JavaScript ok."
 
+# 2b. Helper dei nostri moduli usati senza require: `node --check` non li vede
+# (sintassi valida) e i test unitari nemmeno (codice dentro funzioni che girano
+# solo col browser). È arrivato in produzione come
+# "ReferenceError: isLessonUrl is not defined" su tutta la flotta.
+step "2b/4" "Lint: helper usati senza import"
+if node "$DIR/scripts/lib/undef-probe.js"; then
+  ok "Nessun helper usato senza import."
+else
+  err "Helper usati senza importarli (vedi sopra)."
+  FAIL=1
+fi
+
 # 3. Lint anti-regressione: '| grep -q' in uno script con pipefail.
 # Bug visto in produzione (07/2026): grep -q esce al primo match chiudendo la
 # pipe, il comando a sinistra muore di SIGPIPE (141) e sotto pipefail la
