@@ -7,6 +7,16 @@
 - `data/accounts/<CF>/pending_quiz_answers.json` = archivio legacy per-account di vecchi guess Ollama, **mai promosso automaticamente** e non più alimentato dall'autoplay on-demand.
 - `data/accounts/<CF>/ai_quiz_request.json` + `need_answer.json` = **inbox unificata per l'AI supervisore**: ogni domanda sconosciuta finisce qui con domanda, opzioni, contesti locali e un eventuale guess legacy. `buildAiTodo` e il runner deduplicano entrambe le fonti; soltanto domanda/opzioni/guess lasciano il progetto.
 
+**Disaccordo fra banca locale e condivisa (non blocca più l'automazione):**
+
+Se per la stessa domanda la banca locale e quella condivisa hanno risposte diverse, `answers-cli verify` fallisce — ed è un **gate in `start.sh`**: fino a ieri l'avvio si fermava con *"Conflitto nella banca risposte: avvio bloccato per proteggere i quiz"* e quel Mac restava fermo finché non interveniva qualcuno (capitato su due Mac). Adesso:
+
+1. `start.sh` invoca `answers-cli reconcile`: per le domande in disaccordo **vince la risposta condivisa** (è quella curata e distribuita a tutti), la versione locale finisce in `data/known_answers_conflicts.json` e la banca precedente in `data/known_answers.before-reconcile.json`.
+2. Poi `audit --fix` normalizza i duplicati equivalenti e si **riverifica**: se ora è coerente, l'avvio prosegue (`ok "Banca risposte riallineata"`). Solo se resta incoerente ci si ferma, suggerendo la reinstallazione totale dal menu del curl.
+3. `syncPublicBank` non rifiuta più l'intero merge per un conflitto: le risposte **nuove** arrivano comunque (nessuna sovrascrittura silenziosa) e il disaccordo viene contato in `result.conflicts` e loggato.
+
+`reconcileConflicts()` in `src/lib/bank-audit.js` è pura e testata: rispetta le chiavi di servizio, non tocca le risposte presenti solo in locale e restituisce l'elenco di ciò che ha sostituito. Fermare i corsi è peggio di un disaccordo su una risposta: la politica è allinearsi al condiviso e lasciare traccia.
+
 **Sincronizzazione automatica della banca (nessuna azione dell'utente):**
 
 | Direzione | Quando | Chi lo fa |

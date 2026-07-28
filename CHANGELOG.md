@@ -7,6 +7,11 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-28
 
+- **Risolto un blocco che fermava i corsi**: se la banca risposte locale non era d'accordo con quella condivisa, l'avvio si interrompeva ("Conflitto nella banca risposte") e il Mac restava fermo. Ora si riallinea da solo — per quella domanda vale la risposta condivisa da tutti — tiene una copia di sicurezza e riparte. Le risposte nuove arrivano comunque anche in presenza di un disaccordo.
+- Nuova voce nel menu del comando: **"Reinstallazione totale"**. Riscarica tutto da zero tenendo il tuo nome, l'accesso al corso e gli orari; la cartella vecchia viene spostata in `~/gsdcampus-vecchia-…`, non cancellata.
+- Il **calendario della settimana** non sparisce più un attimo dopo essere apparso: ora sta dentro la schermata di conferma, insieme al riepilogo.
+- Gli errori imprevisti nel log non compaiono più come `ERRORE CRITICO: {}` ma col motivo scritto.
+
 - **Si può tornare indietro** durante la configurazione: **ESC** (o la voce `◂ Indietro`) riporta alla domanda precedente — dai giorni si torna a «Chi sei?», dall'orario ai giorni, e dentro "Altro orario" si risale una domanda per volta. Dal riepilogo si cambia solo l'orario, solo i giorni o solo il collega. Niente più "ricominciamo l'inserimento".
 
 - **La schermata si riapre da sola** quando arriva un aggiornamento: prima restava sulla versione vecchia (l'orologio avanzava ma il contenuto sembrava fermo) e bisognava chiuderla a mano. Ora avvisa e si riapre dopo 6 secondi — e **aspetta** se stai leggendo il log dal vivo o se c'è un quiz in corso. I corsi non si fermano.

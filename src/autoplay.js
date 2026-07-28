@@ -577,7 +577,11 @@ async function runAutoplay() {
           lastError: 'Il browser dell\'automazione è stato chiuso: riapro e riprendo da solo.',
         });
       } else {
-        log('ERRORE CRITICO:', e);
+        // Messaggio LEGGIBILE: `log('...', e)` serializzava l'Error come `{}`
+        // (visto nei log dei colleghi: "ERRORE CRITICO: {}", inutile a chiunque).
+        const why = (e && (e.message || e.code)) ? `${e.name || 'Error'}: ${e.message || e.code}` : String(e);
+        log('ERRORE CRITICO:', why);
+        if (e && e.stack) log(`Dettaglio: ${String(e.stack).split('\n').slice(1, 3).map((l) => l.trim()).join(' ← ')}`);
         await monitor.recordError(null, e, 'outer');
       }
     } finally {

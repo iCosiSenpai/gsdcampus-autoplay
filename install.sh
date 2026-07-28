@@ -352,6 +352,7 @@ if [ -d "$TARGET/.git" ]; then
       "Ripara l'installazione — Riallinea il codice e reinstalla le dipendenze" \
       "Solo avvia — Non aggiorna codice/account; riconcilia stato e avvia" \
       "Diagnostica on-demand — Controlla i componenti senza avviare AI" \
+      "Reinstallazione totale — Riscarica tutto da zero, tenendo il tuo nome e gli orari" \
       "Disinstalla — Rimuove programmi e componenti, dopo una conferma" \
       "Esci — Non modifica nulla" < "$TTY_REDIR" 2>/dev/null || echo 1)
     case "$CHOICE" in
@@ -360,8 +361,9 @@ if [ -d "$TARGET/.git" ]; then
       3) MODE="clean" ;;
       4) MODE="launch" ;;
       5) MODE="diagnose" ;;
-      6) MODE="uninstall" ;;
-      0|7) MODE="cancel" ;;
+      6) MODE="nuke" ;;
+      7) MODE="uninstall" ;;
+      0|8) MODE="cancel" ;;
       *) MODE="update" ;;   # node failure / EOF → safest default
     esac
   else
@@ -423,6 +425,66 @@ fi
 if [ "$MODE" = "cancel" ]; then
   info "Operazione annullata. Niente è stato modificato."
   exit 0
+fi
+
+# Reinstallazione TOTALE: quando la copia locale è in uno stato che non si
+# raddrizza (banca risposte incoerente, file mischiati, cartella senza git),
+# la via più corta è ributtare giù tutto. Teniamo il "chi sei?" — cioè
+# config.json, che contiene nome, accesso al corso e orari — e mettiamo la
+# vecchia cartella da parte invece di cancellarla, così nulla è irreversibile.
+if [ "$MODE" = "nuke" ]; then
+  echo ""
+  warn "Reinstallazione totale: scarico di nuovo tutto il programma."
+  info "Tengo: il tuo nome, l'accesso al corso e gli orari (config.json)."
+  info "La cartella attuale NON viene cancellata: la sposto in una copia di sicurezza."
+  info "Le risposte dei quiz arrivano di nuovo dalla banca condivisa."
+  echo ""
+  REPLY=""
+  if [ -n "$TTY_REDIR" ]; then
+    printf '%b' " ${BOLD}Procedo? [y/N] ${NC}"
+    read -r REPLY < "$TTY_REDIR" || REPLY=""
+    echo ""
+  fi
+  case "$REPLY" in
+    [yY]*) ;;
+    *) info "Annullato: non ho toccato niente."; exit 0 ;;
+  esac
+
+  if ! net_preflight; then
+    err "Serve la rete per riscaricare il programma. Riprova più tardi."
+    exit 1
+  fi
+
+  # 1. Ferma l'automazione: stiamo per spostare la cartella da sotto i piedi.
+  if [ -x "$TARGET/stop.sh" ]; then
+    info "Fermo l'automazione…"
+    "$TARGET/stop.sh" >/dev/null 2>&1 || true
+  fi
+
+  # 2. Sposta la vecchia installazione (niente copie: è veloce e non duplica GB).
+  BK="$HOME/gsdcampus-vecchia-$(date +%Y%m%d-%H%M%S)"
+  KEEP_CONFIG="$(mktemp -t gsdconfig 2>/dev/null || echo "$HOME/.gsdcampus-config-keep.json")"
+  if [ -f "$TARGET/config.json" ]; then
+    cp "$TARGET/config.json" "$KEEP_CONFIG" 2>/dev/null || true
+  fi
+  if ! mv "$TARGET" "$BK"; then
+    err "Non riesco a spostare $TARGET. Chiudi eventuali finestre aperte su quella cartella e riprova."
+    exit 1
+  fi
+  ok "Vecchia installazione messa da parte in $BK"
+
+  # 3. Riscarica pulito e rimetti il "chi sei?".
+  info "Riscarico il programma…"
+  clone_repo "$TARGET"
+  if [ -f "$KEEP_CONFIG" ]; then
+    cp "$KEEP_CONFIG" "$TARGET/config.json" 2>/dev/null || true
+    rm -f "$KEEP_CONFIG" 2>/dev/null || true
+    ok "Rimessi nome, accesso al corso e orari: non devi riconfigurare niente."
+  else
+    warn "Non c'era una configurazione da tenere: il setup ti chiederà chi sei."
+  fi
+  info "La vecchia cartella resta in $BK: puoi cancellarla quando vuoi."
+  MODE="install"   # il launcher completa setup e dipendenze sulla copia nuova
 fi
 
 cd "$TARGET"

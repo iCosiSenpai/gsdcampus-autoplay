@@ -41,6 +41,18 @@ Lo scheduler parte con `nohup`, quindi un semplice `exit` del Terminale non lo t
 
 La plancia mostra in chiaro se il guardiano è installato (plist `com.gsdcampus.autoplay.keepalive`): se manca, avvisa in giallo che chiudere la scheda può fermare l'automazione.
 
+## Reinstallazione totale (menu del curl)
+
+Quando la copia locale è in uno stato che non si raddrizza (banca risposte incoerente, file mischiati, cartella senza `.git`), il menu del comando curl ha **"Reinstallazione totale — Riscarica tutto da zero, tenendo il tuo nome e gli orari"**:
+
+1. chiede conferma esplicita (`y/N`) elencando cosa tiene;
+2. ferma l'automazione (`stop.sh`);
+3. **sposta** la cartella in `~/gsdcampus-vecchia-<timestamp>` — non cancella niente, e non duplica GB di `node_modules`;
+4. ri-clona il progetto pulito e rimette `config.json` (nome, accesso al corso, orari): il "chi sei?" non si rifà;
+5. prosegue come una prima installazione (`MODE=install`), quindi dipendenze e setup vengono completati dal launcher.
+
+La banca risposte torna quella condivisa; lo stato per-account viene ricostruito dalla piattaforma al primo giro. La cartella vecchia resta a disposizione e la cancella l'utente quando vuole.
+
 ## Cosa succede se… (azioni involontarie dell'utente)
 
 Comportamento reale, verificato sul codice. Regola generale: **niente è irreversibile**, il peggio che capita è una pausa fino al prossimo giro dello scheduler o del watchdog.

@@ -114,9 +114,11 @@ async function syncPublicBank(root, opts = {}) {
     return { ok: false, error: 'local_public_bank_invalid', invalid: publicAudit.invalid.length, conflicts: publicAudit.conflicts.length };
   }
   const localMerge = mergeBanks(local, publicFile);
-  if (localMerge.conflicts.length > 0) {
-    return { ok: false, error: 'trusted_public_conflict', conflicts: localMerge.conflicts.length };
-  }
+  // Un conflitto non blocca più l'intero merge: le risposte NUOVE arrivano
+  // comunque (mergeMissingByCanonical non sovrascrive nulla) e il disaccordo
+  // viene segnalato, non trasformato in un blocco dell'automazione. Il
+  // riallineamento vero lo fa `answers-cli reconcile` (start.sh lo invoca).
+  const localConflicts = localMerge.conflicts.length;
   if (localMerge.added > 0) {
     try {
       writeJsonAtomic(knownPath, localMerge.merged);
@@ -128,14 +130,17 @@ async function syncPublicBank(root, opts = {}) {
   }
 
   if (!opts.force && !shouldSync(root)) {
-    return { ok: true, skipped: true, reason: 'throttled', added: localMerge.added };
+    return { ok: true, skipped: true, reason: 'throttled', added: localMerge.added, conflicts: localConflicts };
   }
   const url = opts.url || DEFAULT_PUBLIC_URL;
   let remote;
   try {
     remote = await fetchJson(url);
   } catch (e) {
-    return { ok: false, error: e.message || String(e), added: localMerge.added, localMerged: true };
+    return {
+      ok: false, error: e.message || String(e),
+      added: localMerge.added, conflicts: localConflicts, localMerged: true,
+    };
   }
   const remoteAudit = auditBank(remote);
   if (!remoteAudit.ok) {
@@ -143,16 +148,13 @@ async function syncPublicBank(root, opts = {}) {
       ok: false,
       error: 'remote_bank_invalid',
       invalid: remoteAudit.invalid.length,
-      conflicts: remoteAudit.conflicts.length,
+      conflicts: remoteAudit.conflicts.length + localConflicts,
       remoteHash: remoteAudit.sha256,
       added: localMerge.added,
     };
   }
   const publicComparison = compareBanks(publicFile, remote);
   const remoteMerge = mergeBanks(local, remote);
-  if (remoteMerge.conflicts.length > 0) {
-    return { ok: false, error: 'trusted_public_conflict', conflicts: remoteMerge.conflicts.length, remoteHash: remoteAudit.sha256, added: localMerge.added };
-  }
   if (remoteMerge.added > 0) {
     try {
       writeJsonAtomic(knownPath, remoteMerge.merged);
@@ -162,9 +164,14 @@ async function syncPublicBank(root, opts = {}) {
   }
   markSynced(root);
   if (remoteMerge.added > 0) log(`Banca: +${remoteMerge.added} risposte dalla public remota.`);
+  const conflicts = localConflicts + remoteMerge.conflicts.length;
+  if (conflicts > 0) {
+    log(`Banca: ${conflicts} risposta/e in disaccordo con la banca condivisa (le riallinea answers-cli reconcile).`);
+  }
   return {
     ok: true,
     added: localMerge.added + remoteMerge.added,
+    conflicts,
     skipped: false,
     remoteHash: remoteAudit.sha256,
     publicFileHash: publicComparison.leftHash,

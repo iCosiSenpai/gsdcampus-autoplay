@@ -66,9 +66,20 @@ fi
 # tentativo anche se entrambe le banche hanno lo stesso numero di voci.
 if [ -f "$DIR/scripts/lib/answers-cli.js" ]; then
   if ! node "$DIR/scripts/lib/answers-cli.js" verify >> "$OUT_FILE" 2>&1; then
-    err "Conflitto nella banca risposte: avvio bloccato per proteggere i quiz."
-    info "Diagnosi: node scripts/lib/answers-cli.js audit"
-    exit 1
+    # Un disaccordo fra la banca locale e quella condivisa NON deve fermare i
+    # corsi (prima l'avvio veniva bloccato e il Mac restava fermo finché non
+    # interveniva qualcuno). Ci allineiamo al condiviso — è la versione curata e
+    # distribuita a tutti — conservando copia e storico, poi riverifichiamo.
+    warn "Banca risposte non allineata a quella condivisa: la riallineo da sola."
+    node "$DIR/scripts/lib/answers-cli.js" reconcile 2>&1 | tee -a "$OUT_FILE" || true
+    node "$DIR/scripts/lib/answers-cli.js" audit --fix >> "$OUT_FILE" 2>&1 || true
+    if ! node "$DIR/scripts/lib/answers-cli.js" verify >> "$OUT_FILE" 2>&1; then
+      err "Banca risposte ancora incoerente dopo il riallineamento: mi fermo per proteggere i quiz."
+      info "Diagnosi: node scripts/lib/answers-cli.js audit"
+      info "Rimedio rapido: rilancia il comando curl e scegli \"Reinstallazione totale\"."
+      exit 1
+    fi
+    ok "Banca risposte riallineata: proseguo."
   fi
 fi
 

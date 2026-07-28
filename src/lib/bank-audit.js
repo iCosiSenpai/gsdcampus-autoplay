@@ -138,6 +138,46 @@ function mergeMissingByCanonical(target, source) {
   return { bank: out, added, conflicts };
 }
 
+/**
+ * Riconcilia i CONFLITTI fra banca trusted locale e banca condivisa: per la
+ * stessa domanda vince la risposta CONDIVISA (è quella curata e distribuita a
+ * tutti), e quella locale viene messa da parte per una revisione.
+ *
+ * Perché serve: un conflitto bloccava l'avvio (`answers-cli verify` è un gate in
+ * start.sh) e fermava l'automazione su quel Mac finché non interveniva qualcuno.
+ * Fermare i corsi è peggio del disaccordo: qui si allinea al condiviso e si
+ * conserva la traccia di cosa è stato sostituito.
+ *
+ * Pure: non scrive niente su disco.
+ * @param {object} trusted banca locale
+ * @param {object} shared banca pubblica/condivisa
+ * @returns {{ bank: object, replaced: Array<{question:string, local:string, shared:string}> }}
+ */
+function reconcileConflicts(trusted, shared) {
+  const t = trusted && typeof trusted === 'object' ? trusted : {};
+  const s = shared && typeof shared === 'object' ? shared : {};
+  const sharedIndex = new Map();
+  for (const [q, a] of Object.entries(s)) {
+    if (!isMetaKey(q)) sharedIndex.set(canonicalQuestion(q), { question: q, answer: a, answerKey: canonicalAnswer(a) });
+  }
+  const bank = {};
+  const replaced = [];
+  for (const [q, a] of Object.entries(t)) {
+    if (isMetaKey(q)) {
+      bank[q] = a;
+      continue;
+    }
+    const hit = sharedIndex.get(canonicalQuestion(q));
+    if (hit && hit.answerKey !== canonicalAnswer(a)) {
+      bank[q] = hit.answer;                                  // vince il condiviso
+      replaced.push({ question: q, local: String(a), shared: String(hit.answer) });
+    } else {
+      bank[q] = a;
+    }
+  }
+  return { bank, replaced };
+}
+
 function compareBanks(left, right) {
   const toIndex = (bank) => {
     const map = new Map();
@@ -163,6 +203,7 @@ function compareBanks(left, right) {
 }
 
 module.exports = {
+  reconcileConflicts,
   isMetaKey,
   unicode,
   canonicalQuestion,

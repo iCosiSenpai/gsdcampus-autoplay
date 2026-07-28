@@ -879,7 +879,6 @@ print_week_preview() {
     const shifts = JSON.parse('[' + (process.argv[2] || '') + ']');
     process.stdout.write(renderWeekPreview({ days, shifts }).join('\n'));
   " "$DAYS_JSON" "$shifts_json" 2>/dev/null || true
-  echo ""
 }
 
 # Editor avanzato dei turni (fino a 4 fasce): resta per i casi particolari.
@@ -1020,29 +1019,29 @@ while true; do
       shifts_summary+="${s_str}-${e_str}"
     done
 
-    echo ""
-    ui_hr
-    echo -e " ${BOLD}Ecco come lavorerà${NC}"
-    ui_hr
-    ui_kv "Collega" "${BOLD}$MEMBER_NAME${NC}"
-    ui_kv "Accesso al corso" "${GREEN}collegato al tuo nome ✓${NC}"
-    ui_kv "Giorni" "$(node -e "
+    # Riepilogo + anteprima vanno DENTRO la schermata del menu (--preamble):
+    # stampati prima, il clear-screen del menu li cancellava dopo un attimo.
+    DAYS_HUMAN=$(node -e "
       const { describeDaysHuman } = require('$DIR/src/lib/schedule-ui');
       process.stdout.write(describeDaysHuman(String(process.argv[1]||'').split(',').map(Number)));
-    " "$DAYS_JSON" 2>/dev/null || days_human "$DAYS_JSON")"
-    ui_kv "Orario" "$(shifts_human_summary)"
-    ui_hr
-    echo ""
-    # Anteprima: vedere la settimana rassicura più che rileggere una lista di orari.
-    print_week_preview
-    info "Fuori da queste ore si mette in pausa da sola e riprende al turno dopo."
-    echo ""
+    " "$DAYS_JSON" 2>/dev/null || days_human "$DAYS_JSON")
+    CONFIRM_BLOCK="Collega            $MEMBER_NAME
+Accesso al corso   collegato al tuo nome ✓
+Giorni             $DAYS_HUMAN
+Orario             $(shifts_human_summary)
+
+$(print_week_preview)
+Fuori da queste ore si mette in pausa da sola e riprende al turno dopo."
 
     if [ "$AUTO_YES" = true ]; then
       CONFIRM_PICK=1
+      echo ""
+      printf '%s\n' "$CONFIRM_BLOCK"
+      echo ""
     else
       CONFIRM_PICK=$(node "$DIR/scripts/lib/prompt-cli.js" select \
-        --title "Va bene così?" --default 1 -- \
+        --title "Ecco come lavorerà — va bene così?" \
+        --preamble "$CONFIRM_BLOCK" --default 1 -- \
         "Sì, salva e vai" \
         "◂ Cambio l'orario" \
         "◂ Cambio i giorni" \

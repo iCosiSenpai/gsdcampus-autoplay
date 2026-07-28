@@ -184,7 +184,8 @@ function printMenuFooter(layout) {
 
 function drawMenuScreen(items, title, subtitle, selected, options = {}) {
   const branded = Boolean(options.brand);
-  const layout = menuLayout(items.length, branded);
+  const preambleLines = options.preamble ? String(options.preamble).split('\n') : [];
+  const layout = menuLayout(items.length + preambleLines.length, branded);
   clearScreen();
   for (let i = 0; i < layout.top; i++) console.log('');
   if (branded) {
@@ -192,6 +193,13 @@ function drawMenuScreen(items, title, subtitle, selected, options = {}) {
     console.log('');
   }
   printMenuHeading(layout, title, subtitle, branded);
+  // Preambolo stampato VERBATIM (nessun word-wrap): serve per blocchi allineati
+  // come l'anteprima della settimana. Prima veniva stampato prima del menu e il
+  // clear-screen del menu lo cancellava un attimo dopo.
+  if (preambleLines.length) {
+    console.log('');
+    preambleLines.forEach((line) => console.log(`${layout.indent}${line}`));
+  }
   console.log('');
   printMenuItems(layout, items, selected);
   console.log('');
@@ -685,12 +693,13 @@ function closeLineReader() {
 // ────────────────────────────────────────────────────────────────
 // Menu numerico fallback per non-TTY
 // ────────────────────────────────────────────────────────────────
-function numericMenu(items, title, subtitle) {
+function numericMenu(items, title, subtitle, options = {}) {
   return new Promise((resolve) => {
     function draw() {
       console.log('');
       printBox(title, []);
       if (subtitle) console.log(subtitle);
+      if (options.preamble) console.log(String(options.preamble));
       console.log('');
       items.forEach((it, i) => {
         const label = typeof it === 'string' ? it : it.label;
@@ -744,6 +753,7 @@ function parseArgs(argv) {
   const args = argv.slice(2); // tolgo 'node' e lo script
   let title = '';
   let subtitle = '';
+  let preamble = '';
   let defaultN = 1;
   let brand = false;
   let items = [];
@@ -754,11 +764,12 @@ function parseArgs(argv) {
     if (a === '--') { collectingItems = true; continue; }
     if (a === '--title') { title = args[++i]; continue; }
     if (a === '--subtitle') { subtitle = args[++i]; continue; }
+    if (a === '--preamble') { preamble = args[++i]; continue; }
     if (a === '--default') { defaultN = parseInt(args[++i], 10); continue; }
     if (a === '--brand') { brand = true; continue; }
   }
   if (Number.isNaN(defaultN) || defaultN < 1) defaultN = 1;
-  return { title, subtitle, defaultN, brand, items };
+  return { title, subtitle, preamble, defaultN, brand, items };
 }
 
 // Sottocomandi per gli script shell (setup.sh):
@@ -846,7 +857,7 @@ async function cliMain() {
     process.exit(0);
   }
 
-  const { title, subtitle, defaultN, brand, items } = parseArgs(process.argv);
+  const { title, subtitle, preamble, defaultN, brand, items } = parseArgs(process.argv);
   if (!items || items.length === 0) {
     realStdoutWrite('0\n');
     process.exit(0);
@@ -855,10 +866,10 @@ async function cliMain() {
   let chosen = null;
   try {
     if (process.stdin.isTTY) {
-      chosen = await ttyMenu(items, title, subtitle, (defaultN - 1), { brand });
+      chosen = await ttyMenu(items, title, subtitle, (defaultN - 1), { brand, preamble });
     } else {
       // numericMenu ritorna l'item o null; mappa a indice.
-      chosen = await numericMenu(items, title, subtitle);
+      chosen = await numericMenu(items, title, subtitle, { preamble });
     }
   } catch (_) {
     chosen = null;

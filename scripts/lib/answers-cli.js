@@ -60,6 +60,7 @@ const {
   upsertBankEntry,
   mergeMissingByCanonical,
   compareBanks,
+  reconcileConflicts,
 } = require(path.join(__dirname, '..', '..', 'src', 'lib', 'bank-audit'));
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -220,6 +221,31 @@ if (cmd === 'stats') {
     }
     process.exit(0);
   }
+} else if (cmd === 'reconcile') {
+  // Allinea la banca locale a quella condivisa sui CONFLITTI (stessa domanda,
+  // risposta diversa): vince il condiviso, il valore locale finisce in
+  // data/known_answers_conflicts.json per una revisione. Serve a NON fermare
+  // l'automazione: prima un conflitto bloccava l'avvio (gate in start.sh).
+  const known = readJson(KNOWN, {});
+  const pub = readJson(PUBLIC, {});
+  const { bank, replaced } = reconcileConflicts(known, pub);
+  if (replaced.length === 0) {
+    console.log('Nessun conflitto fra banca locale e banca condivisa.');
+  } else {
+    const backup = path.join(DATA, `known_answers.before-reconcile.json`);
+    try { writeJsonAtomic(backup, known); } catch (_) {}
+    writeJsonAtomic(KNOWN, bank);
+    const logFile = path.join(DATA, 'known_answers_conflicts.json');
+    const previous = readJson(logFile, []);
+    const entries = Array.isArray(previous) ? previous : [];
+    entries.push({ at: new Date().toISOString(), replaced });
+    try { writeJsonAtomic(logFile, entries); } catch (_) {}
+    console.log(`Allineate ${replaced.length} risposta/e alla banca condivisa (vince quella di tutti):`);
+    replaced.forEach((r) => console.log(`  • ${r.question.slice(0, 70)}\n      locale: ${r.local.slice(0, 50)}\n      condivisa: ${r.shared.slice(0, 50)}`));
+    console.log(`Copia di sicurezza: ${backup}`);
+    console.log(`Storico conflitti:  ${logFile}`);
+  }
+  try { writeAiTodo(ROOT); } catch (_) {}
 } else if (cmd === 'audit') {
   const known = readJson(KNOWN, {});
   const fix = process.argv.includes('--fix');
@@ -355,6 +381,6 @@ if (cmd === 'stats') {
     process.exit(localOk && remote.ok ? 0 : 1);
   }).catch((e) => { console.error(`Verifica main fallita: ${e.message}`); process.exit(1); });
 } else {
-  console.error(`Comando sconosciuto: ${cmd}\nComandi: stats | list | merge | set | resolve | audit [--fix] | publish | share | lag | verify [--remote]`);
+  console.error(`Comando sconosciuto: ${cmd}\nComandi: stats | list | merge | set | resolve | reconcile | audit [--fix] | publish | share | lag | verify [--remote]`);
   process.exit(1);
 }
