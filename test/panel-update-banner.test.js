@@ -84,25 +84,30 @@ describe('plancia: riga auto-aggiornamento', () => {
   });
 });
 
-describe('plancia: tasti Q e F', () => {
-  it('Q è dichiarato come chiusura della SCHEDA, non dell\'app', () => {
+describe('plancia: tasti Q e ESC', () => {
+  // Q deve fermare l'automazione per davvero (corsi + scheduler + guardiano) e
+  // chiudere la scheda; ESC è la via d'uscita che lascia lavorare il Mac.
+  it('Q è dichiarato come stop reale, non come semplice chiusura scheda', () => {
     const out = frame(baseModel);
-    assert.match(out, /Q chiudi la scheda/);
-    assert.match(out, /Q chiude solo questa scheda del Terminale \(non l'app/);
+    assert.match(out, /Q ferma tutto e chiudi/);
+    assert.match(out, /Q ferma i corsi, lo scheduler e il guardiano/);
     // Non deve più promettere che chiudere non ferma niente.
     assert.equal(/chiudere la finestra non ferma nulla/.test(out), false);
+    assert.equal(/Q chiude solo questa scheda/.test(out), false);
   });
 
-  it('col guardiano attivo spiega il riavvio automatico', () => {
-    assert.match(frame(baseModel), /il guardiano li riavvia entro ~2 minuti/);
+  it('ESC è offerto come uscita che non ferma i corsi', () => {
+    const out = frame(baseModel);
+    assert.match(out, /ESC esci e lascia lavorare/);
+    assert.match(out, /ESC chiude solo questa scheda del Terminale \(non l'app\): i corsi continuano/);
+  });
+
+  it('col guardiano attivo chiarisce che dopo Q non si riparte da soli', () => {
+    assert.match(frame(baseModel), /Dopo Q l'automazione resta ferma finché non la riavvii tu/);
   });
 
   it('senza guardiano avvisa che l\'automazione può fermarsi', () => {
     assert.match(frame({ ...baseModel, keepAlive: false }), /Guardiano non attivo/);
-  });
-
-  it('F resta la fermata vera', () => {
-    assert.match(frame(baseModel), /F ferma davvero i corsi/);
   });
 });
 

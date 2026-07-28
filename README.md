@@ -110,25 +110,25 @@ Alla fine si apre una **plancia** che ti dice a colpo d'occhio come sta andando,
    Turni     ▸ 09:00–13:00 · 16:00–20:00  · in orario
    Aggiorn.  ▸ controllato 4m fa · già all'ultima versione
  ════════════════════════════════════════════════════════════════════
-  L guarda dal vivo   R aggiorna ora   Q chiudi la scheda   F ferma tutto
+  L guarda dal vivo   R aggiorna ora   Q ferma tutto e chiudi   ESC esci e lascia lavorare
 ```
 
 Il **Pac-Man giallo** mangia la strada che resta da fare: quando arriva in fondo i corsi sono finiti. I **fantasmini** in coda sono i corsi in attesa di risposte ai quiz (uno per corso, coi colori dei quattro originali). In alto trovi sempre la **versione** installata, accanto al tuo nome.
 
 Con un tasto solo:
 
-- **L** — guarda dal vivo cosa sta facendo. È **solo guardare**: non ferma e non cambia niente. Per tornare alla plancia premi **Q**.
+- **L** — guarda dal vivo cosa sta facendo. È **solo guardare**: non ferma e non cambia niente. Per tornare alla plancia premi **ESC** (o **Q**).
 - **R** — rilegge subito i dati mostrati.
-- **Q** — **chiude questa scheda del Terminale**. Solo questa: non chiude l'app né le altre finestre, che possono star facendo altro. Se chiudendo la scheda il Mac interrompe i processi, il **guardiano** li rimette in piedi entro un paio di minuti (la plancia ti avvisa in giallo se il guardiano non è attivo).
-- **F** — **ferma davvero** i corsi e chiude la scheda: resta fermo finché non lo riavvii tu.
+- **Q** — **ferma tutto e chiude**: corsi, scheduler e guardiano si spengono, poi si chiude questa scheda del Terminale (solo questa: non l'app né le altre finestre). Chiede una conferma, e dopo Q il Mac resta fermo finché non lo riavvii tu.
+- **ESC** — esce dalla plancia **senza fermare niente**: chiude la scheda e i corsi continuano in background.
 
-Se vuoi solo uscire dalla plancia lasciando la scheda aperta, premi **Ctrl-C**.
+Se vuoi uscire lasciando anche la scheda aperta, premi **Ctrl-C**.
 
 La riga **Aggiorn.** dice quando il Mac ha controllato l'ultima volta se c'è una versione nuova (il controllo è automatico ogni ~10 minuti). Se diventa gialla — "nessun controllo recente" o "non attivo su questo Mac" — rilancia il comando curl: lo riattiva.
 
-Se l'aggiornamento arriva **mentre questa finestra è aperta**, la plancia te lo dice ("Si è aggiornato da solo…"): i dati che vedi restano veri, ma la schermata gira ancora sulla versione precedente — chiudila con **Q** e rilancia il comando curl. Ad aggiornamento riuscito arriva anche una **notifica** del Mac, così te ne accorgi pure senza terminali aperti.
+Se l'aggiornamento arriva **mentre questa finestra è aperta**, la plancia te lo dice ("Si è aggiornato da solo…"): i dati che vedi restano veri, ma la schermata gira ancora sulla versione precedente — chiudila con **ESC** e rilancia il comando curl. Ad aggiornamento riuscito arriva anche una **notifica** del Mac, così te ne accorgi pure senza terminali aperti.
 
-Non devi tenere niente aperto: se la scheda si chiude — o se il Mac si riavvia — il **guardiano** rimette in piedi l'automazione entro un paio di minuti e continua in background. Se invece premi **F**, resta ferma di proposito finché non la riavvii tu.
+Non devi tenere niente aperto: se la scheda si chiude — o se il Mac si riavvia — il **guardiano** rimette in piedi l'automazione entro un paio di minuti e continua in background. Se invece premi **Q**, resta ferma di proposito finché non la riavvii tu.
 
 **Per rivederla o controllare come va**, riapri il Terminale e rilancia **lo stesso comando** di sopra, poi scegli **"Aggiorna e avvia"**: riconosce la sessione già in corso, ricompare la schermata di stato e i corsi riprendono dal punto salvato. È sempre lo stesso comando, per tutto.
 

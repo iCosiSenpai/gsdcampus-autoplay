@@ -450,8 +450,8 @@ function renderFrame(model, opts = {}) {
   if (head.cooldown) {
     L.push(`     ${c(ANSI.dim, 'Cosa puoi fare:')}`);
     L.push(`       ${c(ANSI.gray, GLYPH.bul)} lascia questa finestra aperta: riprova da sola.`);
-    L.push(`       ${c(ANSI.bold, 'Q')} chiudi la scheda: il guardiano tiene in vita l'automazione e riprova.`);
-    L.push(`       ${c(ANSI.bold, 'F')} ferma tutto e chiudi.`);
+    L.push(`       ${c(ANSI.bold, 'ESC')} esci dalla plancia: i corsi continuano e il guardiano riprova da solo.`);
+    L.push(`       ${c(ANSI.bold, 'Q')} ferma corsi e scheduler, poi chiude questa scheda.`);
   }
   L.push('');
 
@@ -552,22 +552,21 @@ function renderFrame(model, opts = {}) {
   const actions = [
     key('L', 'guarda dal vivo'),
     key('R', 'aggiorna ora'),
-    key('Q', 'chiudi la scheda'),
-    key('F', 'ferma tutto'),
+    key('Q', 'ferma tutto e chiudi'),
+    key('ESC', 'esci e lascia lavorare'),
   ];
   if (head.level === 'attention' && head.hint && head.hint.includes('C ')) actions.splice(3, 0, key('C', 'cambia collega'));
   L.push('  ' + actions.join('   '));
-  // Q = chiude SOLO questa scheda del Terminale (non l'app, non le altre
-  // finestre che possono fare altro). Chiudere la scheda può interrompere i
-  // processi avviati da qui: lo diciamo, invece di promettere che "non ferma
-  // nulla". Con il guardiano installato ripartono da soli entro ~2 minuti.
-  L.push(`  ${c(ANSI.dim, `${GLYPH.bul} Q chiude solo questa scheda del Terminale (non l'app, non le altre finestre).`)}`);
+  // Q = ferma per davvero: corsi, scheduler e guardiano, poi chiude la scheda.
+  // ESC = via d'uscita non distruttiva: chiude solo questa scheda del Terminale
+  // (non l'app, non le altre finestre che possono fare altro) e lascia lavorare.
+  L.push(`  ${c(ANSI.dim, `${GLYPH.bul} Q ferma i corsi, lo scheduler e il guardiano, poi chiude questa scheda (chiede conferma).`)}`);
+  L.push(`  ${c(ANSI.dim, `${GLYPH.bul} ESC chiude solo questa scheda del Terminale (non l'app): i corsi continuano.`)}`);
   if (model.keepAlive) {
-    L.push(`  ${c(ANSI.dim, `${GLYPH.bul} Se chiudendo la scheda i processi vengono interrotti, il guardiano li riavvia entro ~2 minuti.`)}`);
+    L.push(`  ${c(ANSI.dim, `${GLYPH.bul} Dopo Q l'automazione resta ferma finché non la riavvii tu: il guardiano non la resuscita.`)}`);
   } else {
-    L.push(`  ${c(ANSI.yellow, `${GLYPH.warn} Guardiano non attivo: se chiudi la scheda l'automazione può fermarsi — rilancia il comando curl per riattivarlo.`)}`);
+    L.push(`  ${c(ANSI.yellow, `${GLYPH.warn} Guardiano non attivo: se l'automazione si ferma da sola, rilancia il comando curl per riattivarlo.`)}`);
   }
-  L.push(`  ${c(ANSI.dim, `${GLYPH.bul} F ferma davvero i corsi (e non riparte finché non lo riavvii tu).`)}`);
   const clock = new Date(model.now || Date.now());
   const hhmmss = [clock.getHours(), clock.getMinutes(), clock.getSeconds()]
     .map((n) => String(n).padStart(2, '0')).join(':');
@@ -721,7 +720,7 @@ function main() {
         restartHeld: restartPlan.action === 'wait' ? restartPlan.reason : null,
       });
     const extra = (view === 'panel' && confirmStop)
-      ? `\n  ${color ? ANSI.red : ''}Premere di nuovo F per fermare tutto e chiudere la scheda, un altro tasto per annullare.${color ? ANSI.reset : ''}`
+      ? `\n  ${color ? ANSI.red : ''}Premere di nuovo Q per fermare corsi e scheduler e chiudere la scheda, un altro tasto per annullare.${color ? ANSI.reset : ''}`
       : '';
     // Redraw IN PLACE: cursore a casa, ogni riga pulita fino a fine riga
     // (\x1b[K) e pulizia finale sotto (\x1b[J). Con un clear-screen a 4 fps si
@@ -771,18 +770,22 @@ function main() {
     if (view === 'log') { if (/^[qQ\r\n\u001b]$/.test(k)) { view = 'panel'; draw(); } return; }
     if (confirmStop) {
       confirmStop = false;
-      if (k === 'f' || k === 'F') return doStop();
+      // Conferma con lo stesso tasto che ha chiesto lo stop (Q, o F come alias storico).
+      if (/^[qQfF]$/.test(k)) return doStop();
       draw();
       return;
     }
     switch (k) {
-      case 'q': case 'Q': case '\u001b': {
+      // Q = fermo davvero tutto: corsi, scheduler, guardiano, e chiudo la scheda.
+      // Chiede una conferma perché su un Mac che sta lavorando è un'azione pesante.
+      case 'q': case 'Q': case 'f': case 'F': confirmStop = true; draw(); break;
+      // ESC = via d'uscita non distruttiva: chiude la plancia e lascia lavorare.
+      case '\u001b': {
         const tail = model.keepAlive
-          ? 'Se i processi vengono interrotti, il guardiano li riavvia entro un paio di minuti.'
+          ? 'I corsi continuano e il guardiano li tiene in vita.'
           : 'Attenzione: il guardiano non è attivo — se l\'automazione si ferma, rilancia il comando curl.';
-        return quit(`Chiudo questa scheda del Terminale (non l'app). ${tail}`, { closeTab: true });
+        return quit(`Esco dalla plancia senza fermare nulla. ${tail}`, { closeTab: true });
       }
-      case 'f': case 'F': confirmStop = true; draw(); break;
       case 'l': case 'L': view = 'log'; draw(); break;
       case 'r': case 'R': refreshNow(); draw(); break;
       default: break;
