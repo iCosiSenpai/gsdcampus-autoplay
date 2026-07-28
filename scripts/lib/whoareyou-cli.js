@@ -226,7 +226,7 @@ async function searchAndSelectMember(mode) {
       console.log(`Nessun membro trovato per "${q}".`);
       const retry = await menu([
         { label: 'Riprova', value: 'retry' },
-        { label: 'Torna al menu principale', value: 'back' }
+        { label: '◂ Indietro', value: 'back' }
       ], 'Nessun risultato', '');
       if (!retry || retry.value === 'back') return null;
       continue;
@@ -297,7 +297,7 @@ async function manualAutologin() {
       console.log('Link non valido. Formato atteso: https://tecsial.gsdcampus.it/autologin/CODICEFISCALE/TOKEN');
       const retry = await menu([
         { label: 'Riprova', value: 'retry' },
-        { label: 'Torna al menu principale', value: 'back' }
+        { label: '◂ Indietro', value: 'back' }
       ], 'Link non valido', '');
       if (!retry || retry.value === 'back') return null;
       continue;
@@ -403,7 +403,7 @@ async function main() {
         { label: 'Cerca per codice fiscale', value: 'cf' },
         { label: 'Ho un link di accesso dal referente — lo incollo', value: 'manual' },
         { label: 'Aggiorna l\'elenco dei colleghi da un file CSV', value: 'import' },
-        { label: 'Torna indietro', value: 'back' },
+        { label: '◂ Indietro', value: 'back' },
       ], 'Non ti trovi nell\'elenco?', 'Se il tuo nome non c\'è, avvisa il referente: aggiorna lui l\'elenco per tutti.');
       if (!alt || alt.value === 'back') continue;
       if (alt.value === 'import') {

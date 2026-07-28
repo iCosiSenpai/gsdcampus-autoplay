@@ -75,6 +75,24 @@ Poi *"C'è la pausa pranzo?"*: se sì, altri due orologi (inizio pausa e riapert
 
 Scegliendo "Cambio l'orario" o "Cambio i giorni" si rifà **solo quel passo** (`CONFIG_STEP` in `setup.sh`), senza ricominciare da capo come faceva il vecchio `[y/N]`.
 
+## Tornare indietro di una pagina
+
+Ogni passo si può rifare senza ricominciare: **ESC** (o la voce `◂ Indietro`) torna alla pagina precedente.
+
+```
+«Chi sei?»  ◂—▸  Giorni  ◂—▸  Orario  ◂—▸  Riepilogo
+                                 ├─ modelli pronti
+                                 └─ Altro orario: apertura ◂—▸ chiusura ◂—▸ pausa? ◂—▸ inizio ◂—▸ riapertura
+```
+
+- **Giorni**: ESC torna a «Chi sei?». Se lì si annulla, il collega già configurato resta quello di prima (non si esce dal setup).
+- **Orario**: la voce `◂ Indietro — torno ai giorni`, oppure ESC.
+- **Altro orario**: ESC su un orologio torna alla domanda precedente; dal primo (apertura) si torna ai modelli pronti — non al passo dei giorni, così non si perde il posto. Anche `C'è la pausa pranzo?` ha la sua voce `◂ Indietro`.
+- **Riepilogo**: `◂ Cambio l'orario`, `◂ Cambio i giorni`, `◂ Cambio collega` rifanno solo quel pezzo.
+- Se il negozio ha orari incompatibili (pausa fuori dall'apertura) il setup rimanda alla domanda che l'ha causata, non all'inizio.
+
+Contratto tecnico dei widget: `timeMenu` e `checkMenu` ritornano `null` su ESC/q/Ctrl-C, e i sottocomandi `prompt-cli.js time|check` stampano una **riga vuota** — è così che `setup.sh` distingue "indietro" da un valore confermato (`return 1` dalle funzioni `configure_*`, che la macchina a stati `CONFIG_STEP` traduce nel passo precedente). Nel fallback non interattivo si scrive `b` (o `indietro`).
+
 ## Chi lo usa senza mouse né lettura di manuali
 
 - Zero orari da digitare: tutto con frecce e Invio. Il parser flessibile (`9`, `9:30`, `1630`) resta solo come rete di sicurezza nel fallback non interattivo.

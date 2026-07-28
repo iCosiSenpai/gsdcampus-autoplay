@@ -72,6 +72,7 @@ Il Terminale ti farà qualche domanda. Rispondi con calma, è tutto normale:
    ←→ 15 minuti   ↑↓ un'ora   INVIO confermo
 ```
 
+- **Hai sbagliato?** Premi **ESC** e torni alla domanda precedente (o scegli la voce `◂ Indietro`): non serve ricominciare da capo.
 - **Un'ultima occhiata** — prima di salvare vedi la tua settimana disegnata, e se qualcosa non torna cambi solo quel pezzo:
 
 ```
@@ -84,7 +85,7 @@ Il Terminale ti farà qualche domanda. Rispondi con calma, è tutto normale:
   dom   chiuso
 
    Va bene così?
- ▌  01  Sì, salva e vai      02  Cambio l'orario      03  Cambio i giorni
+ ▌  01  Sì, salva e vai   02  ◂ Cambio l'orario   03  ◂ Cambio i giorni   04  ◂ Cambio collega
 ```
 
 ---

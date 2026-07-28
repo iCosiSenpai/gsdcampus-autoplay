@@ -7,6 +7,8 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-28
 
+- **Si può tornare indietro** durante la configurazione: **ESC** (o la voce `◂ Indietro`) riporta alla domanda precedente — dai giorni si torna a «Chi sei?», dall'orario ai giorni, e dentro "Altro orario" si risale una domanda per volta. Dal riepilogo si cambia solo l'orario, solo i giorni o solo il collega. Niente più "ricominciamo l'inserimento".
+
 - **La schermata si riapre da sola** quando arriva un aggiornamento: prima restava sulla versione vecchia (l'orologio avanzava ma il contenuto sembrava fermo) e bisognava chiuderla a mano. Ora avvisa e si riapre dopo 6 secondi — e **aspetta** se stai leggendo il log dal vivo o se c'è un quiz in corso. I corsi non si fermano.
 - Anche l'automazione **adotta il codice nuovo da sola**, tra un corso e l'altro: mai durante un video o un quiz.
 - Se non c'è nessun corso in esecuzione, la schermata lo dice ("stato del corso di 4h 12m fa"), così un contenuto immobile non sembra un blocco.

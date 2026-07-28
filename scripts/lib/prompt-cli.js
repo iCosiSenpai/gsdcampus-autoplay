@@ -382,18 +382,21 @@ function drawTimeScreen(title, subtitle, minutes, hint) {
   console.log(`${layout.indent}      ${big}`);
   console.log('');
   console.log(`${layout.indent}${UI.dim}${'─'.repeat(layout.inner)}${UI.reset}`);
-  console.log(`${layout.indent}${UI.accent}←→${UI.reset} ${UI.dim}${TIME_STEP_MIN} minuti${UI.reset}   ${UI.accent}↑↓${UI.reset} ${UI.dim}un'ora${UI.reset}   ${UI.accent}INVIO${UI.reset} ${UI.dim}confermo${UI.reset}`);
+  console.log(`${layout.indent}${UI.accent}←→${UI.reset} ${UI.dim}${TIME_STEP_MIN} minuti${UI.reset}   ${UI.accent}↑↓${UI.reset} ${UI.dim}un'ora${UI.reset}   ${UI.accent}INVIO${UI.reset} ${UI.dim}confermo${UI.reset}   ${UI.accent}ESC${UI.reset} ${UI.dim}indietro${UI.reset}`);
   if (hint) console.log(`${layout.indent}${UI.dim}${hint}${UI.reset}`);
 }
 
 /**
- * Selettore orario. Ritorna i minuti scelti (o il default se si annulla), così
- * il chiamante ha SEMPRE un valore valido.
+ * Selettore orario. Ritorna i minuti scelti, oppure **null** se si torna
+ * indietro (ESC / q / Ctrl-C): così il chiamante può rifare il passo precedente
+ * invece di dover confermare per forza.
  */
 function timeMenu(title, subtitle, defaultMinutes, hint) {
   const start = Number.isFinite(defaultMinutes) ? stepMinutes(defaultMinutes, 0) : 9 * 60;
   if (!process.stdin.isTTY) {
-    return readLine(`${title} [${formatMinutes(start)}]: `).then((answer) => {
+    return readLine(`${title} [${formatMinutes(start)}] (b = indietro): `).then((answer) => {
+      const txt = String(answer || '').trim().toLowerCase();
+      if (txt === 'b' || txt === 'back' || txt === 'indietro') return null;
       const parsed = parseTimeToMinutes(answer);
       return parsed == null ? start : parsed;
     });
@@ -412,14 +415,14 @@ function timeMenu(title, subtitle, defaultMinutes, hint) {
     function onKey(str, key) {
       if (!key) return;
       if (Date.now() - openedAt < 150 && !(key.ctrl && key.name === 'c')) return;
-      if (key.ctrl && key.name === 'c') { cleanup(); resolve(start); return; }
+      if (key.ctrl && key.name === 'c') { cleanup(); resolve(null); return; }
       switch (key.name) {
         case 'right': value = stepMinutes(value, TIME_STEP_MIN); break;
         case 'left': value = stepMinutes(value, -TIME_STEP_MIN); break;
         case 'up': value = stepMinutes(value, 60); break;
         case 'down': value = stepMinutes(value, -60); break;
         case 'return': case 'enter': cleanup(); resolve(value); return;
-        case 'q': case 'escape': cleanup(); resolve(start); return;
+        case 'q': case 'escape': cleanup(); resolve(null); return;   // indietro
         default: return;
       }
       drawTimeScreen(title, subtitle, value, hint);
@@ -456,18 +459,21 @@ function drawCheckScreen(items, title, subtitle, selected, cursor) {
   });
   console.log('');
   console.log(`${layout.indent}${UI.dim}${'─'.repeat(layout.inner)}${UI.reset}`);
-  console.log(`${layout.indent}${UI.accent}↑↓${UI.reset} ${UI.dim}muovi${UI.reset}   ${UI.accent}SPAZIO${UI.reset} ${UI.dim}spunta${UI.reset}   ${UI.accent}INVIO${UI.reset} ${UI.dim}confermo${UI.reset}`);
+  console.log(`${layout.indent}${UI.accent}↑↓${UI.reset} ${UI.dim}muovi${UI.reset}   ${UI.accent}SPAZIO${UI.reset} ${UI.dim}spunta${UI.reset}   ${UI.accent}INVIO${UI.reset} ${UI.dim}confermo${UI.reset}   ${UI.accent}ESC${UI.reset} ${UI.dim}indietro${UI.reset}`);
 }
 
 /**
- * Lista con caselle da spuntare. Ritorna gli indici selezionati (0-based);
- * se si annulla o non si seleziona nulla, torna la preselezione.
+ * Lista con caselle da spuntare. Ritorna gli indici selezionati (0-based),
+ * oppure **null** se si torna indietro (ESC / q / Ctrl-C). Con Invio e nessuna
+ * casella spuntata torna la preselezione (non si resta mai senza risposta).
  */
 function checkMenu(items, title, subtitle, preselected = []) {
   const initial = [...new Set(preselected.filter((i) => i >= 0 && i < items.length))].sort((a, b) => a - b);
   if (!process.stdin.isTTY) {
     items.forEach((it, i) => console.log(`  [${i + 1}] ${it}`));
-    return readLine('Numeri separati da virgola (Invio = come proposto): ').then((answer) => {
+    return readLine('Numeri separati da virgola (Invio = come proposto, b = indietro): ').then((answer) => {
+      const txt = String(answer || '').trim().toLowerCase();
+      if (txt === 'b' || txt === 'back' || txt === 'indietro') return null;
       const picked = String(answer || '').split(',')
         .map((x) => parseInt(String(x).trim(), 10) - 1)
         .filter((i) => Number.isInteger(i) && i >= 0 && i < items.length);
@@ -489,7 +495,7 @@ function checkMenu(items, title, subtitle, preselected = []) {
     function onKey(str, key) {
       if (!key) return;
       if (Date.now() - openedAt < 150 && !(key.ctrl && key.name === 'c')) return;
-      if (key.ctrl && key.name === 'c') { cleanup(); resolve(initial); return; }
+      if (key.ctrl && key.name === 'c') { cleanup(); resolve(null); return; }
       if (key.name === 'up') cursor = (cursor - 1 + items.length) % items.length;
       else if (key.name === 'down') cursor = (cursor + 1) % items.length;
       else if (key.name === 'space') selected = toggleSelection(selected, cursor);
@@ -499,7 +505,7 @@ function checkMenu(items, title, subtitle, preselected = []) {
         cleanup();
         resolve(selected.length ? selected : initial);
         return;
-      } else if (key.name === 'q' || key.name === 'escape') { cleanup(); resolve(initial); return; }
+      } else if (key.name === 'q' || key.name === 'escape') { cleanup(); resolve(null); return; }   // indietro
       else return;
       drawCheckScreen(items, title, subtitle, selected, cursor);
     }
@@ -776,7 +782,8 @@ async function cliTime(realStdoutWrite) {
   })();
   const def = parseTimeToMinutes(defaultRaw);
   const value = await timeMenu(title, subtitle, def == null ? 9 * 60 : def, hint);
-  realStdoutWrite(`${formatMinutes(value)}\n`);
+  // Riga vuota = "torna indietro": lo script chiamante rifà il passo precedente.
+  realStdoutWrite(value == null ? '\n' : `${formatMinutes(value)}\n`);
 }
 
 async function cliCheck(realStdoutWrite) {
@@ -795,7 +802,7 @@ async function cliCheck(realStdoutWrite) {
     return;
   }
   const picked = await checkMenu(items, get('--title', 'Scegli'), get('--subtitle', ''), pre);
-  realStdoutWrite(`${picked.map((i) => i + 1).join(',')}\n`);
+  realStdoutWrite(picked == null ? '\n' : `${picked.map((i) => i + 1).join(',')}\n`);
 }
 
 async function cliMain() {

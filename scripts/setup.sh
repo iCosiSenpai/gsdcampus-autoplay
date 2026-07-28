@@ -684,10 +684,13 @@ configure_days() {
   local picked
   picked=$(node "$DIR/scripts/lib/prompt-cli.js" check \
     --title "In quali giorni è aperto il negozio?" \
-    --subtitle "Spazio per spuntare · A tutti · N nessuno · Invio per confermare" \
+    --subtitle "Spazio per spuntare · A tutti · N nessuno · Invio conferma · ESC torna indietro" \
     --default "${DAYS_CHECK_DEFAULT:-1,2,3,4,5}" -- \
     "lunedì" "martedì" "mercoledì" "giovedì" "venerdì" "sabato" "domenica" 2>/dev/null || echo "1,2,3,4,5")
-  [ -n "$picked" ] || picked="1,2,3,4,5"
+  # Riga vuota = ESC: l'utente vuole tornare al passo precedente («Chi sei?»).
+  if [ -z "$picked" ]; then
+    return 1
+  fi
   DAYS_CHECK_DEFAULT="$picked"
   # Le voci sono lun..dom (1..7): i giorni JS sono 0=dom … 6=sab.
   DAYS=$(node -e "
@@ -710,9 +713,10 @@ configure_days() {
 # Orario del negozio → turni. Il collega ragiona per "apre / chiude / pausa
 # pranzo", non per "turni": traduciamo noi (src/lib/schedule-ui.js).
 ask_time() {
-  # $1 = titolo, $2 = default HH:MM, $3 = suggerimento
+  # $1 = titolo, $2 = default HH:MM, $3 = suggerimento.
+  # Stampa l'orario scelto, oppure NIENTE se l'utente ha premuto ESC (indietro).
   node "$DIR/scripts/lib/prompt-cli.js" time \
-    --title "$1" --default "$2" --hint "${3:-}" 2>/dev/null || echo "$2"
+    --title "$1" --default "$2" --hint "${3:-} · ESC torna indietro" 2>/dev/null || echo "$2"
 }
 
 # Costruisce SHIFT_SPECS da apertura/chiusura/pausa usando l'helper condiviso.
@@ -749,22 +753,33 @@ shifts_from_store_hours() {
 
 configure_hours() {
   local choice
-  choice=$(node "$DIR/scripts/lib/prompt-cli.js" select \
-    --title "A che ora apre e chiude il negozio?" \
-    --subtitle "Nelle ore scelte l'automazione segue i corsi; fuori si mette in pausa da sola." \
-    --default 1 -- \
-    "09:00 – 20:00 con pausa 13:00-16:00 — il più comune" \
-    "09:00 – 18:00 senza pausa" \
-    "Solo mattina — 09:00 – 13:00" \
-    "Solo pomeriggio — 16:00 – 20:00" \
-    "Altro orario — lo scelgo con le frecce" 2>/dev/null || echo 1)
-  case "$choice" in
-    2) SHIFT_SPECS=("9,0,18,0") ;;
-    3) SHIFT_SPECS=("9,0,13,0") ;;
-    4) SHIFT_SPECS=("16,0,20,0") ;;
-    5) configure_hours_custom ;;
-    *) SHIFT_SPECS=("9,0,13,0" "16,0,20,0") ;;
-  esac
+  # Il menu resta aperto: tornando indietro da "Altro orario" si ricade QUI
+  # (stessa pagina), non ai giorni. Indietro dai modelli = pagina precedente.
+  while true; do
+    choice=$(node "$DIR/scripts/lib/prompt-cli.js" select \
+      --title "A che ora apre e chiude il negozio?" \
+      --subtitle "Nelle ore scelte l'automazione segue i corsi; fuori si mette in pausa da sola." \
+      --default "${LAST_HOURS_PICK:-1}" -- \
+      "09:00 – 20:00 con pausa 13:00-16:00 — il più comune" \
+      "09:00 – 18:00 senza pausa" \
+      "Solo mattina — 09:00 – 13:00" \
+      "Solo pomeriggio — 16:00 – 20:00" \
+      "Altro orario — lo scelgo con le frecce" \
+      "◂ Indietro — torno ai giorni" 2>/dev/null || echo 1)
+    LAST_HOURS_PICK="$choice"
+    case "$choice" in
+      2) SHIFT_SPECS=("9,0,18,0"); break ;;
+      3) SHIFT_SPECS=("9,0,13,0"); break ;;
+      4) SHIFT_SPECS=("16,0,20,0"); break ;;
+      5)
+        if configure_hours_custom; then
+          break
+        fi
+        continue ;;      # ESC sul primo orologio: ritorno a questo menu
+      6|0) return 1 ;;   # Indietro (voce o ESC): pagina precedente = i giorni
+      *) SHIFT_SPECS=("9,0,13,0" "16,0,20,0"); break ;;
+    esac
+  done
   sort_shifts
   if [ ${#SHIFT_SPECS} -eq 0 ]; then
     warn "Nessun orario impostato: uso il più comune (09:00-13:00 e 16:00-20:00)."
@@ -774,24 +789,55 @@ configure_hours() {
   return 0
 }
 
+# Catena di domande navigabile: ogni ESC torna alla domanda precedente, e
+# dall'apertura si esce ai modelli pronti. Niente vicoli ciechi.
 configure_hours_custom() {
-  local open close pause pstart pend
+  local open="${LAST_OPEN:-09:00}" close="${LAST_CLOSE:-20:00}"
+  local pstart="${LAST_PSTART:-13:00}" pend="${LAST_PEND:-16:00}"
+  local pause=1 stage=1 val
   while true; do
-    open=$(ask_time "A che ora apre?" "${LAST_OPEN:-09:00}" "Frecce ←→ per i minuti, ↑↓ per le ore")
-    close=$(ask_time "A che ora chiude?" "${LAST_CLOSE:-20:00}" "Deve essere dopo l'apertura")
-    pause=$(node "$DIR/scripts/lib/prompt-cli.js" select \
-      --title "C'è la pausa pranzo?" --default 1 -- \
-      "Sì, il negozio chiude a pranzo" \
-      "No, orario continuato" 2>/dev/null || echo 1)
-    pstart=""; pend=""
-    if [ "$pause" != "2" ]; then
-      pstart=$(ask_time "A che ora inizia la pausa?" "${LAST_PSTART:-13:00}" "Dentro l'orario di apertura")
-      pend=$(ask_time "A che ora riapre?" "${LAST_PEND:-16:00}" "Dentro l'orario di apertura")
-    fi
-    if shifts_from_store_hours "$open" "$close" "$pstart" "$pend"; then
-      LAST_OPEN="$open"; LAST_CLOSE="$close"; LAST_PSTART="$pstart"; LAST_PEND="$pend"
-      break
-    fi
+    case "$stage" in
+      1)
+        val=$(ask_time "A che ora apre?" "$open" "Frecce ←→ per i minuti, ↑↓ per le ore")
+        [ -n "$val" ] || return 1        # indietro: torno ai modelli pronti
+        open="$val"; stage=2 ;;
+      2)
+        val=$(ask_time "A che ora chiude?" "$close" "Deve essere dopo l'apertura")
+        if [ -z "$val" ]; then stage=1; continue; fi
+        close="$val"; stage=3 ;;
+      3)
+        pause=$(node "$DIR/scripts/lib/prompt-cli.js" select \
+          --title "C'è la pausa pranzo?" --default "$pause" -- \
+          "Sì, il negozio chiude a pranzo" \
+          "No, orario continuato" \
+          "◂ Indietro — cambio l'orario di chiusura" 2>/dev/null || echo 1)
+        case "$pause" in
+          3|0) stage=2; continue ;;
+          2) stage=6 ;;                  # senza pausa: vai alla verifica
+          *) pause=1; stage=4 ;;
+        esac ;;
+      4)
+        val=$(ask_time "A che ora inizia la pausa?" "$pstart" "Dentro l'orario di apertura")
+        if [ -z "$val" ]; then stage=3; continue; fi
+        pstart="$val"; stage=5 ;;
+      5)
+        val=$(ask_time "A che ora riapre?" "$pend" "Dentro l'orario di apertura")
+        if [ -z "$val" ]; then stage=4; continue; fi
+        pend="$val"; stage=6 ;;
+      6)
+        if [ "$pause" = "2" ]; then
+          if shifts_from_store_hours "$open" "$close" "" ""; then
+            LAST_OPEN="$open"; LAST_CLOSE="$close"
+            break
+          fi
+          stage=1; continue
+        fi
+        if shifts_from_store_hours "$open" "$close" "$pstart" "$pend"; then
+          LAST_OPEN="$open"; LAST_CLOSE="$close"; LAST_PSTART="$pstart"; LAST_PEND="$pend"
+          break
+        fi
+        stage=4; continue ;;             # orari incompatibili: rifai la pausa
+    esac
   done
   # Chi ha bisogno di più di due fasce (raro) passa dall'editor avanzato.
   local more
@@ -916,17 +962,37 @@ edit_shifts_advanced() {
 CONFIG_STEP="days"
 while true; do
   if [ "$MODIFY" = true ]; then
+    # Passo «Chi sei?» raggiungibile tornando indietro dai giorni: se si annulla
+    # lì, si tiene il collega di prima invece di uscire dal setup.
+    if [ "$CONFIG_STEP" = "who" ]; then
+      step "Chi sei?"
+      if who_are_you; then
+        apply_selected_account
+      else
+        load_account_from_config
+        info "Tengo il collega già configurato: $MEMBER_NAME"
+      fi
+      CONFIG_STEP="days"
+    fi
     if [ "$CONFIG_STEP" = "days" ]; then
       echo ""
       step "Quando lavora"
       ui_kv "Collega" "${BOLD}$MEMBER_NAME${NC}"
       ui_kv "Accesso al corso" "${GREEN}collegato al tuo nome ✓${NC}"
-      configure_days
-      CONFIG_STEP="hours"
+      if configure_days; then
+        CONFIG_STEP="hours"
+      else
+        CONFIG_STEP="who"      # ESC sui giorni: torna a «Chi sei?»
+        continue
+      fi
     fi
     if [ "$CONFIG_STEP" = "hours" ]; then
-      configure_hours
-      CONFIG_STEP="confirm"
+      if configure_hours; then
+        CONFIG_STEP="confirm"
+      else
+        CONFIG_STEP="days"     # Indietro sugli orari: torna ai giorni
+        continue
+      fi
     fi
 
     # Costruisci JSON shifts su una sola riga (JSON non richiede a capo; evita problemi di
@@ -978,13 +1044,15 @@ while true; do
       CONFIRM_PICK=$(node "$DIR/scripts/lib/prompt-cli.js" select \
         --title "Va bene così?" --default 1 -- \
         "Sì, salva e vai" \
-        "Cambio l'orario" \
-        "Cambio i giorni" 2>/dev/null || echo 1)
+        "◂ Cambio l'orario" \
+        "◂ Cambio i giorni" \
+        "◂ Cambio collega" 2>/dev/null || echo 1)
     fi
 
     case "$CONFIRM_PICK" in
       2) CONFIG_STEP="hours"; continue ;;
       3) CONFIG_STEP="days"; continue ;;
+      4) CONFIG_STEP="who"; continue ;;
       *) : ;;   # 1 / annullato → salva
     esac
 

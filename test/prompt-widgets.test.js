@@ -8,10 +8,18 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
+const { execFileSync } = require('child_process');
+const path = require('path');
+
 const {
   stepMinutes, formatMinutes, parseTimeToMinutes,
   toggleSelection, filterItems, normalizeForFilter, TIME_STEP_MIN,
 } = require('../scripts/lib/prompt-cli');
+
+const CLI = path.join(__dirname, '..', 'scripts', 'lib', 'prompt-cli.js');
+const runCli = (args, input) => execFileSync(process.execPath, [CLI, ...args], {
+  input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'],
+}).trim();
 
 describe('orologio a frecce', () => {
   it('il passo è di 15 minuti', () => {
@@ -84,5 +92,28 @@ describe('ricerca incrementale', () => {
 
   it('nessuna corrispondenza torna lista vuota (non un errore)', () => {
     assert.deepEqual(filterItems(items, 'zzz'), []);
+  });
+});
+
+describe('tornare indietro di una pagina', () => {
+  it('l\'orologio risponde vuoto quando si torna indietro', () => {
+    assert.equal(runCli(['time', '--title', 'Apertura', '--default', '09:00'], 'b\n'), '');
+    assert.equal(runCli(['time', '--title', 'Apertura', '--default', '09:00'], 'indietro\n'), '');
+  });
+
+  it('l\'orologio conferma normalmente un orario scritto', () => {
+    assert.equal(runCli(['time', '--title', 'Apertura', '--default', '09:00'], '9:45\n'), '09:45');
+  });
+
+  it('Invio a vuoto tiene il valore proposto (non è un indietro)', () => {
+    assert.equal(runCli(['time', '--title', 'Apertura', '--default', '09:00'], '\n'), '09:00');
+  });
+
+  it('la lista da spuntare risponde vuoto quando si torna indietro', () => {
+    assert.equal(runCli(['check', '--title', 'Giorni', '--default', '1,2', '--', 'lun', 'mar', 'mer'], 'b\n'), '');
+  });
+
+  it('la lista da spuntare conferma la selezione scritta', () => {
+    assert.equal(runCli(['check', '--title', 'Giorni', '--default', '1', '--', 'lun', 'mar', 'mer'], '1,3\n'), '1,3');
   });
 });
