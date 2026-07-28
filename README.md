@@ -14,10 +14,11 @@ Due modi, scegli quello che preferisci. **Entrambi fanno tutto**: la prima volta
 ### ⭐️ Modo A — Scarica e doppio clic (consigliato: non copi né scrivi niente)
 
 1. Scarica il file: **[⬇︎ Scarica "GSD Avvia"](https://gsd.lookatale95.workers.dev/avvia)**
-2. Fai **doppio clic** sul file scaricato (di solito finisce in *Download*).
+2. Arriva un archivio **GSD Avvia.zip**: Safari lo apre da solo e dentro trovi **GSD Avvia.command** (se resta zippato, doppio clic sullo zip).
+3. Fai **doppio clic** su *GSD Avvia.command* (di solito è in *Download*).
    - *Solo la primissima volta* il Mac può bloccarlo ("sviluppatore non identificato"): allora **tasto destro sul file → Apri → Apri**. Dopo, basta il doppio clic.
 
-Le volte successive: doppio clic sullo stesso file. Fine.
+Le volte successive: doppio clic sullo stesso file. Fine — **e aggiorna ogni volta**: il file non contiene il programma, va a prendere l'ultima versione al momento del clic. Puoi tenerlo nel Dock o sulla Scrivania.
 
 ### ⌨️ Modo B — Comando nel Terminale
 

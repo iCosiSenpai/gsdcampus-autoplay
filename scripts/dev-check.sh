@@ -37,7 +37,7 @@ fi
 # 2. Sintassi JavaScript.
 step "2/4" "Sintassi JavaScript"
 JS_FAIL=0
-for f in src/*.js src/lib/*.js scripts/*.js scripts/lib/*.js worker/*.js; do
+for f in src/*.js src/lib/*.js scripts/*.js scripts/lib/*.js worker/*.js worker-install/*.js; do
   [ -f "$f" ] || continue
   node --check "$f" >/dev/null 2>&1 || { err "node --check $f"; JS_FAIL=1; FAIL=1; }
 done

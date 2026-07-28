@@ -7,6 +7,7 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-28
 
+- **Modo A riparato**: il file "GSD Avvia" arriva ora come archivio e dentro c'è il file **già eseguibile**. Prima, scaricato dal browser, il doppio clic rispondeva "non hai i permessi necessari" e non partiva niente. Ogni doppio clic scarica l'ultima versione: aggiorna sempre.
 - **"Aggiorna e avvia" ora dice la verità**: se l'aggiornamento non parte (rete o proxy che bloccano GitHub) lo scrive a chiare lettere invece di stampare "Progetto aggiornato". A fine giro compare sempre l'esito reale: `Aggiornato: 964824c → 42a07aa` oppure `Già all'ultima versione (964824c)`.
 - Il **controllo rete prima dell'aggiornamento** non pretende più che rispondano *tutti* gli indirizzi di prova: su reti aziendali filtrate bastava un blocco per saltare l'aggiornamento in silenzio. Ora basta una risposta e il timeout è più tollerante (8s).
 - Le installazioni **partite dallo zip** (senza cronologia git) non potevano aggiornarsi *mai*, senza dirlo: adesso il comando lo rileva, lo spiega e propone la riparazione automatica — account, orari, risposte e log restano al loro posto.
