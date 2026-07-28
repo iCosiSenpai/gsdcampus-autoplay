@@ -7,6 +7,10 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-28
 
+- **La schermata si riapre da sola** quando arriva un aggiornamento: prima restava sulla versione vecchia (l'orologio avanzava ma il contenuto sembrava fermo) e bisognava chiuderla a mano. Ora avvisa e si riapre dopo 6 secondi — e **aspetta** se stai leggendo il log dal vivo o se c'è un quiz in corso. I corsi non si fermano.
+- Anche l'automazione **adotta il codice nuovo da sola**, tra un corso e l'altro: mai durante un video o un quiz.
+- Se non c'è nessun corso in esecuzione, la schermata lo dice ("stato del corso di 4h 12m fa"), così un contenuto immobile non sembra un blocco.
+
 - **Prima configurazione senza tastiera**: niente più orari da scrivere né numeri dei giorni. I giorni si spuntano con la barra spaziatrice, l'orario si sceglie tra modelli pronti ("09:00–20:00 con pausa 13:00-16:00", il più comune) e con "Altro orario" si sposta l'ora con le frecce (←→ 15 minuti, ↑↓ un'ora).
 - Il setup chiede l'**orario del negozio** — apre, chiude, pausa pranzo — invece di parlare di "turni": le fasce le calcola lui.
 - **Anteprima della settimana** prima di salvare: si vede disegnato quando lavora e quando è chiuso. Se qualcosa non torna, "Cambio l'orario" o "Cambio i giorni" rifà solo quel passo invece di ricominciare.

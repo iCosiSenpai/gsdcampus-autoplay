@@ -325,6 +325,7 @@ function readModel(root, now = Date.now()) {
   // progresso video vanno mostrati solo se sono davvero freschi.
   const statusUpdatedAt = Date.parse(status.lastUpdate || '');
   const statusFresh = Number.isFinite(statusUpdatedAt) && (now - statusUpdatedAt) < 5 * 60 * 1000;
+  const statusAgeMs = Number.isFinite(statusUpdatedAt) ? Math.max(0, now - statusUpdatedAt) : null;
 
   const claudeWorking = pidAlive(readPid(path.join(root, '.claude_batch_pid')))
     || pidAlive(readPid(path.join(root, '.claude_runner_pid')));
@@ -366,6 +367,7 @@ function readModel(root, now = Date.now()) {
     claudeWorking,
     schedAlive,
     statusFresh,
+    statusAgeMs,
     workNow,
     nextStart,
     scheduleDesc,
@@ -521,10 +523,18 @@ function renderFrame(model, opts = {}) {
     L.push(`  ${c(ANSI.cyan, '↑')} Aggiornamento disponibile (${model.update.remoteVersion}) — rilancia il comando curl per riceverlo.`);
   }
   // Il codice è cambiato DOPO l'apertura di questa finestra (auto-update): i dati
-  // qui sono freschi, ma la schermata gira ancora sulla versione vecchia.
+  // qui sono freschi, ma la schermata gira ancora sulla versione vecchia. Non
+  // chiediamo più all'utente di chiudere e rilanciare: la plancia si riapre da
+  // sola (opts.restartIn = secondi al riavvio, o null se rimandato).
   if (opts.bootSha && model.headSha && opts.bootSha !== model.headSha) {
     L.push(`  ${c(ANSI.cyan, '↻')} Si è aggiornato da solo (${opts.bootSha} ${GLYPH.arrow} ${model.headSha}).`);
-    L.push(`     ${c(ANSI.dim, 'Questa finestra mostra ancora la versione precedente: chiudila con Q e rilancia il comando curl.')}`);
+    if (opts.restartIn != null && opts.restartIn >= 0) {
+      L.push(`     ${c(ANSI.dim, `Riapro questa schermata con la versione nuova tra ${opts.restartIn}s (i corsi non si fermano).`)}`);
+    } else if (opts.restartHeld) {
+      L.push(`     ${c(ANSI.dim, `${opts.restartHeld} — riapro la schermata appena ha finito.`)}`);
+    } else {
+      L.push(`     ${c(ANSI.dim, 'Questa finestra mostra ancora la versione precedente: chiudila con Q e riapri.')}`);
+    }
   }
 
   // Eventi recenti
@@ -561,7 +571,14 @@ function renderFrame(model, opts = {}) {
   const clock = new Date(model.now || Date.now());
   const hhmmss = [clock.getHours(), clock.getMinutes(), clock.getSeconds()]
     .map((n) => String(n).padStart(2, '0')).join(':');
-  L.push(` ${c(ANSI.maze, SPIN[spinIndex % SPIN.length])} ${c(ANSI.dim, `dati aggiornati alle ${hhmmss} ${GLYPH.bul} questa schermata si aggiorna da sola`)}`);
+  // Se la schermata si aggiorna ma il CONTENUTO non cambia, il motivo è che lo
+  // stato del corso è vecchio (nessun corso in esecuzione adesso): diciamolo,
+  // invece di lasciare il dubbio "è bloccata?".
+  let ageNote = '';
+  if (!model.statusFresh && model.statusAgeMs != null) {
+    ageNote = ` ${GLYPH.bul} stato del corso di ${formatDuration(model.statusAgeMs)} fa`;
+  }
+  L.push(` ${c(ANSI.maze, SPIN[spinIndex % SPIN.length])} ${c(ANSI.dim, `dati aggiornati alle ${hhmmss}${ageNote} ${GLYPH.bul} questa schermata si aggiorna da sola`)}`);
   return L.join('\n');
 }
 
@@ -598,6 +615,36 @@ function closeTerminalTab() {
   const script = terminalCloseScript(process.env.TERM_PROGRAM);
   if (!script) return false;
   try { spawnSync('osascript', ['-e', script], { stdio: 'ignore', timeout: 5000 }); return true; } catch (_) { return false; }
+}
+
+/**
+ * Decide se la plancia deve riaprirsi con il codice nuovo. Pura (testabile).
+ *
+ * Il riavvio della PLANCIA non tocca i corsi (è solo una finestra di lettura),
+ * ma per non far ballare lo schermo sotto il naso di chi sta guardando aspetta:
+ * - che il codice sul disco sia davvero diverso da quello con cui è partita;
+ * - che non si stia leggendo il log dal vivo o confermando una fermata;
+ * - che non ci sia un quiz in corso o una fase delicata (max `holdMaxMs`, poi
+ *   procede comunque: la finestra vecchia non deve restare vecchia per sempre).
+ *
+ * @returns {{ action: 'none'|'wait'|'restart', seconds?: number, reason?: string }}
+ */
+function planPanelRestart(state = {}) {
+  const {
+    bootSha, headSha, now = Date.now(), detectedAt = null,
+    noticeMs = 6000, holdMaxMs = 5 * 60 * 1000,
+    view = 'panel', confirmStop = false, busy = false, busyLabel = '',
+  } = state;
+  if (!bootSha || !headSha || bootSha === headSha) return { action: 'none' };
+  if (detectedAt == null) return { action: 'wait', seconds: Math.ceil(noticeMs / 1000) };
+  const waited = now - detectedAt;
+  if (view !== 'panel' || confirmStop) return { action: 'wait', reason: 'schermata occupata' };
+  if (busy && waited < holdMaxMs) {
+    return { action: 'wait', reason: busyLabel || 'lavoro delicato in corso' };
+  }
+  const left = Math.ceil((noticeMs - waited) / 1000);
+  if (left > 0) return { action: 'wait', seconds: left };
+  return { action: 'restart' };
 }
 
 function parseArgs(argv) {
@@ -645,10 +692,34 @@ function main() {
   let model = readModel(args.root);
   let lastRead = Date.now();
 
+  // Riavvio automatico della plancia quando l'auto-update cambia il codice
+  // sotto i piedi di questa finestra (prima restava vecchia e bisognava
+  // chiuderla a mano). Il contatore GSD_PANEL_RELAUNCH evita catene infinite.
+  let codeChangedAt = null;
+  let restartPlan = { action: 'none' };
+  const relaunchCount = Number(process.env.GSD_PANEL_RELAUNCH || 0);
+
+  const relaunchWithNewCode = () => {
+    teardown();
+    process.stdout.write('\n Mi riapro con la versione nuova (i corsi continuano)…\n');
+    const res = spawnSync(process.execPath, [__filename, ...process.argv.slice(2)], {
+      stdio: 'inherit',
+      env: { ...process.env, GSD_PANEL_RELAUNCH: String(relaunchCount + 1) },
+    });
+    process.exit(res && res.status != null ? res.status : 0);
+  };
+
   const draw = () => {
     const frame = view === 'log'
       ? renderLogView(args.root, { color, width, spinIndex })
-      : renderFrame(model, { color, width, spinIndex, bootSha });
+      : renderFrame(model, {
+        color,
+        width,
+        spinIndex,
+        bootSha,
+        restartIn: restartPlan.action === 'wait' ? restartPlan.seconds : null,
+        restartHeld: restartPlan.action === 'wait' ? restartPlan.reason : null,
+      });
     const extra = (view === 'panel' && confirmStop)
       ? `\n  ${color ? ANSI.red : ''}Premere di nuovo F per fermare tutto e chiudere la scheda, un altro tasto per annullare.${color ? ANSI.reset : ''}`
       : '';
@@ -740,7 +811,23 @@ function main() {
   timer = setInterval(() => {
     spinIndex += 1;
     if (Date.now() - lastRead >= args.interval) refreshNow();
+    if (bootSha && model.headSha && bootSha !== model.headSha && codeChangedAt == null) {
+      codeChangedAt = Date.now();
+    }
+    const busyPhase = ['quiz', 'quiz_dashboard', 'quiz_needs_answers', 'checking'].includes(model.status.phase);
+    restartPlan = planPanelRestart({
+      bootSha,
+      headSha: model.headSha,
+      detectedAt: codeChangedAt,
+      view,
+      confirmStop,
+      busy: model.claudeWorking || busyPhase,
+      busyLabel: model.claudeWorking ? 'Claude sta risolvendo un quiz' : 'quiz in corso',
+    });
     draw();
+    // Max 3 riaperture per sessione: se qualcosa va storto meglio una finestra
+    // vecchia che un ciclo di riavvii.
+    if (restartPlan.action === 'restart' && relaunchCount < 3) relaunchWithNewCode();
   }, ANIM_MS);
   return 0;
 }
@@ -755,5 +842,5 @@ module.exports = {
   PAC_FRAMES, GLYPH,
   formatDuration, relativeTime, formatWhen,
   courseIdFromUrl, computeHeadline, readModel, renderFrame, renderLogView, stripAnsi, visLen,
-  terminalCloseScript, readVersion, keepAliveInstalled,
+  terminalCloseScript, readVersion, keepAliveInstalled, planPanelRestart,
 };

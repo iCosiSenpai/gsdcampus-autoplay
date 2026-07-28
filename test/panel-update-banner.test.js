@@ -14,7 +14,8 @@ const path = require('path');
 process.env.LANG = 'en_US.UTF-8';
 
 const {
-  renderFrame, stripAnsi, pacmanBar, pacmanSegments, paintPacman, PAC_FRAMES, terminalCloseScript,
+  renderFrame, stripAnsi, pacmanBar, pacmanSegments, paintPacman, PAC_FRAMES,
+  terminalCloseScript, planPanelRestart,
 } = require('../scripts/lib/panel-cli');
 const { readHeadSha } = require('../src/lib/update-state');
 
@@ -65,7 +66,17 @@ describe('plancia: riga auto-aggiornamento', () => {
   it('avvisa quando il codice è cambiato dopo l\'apertura della finestra', () => {
     const out = frame(baseModel, { bootSha: 'aaaaaaa' });
     assert.match(out, /Si è aggiornato da solo \(aaaaaaa/);
-    assert.match(out, /chiudila con Q/);
+  });
+
+  it('annuncia il riavvio automatico col conto alla rovescia', () => {
+    const out = frame(baseModel, { bootSha: 'aaaaaaa', restartIn: 4 });
+    assert.match(out, /Riapro questa schermata con la versione nuova tra 4s/);
+    assert.match(out, /i corsi non si fermano/);
+  });
+
+  it('se c\'è un quiz in corso dice che aspetta', () => {
+    const out = frame(baseModel, { bootSha: 'aaaaaaa', restartHeld: 'Claude sta risolvendo un quiz' });
+    assert.match(out, /Claude sta risolvendo un quiz — riapro la schermata appena ha finito/);
   });
 
   it('nessun avviso se la finestra gira già sul codice attuale', () => {
@@ -185,5 +196,33 @@ describe('readHeadSha', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-head-'));
     assert.equal(readHeadSha(root), null);
     fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe('planPanelRestart', () => {
+  const now = 1_000_000;
+  const base = { bootSha: 'aaaaaaa', headSha: 'bbbbbbb', now };
+
+  it('codice invariato: nessun riavvio', () => {
+    assert.deepEqual(planPanelRestart({ bootSha: 'aaa', headSha: 'aaa' }), { action: 'none' });
+  });
+
+  it('appena rilevato annuncia il preavviso', () => {
+    assert.deepEqual(planPanelRestart(base), { action: 'wait', seconds: 6 });
+  });
+
+  it('scaduto il preavviso riavvia', () => {
+    assert.deepEqual(planPanelRestart({ ...base, detectedAt: now - 7000 }), { action: 'restart' });
+  });
+
+  it('aspetta se si sta leggendo il log o confermando una fermata', () => {
+    assert.equal(planPanelRestart({ ...base, detectedAt: now - 7000, view: 'log' }).action, 'wait');
+    assert.equal(planPanelRestart({ ...base, detectedAt: now - 7000, confirmStop: true }).action, 'wait');
+  });
+
+  it('aspetta durante un quiz, ma non per sempre', () => {
+    const held = planPanelRestart({ ...base, detectedAt: now - 7000, busy: true, busyLabel: 'quiz in corso' });
+    assert.deepEqual(held, { action: 'wait', reason: 'quiz in corso' });
+    assert.equal(planPanelRestart({ ...base, detectedAt: now - 6 * 60 * 1000, busy: true }).action, 'restart');
   });
 });

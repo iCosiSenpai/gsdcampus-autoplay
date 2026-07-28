@@ -358,6 +358,27 @@ EOF
   log "⚠️  Aggiornamento disponibile: $LOCAL_SHORT → $REMOTE_SHORT ($REMOTE_DATE). L'utente dovrebbe chiudere e rilanciare il comando curl per aggiornare."
 }
 
+# Versione del codice con cui questo scheduler è partito. Se l'auto-update la
+# cambia mentre giriamo, ci ri-eseguiamo TRA un corso e l'altro (v. sotto).
+SCHED_BOOT_SHA="$(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo "")"
+
+# Adotta il codice nuovo senza perdere l'identità del processo: `exec` mantiene
+# lo stesso PID, quindi .autoplay_pid, il lock single-instance e `caffeinate -w`
+# restano validi e nessuno vede un riavvio. Chiamata SOLO all'inizio del giro,
+# quando nessun autoplay è in esecuzione: mai durante un video o un quiz.
+adopt_new_code_if_changed() {
+  [ -n "$SCHED_BOOT_SHA" ] || return 0
+  local now_sha
+  now_sha="$(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo "")"
+  [ -n "$now_sha" ] || return 0
+  [ "$now_sha" != "$SCHED_BOOT_SHA" ] || return 0
+  log "Codice aggiornato ($SCHED_BOOT_SHA → $now_sha): adotto la versione nuova senza fermarmi."
+  local args=()
+  [ "$IGNORE_HOURS" = true ] && args+=(--ignore-hours)
+  args+=(--lock-token "$LOCK_TOKEN")
+  exec /bin/zsh "$DIR/scripts/scheduler.sh" "${args[@]}"
+}
+
 log "Scheduler avviato. IGNORE_HOURS=$IGNORE_HOURS"
 if [ -f "$SCHEDULER_STATUS_CLI" ]; then
   node "$SCHEDULER_STATUS_CLI" mark "$DIR" scheduler_starting "" "Scheduler avviato; preparo il prossimo ciclo." >/dev/null 2>&1 || true
@@ -480,6 +501,10 @@ while true; do
     rm -f "$STOP_FILE"
     exit 0
   fi
+
+  # Siamo tra due run: nessun browser aperto, nessun quiz in corso. È il momento
+  # sicuro per passare al codice appena aggiornato (se è cambiato).
+  adopt_new_code_if_changed
 
   # Check aggiornamento (throttled: max 1 volta/ora, best-effort, mai bloccante).
   check_for_updates || true

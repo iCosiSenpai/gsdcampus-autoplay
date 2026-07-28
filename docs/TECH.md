@@ -23,6 +23,14 @@ Lo scheduler non è più solo un processo `nohup` legato al Terminale: un Launch
 
 > Il percorso di avvio (`start.sh`, lock/token, `caffeinate`) è **invariato**: il keepalive lo usa così com'è. Se il watchdog fallisce, il comportamento degrada a quello attuale (serve il comando curl), mai peggio.
 
+### Adozione del codice nuovo senza intervento
+
+Dopo un auto-update convivevano due versioni: i file su disco erano nuovi, ma i processi già avviati (scheduler e **plancia**) continuavano col codice caricato all'apertura. La plancia in particolare restava vecchia per giorni e bisognava chiuderla a mano.
+
+- **Plancia** (`panel-cli.js`): confronta il commit di partenza con `.git/HEAD` a ogni frame. Quando cambiano, annuncia il riavvio con 6 secondi di preavviso e si ri-esegue da sola (`spawnSync` dello stesso file, stdio ereditati) — il riavvio della plancia non tocca i corsi, è solo una finestra di lettura. `planPanelRestart()` (pura, testata) **rimanda** se: si sta leggendo il log dal vivo, è armata la conferma di `F`, oppure c'è un quiz in corso (`claudeWorking` o fase `quiz*`/`checking`) — con tetto di 5 minuti, così una finestra non resta vecchia per sempre. Massimo 3 riaperture per sessione (`GSD_PANEL_RELAUNCH`), per non rischiare cicli.
+- **Scheduler** (`scheduler.sh`): all'inizio di ogni giro — quando nessun autoplay è in esecuzione, quindi **mai** durante un video o un quiz — confronta `git rev-parse HEAD` con lo sha di partenza e, se è cambiato, fa `exec` di se stesso. `exec` mantiene lo **stesso PID**: `.autoplay_pid`, il lock single-instance e `caffeinate -w <pid>` restano validi e nessuno vede un riavvio. È la rete di sicurezza per quando il restart di `auto-update.sh` non è andato a buon fine.
+- Se lo stato del corso è vecchio (nessun corso in esecuzione adesso), il piè di pagina della plancia lo dice: `stato del corso di 4h 12m fa`. Serve a distinguere "schermata bloccata" da "non c'è niente in corso": prima il contenuto immobile con l'orologio che avanzava sembrava un blocco.
+
 ### Chiudere la scheda: cosa succede davvero
 
 Lo scheduler parte con `nohup`, quindi un semplice `exit` del Terminale non lo tocca. Ma quando si chiude una **scheda con processi attivi**, Terminal.app propone di terminarli e la conferma manda un segnale a tutto il process group: `nohup` protegge da `SIGHUP`, non da `SIGKILL`. Per questo la plancia non promette più "chiudere la finestra non ferma nulla" e dice invece:
