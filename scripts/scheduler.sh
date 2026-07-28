@@ -277,6 +277,22 @@ handle_awaiting_ai() {
   done
 }
 
+# Distribuisce ai colleghi le risposte imparate DURANTE il run (la banca trusted
+# cresce anche senza AI: la piattaforma rivela le corrette a quiz concluso).
+# `answers-cli share` esce subito quando non c'è delta, quindi nessuna chiamata
+# di rete inutile; un fallimento lascia il marker persistente e viene ritentato.
+# Mai bloccante: lo scheduler non deve fermarsi per la fleet.
+share_learned_answers() {
+  [ -f "$DIR/scripts/lib/answers-cli.js" ] || return 0
+  local out=""
+  out=$(node "$DIR/scripts/lib/answers-cli.js" share 2>&1) || true
+  case "$out" in
+    *"Nessuna nuova risposta"*|"") : ;;
+    *) log "Banca risposte condivisa: $(printf '%s' "$out" | tail -2 | tr '\n' ' ')" ;;
+  esac
+  return 0
+}
+
 # Controlla se siamo in orario lavorativo
 is_in_hours() {
   # grep -c (non -q): evita SIGPIPE sotto pipefail (v. commento in start.sh).
@@ -483,6 +499,7 @@ while true; do
     EXIT_CODE=0
     node "$DIR/src/autoplay.js" --ignore-hours 2>&1 | tee -a "$LOG_FILE" || EXIT_CODE=${pipestatus[1]}
     notify_on_exit "$EXIT_CODE"
+    share_learned_answers
     if [[ "$EXIT_CODE" -eq 0 ]]; then
       # Uscita pulita: fine turno / all done / need_help. Se phase=member_queue_advanced
       # (coda multi-CF) riparti in 60s sul prossimo membro; altrimenti 10 min.
@@ -531,6 +548,7 @@ while true; do
     EXIT_CODE=0
     node "$DIR/src/autoplay.js" 2>&1 | tee -a "$LOG_FILE" || EXIT_CODE=${pipestatus[1]}
     notify_on_exit "$EXIT_CODE"
+    share_learned_answers
     if [[ "$EXIT_CODE" -eq 0 ]]; then
       CRASH_COUNT=0
       PHASE=$(node -e "try{const s=require('./logs/status.json');process.stdout.write(s.phase||'')}catch(e){}" 2>/dev/null || echo "")

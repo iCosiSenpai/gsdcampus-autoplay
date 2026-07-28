@@ -58,29 +58,40 @@ Fatto questo, parte da solo. Le volte successive queste domande non ricompaiono.
 
 ## 🖥️ Cosa vedi quando è avviato
 
-Alla fine si apre una **plancia** che ti dice a colpo d'occhio come sta andando e si aggiorna da sola:
+Alla fine si apre una **plancia** che ti dice a colpo d'occhio come sta andando, si aggiorna da sola e si muove (il Pac-Man mangia la strada che resta da fare):
 
 ```
- GSD Campus · IL TUO NOME                             ● attivo
- ────────────────────────────────────────────────────────────
-   Sto seguendo   Sicurezza sul lavoro · video 68%
+ ᗧ GSD Campus · IL TUO NOME · v1.1.0-63                    ● attivo
+ ────────────────────────────────────────────────────────────────
+   ● Sto seguendo: Sicurezza sul lavoro · modulo 3 · video 62%
 
-   Corsi     ▸ 7 totali · 3 fatti · 4 da fare
+   Corsi     ▸ 7 totali · 5 fatti · 1 in corso
+   Avanzam.  ▸ ──────────────ᗧ··ᗣ  81%
+   Video     ▸ ⣾ ██████████░░░░░░  62%  0:59 / 16:00
    Quiz      ▸ nessuno in attesa
    Claude    ▸ inattivo — entra da solo solo se serve
    Turni     ▸ 09:00–13:00 · 16:00–20:00  · in orario
- ────────────────────────────────────────────────────────────
-  L guarda dal vivo   F ferma e chiudi   R aggiorna   Q chiudi
+   Aggiorn.  ▸ controllato 4m fa · già all'ultima versione
+ ────────────────────────────────────────────────────────────────
+  L guarda dal vivo   R aggiorna ora   Q chiudi la scheda   F ferma tutto
 ```
+
+In alto trovi sempre la **versione** installata, accanto al tuo nome.
 
 Con un tasto solo:
 
-- **Q** — chiudi la plancia. **Il lavoro continua** in background: puoi chiudere la finestra tranquillamente, i corsi vanno avanti lo stesso.
-- **L** — guarda dal vivo cosa sta facendo.
-- **R** — aggiorna subito i dati mostrati.
-- **F** — **ferma tutto e chiude la tab** del Terminale.
+- **L** — guarda dal vivo cosa sta facendo. È **solo guardare**: non ferma e non cambia niente. Per tornare alla plancia premi **Q**.
+- **R** — rilegge subito i dati mostrati.
+- **Q** — **chiude questa scheda del Terminale**. Solo questa: non chiude l'app né le altre finestre, che possono star facendo altro. Se chiudendo la scheda il Mac interrompe i processi, il **guardiano** li rimette in piedi entro un paio di minuti (la plancia ti avvisa in giallo se il guardiano non è attivo).
+- **F** — **ferma davvero** i corsi e chiude la scheda: resta fermo finché non lo riavvii tu.
 
-Non devi tenere niente aperto: se chiudi la finestra — o se il Mac si riavvia — l'automazione **riparte da sola** e continua in background.
+Se vuoi solo uscire dalla plancia lasciando la scheda aperta, premi **Ctrl-C**.
+
+La riga **Aggiorn.** dice quando il Mac ha controllato l'ultima volta se c'è una versione nuova (il controllo è automatico ogni ~10 minuti). Se diventa gialla — "nessun controllo recente" o "non attivo su questo Mac" — rilancia il comando curl: lo riattiva.
+
+Se l'aggiornamento arriva **mentre questa finestra è aperta**, la plancia te lo dice ("Si è aggiornato da solo…"): i dati che vedi restano veri, ma la schermata gira ancora sulla versione precedente — chiudila con **Q** e rilancia il comando curl. Ad aggiornamento riuscito arriva anche una **notifica** del Mac, così te ne accorgi pure senza terminali aperti.
+
+Non devi tenere niente aperto: se la scheda si chiude — o se il Mac si riavvia — il **guardiano** rimette in piedi l'automazione entro un paio di minuti e continua in background. Se invece premi **F**, resta ferma di proposito finché non la riavvii tu.
 
 **Per rivederla o controllare come va**, riapri il Terminale e rilancia **lo stesso comando** di sopra, poi scegli **"Aggiorna e avvia"**: riconosce la sessione già in corso, ricompare la schermata di stato e i corsi riprendono dal punto salvato. È sempre lo stesso comando, per tutto.
 

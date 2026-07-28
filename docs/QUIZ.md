@@ -7,6 +7,16 @@
 - `data/accounts/<CF>/pending_quiz_answers.json` = archivio legacy per-account di vecchi guess Ollama, **mai promosso automaticamente** e non più alimentato dall'autoplay on-demand.
 - `data/accounts/<CF>/ai_quiz_request.json` + `need_answer.json` = **inbox unificata per l'AI supervisore**: ogni domanda sconosciuta finisce qui con domanda, opzioni, contesti locali e un eventuale guess legacy. `buildAiTodo` e il runner deduplicano entrambe le fonti; soltanto domanda/opzioni/guess lasciano il progetto.
 
+**Sincronizzazione automatica della banca (nessuna azione dell'utente):**
+
+| Direzione | Quando | Chi lo fa |
+| --- | --- | --- |
+| **Ricezione** (risposte trovate dai colleghi) | a ogni avvio; e in automatico entro ~10 min da quando un collega ne pubblica una | `launch-ai-supervisor.sh` → `update-known-answers.sh`; `start.sh` → `syncPublicBank` (throttle rete 6h); `scripts/auto-update.sh` da launchd ogni ~10 min (il commit del Worker su `main` è a tutti gli effetti un aggiornamento del repo, quindi viene scaricato e mergiato) |
+| **Invio** (risposte risolte dall'AI) | subito | `answers-cli resolve` → auto-share al Worker (`autoShareAnswers`, opt-out con `false`); su errore resta un marker metadata-only ritentato dal batch successivo |
+| **Invio** (risposte imparate dalla piattaforma) | a fine di ogni run di autoplay e a ogni avvio | `scheduler.sh` → `share_learned_answers`; `launch-ai-supervisor.sh` step 3 → `answers-cli share` |
+
+Il canale d'invio è sempre `POST /answers` al Worker (merge additivo, mai overwrite) → commit su `main`: nessun `git push` e nessun token sui Mac dei colleghi. `answers-share.js` valida il payload e **scarta** qualsiasi voce che assomigli a CF, link di autologin o token: viaggiano solo domanda e risposta. `answers-cli share` esce subito quando non c'è delta, quindi i giri a vuoto non generano traffico. Restano manuali soltanto i recuperi: `./scripts/publish-answers.sh` e `answers-cli share --all`.
+
 **Risoluzione (`src/lib/quiz.js` + batch Claude on-demand):**
 - Prima cerca in `known_answers.json` (banca trusted).
 - Se la domanda non è nota, non seleziona un'opzione e non apre processi AI: salva `need_answer.json`/`ai_quiz_request.json`, raggiunge il riepilogo senza finalizzare e sospende il quiz in modo attempt-protective.

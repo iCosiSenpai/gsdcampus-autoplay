@@ -19,6 +19,7 @@ cd "$DIR"
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
+CONFIG_CHECK_CLI="$DIR/scripts/lib/config-check-cli.js"
 MEMBERS_CLI="$DIR/scripts/lib/members-cli.js"
 WHOAREYOU_CLI="$DIR/scripts/lib/whoareyou-cli.js"
 IMPORT_MEMBERS="$DIR/scripts/import-members.js"
@@ -208,6 +209,16 @@ cf_from_url() {
   [[ "$url" =~ autologin/([A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z])/ ]]
   echo "${match[1]:-}"
 }
+# Legge l'account attivo da config.json in AUTOLOGIN / ACTIVE_CF / MEMBER_NAME.
+load_account_from_config() {
+  AUTOLOGIN=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.autologinUrl||'');}catch(e){console.log('')}" 2>/dev/null)
+  ACTIVE_CF=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.codice_fiscale||'');}catch(e){console.log('')}" 2>/dev/null)
+  MEMBER_NAME=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.memberName||'');}catch(e){console.log('')}" 2>/dev/null)
+  if [ -z "$ACTIVE_CF" ] && [ -n "$AUTOLOGIN" ]; then
+    ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
+  fi
+}
+
 who_are_you() {
   local result_file="$DIR/.whoareyou_result.json"
   rm -f "$result_file"
@@ -218,12 +229,7 @@ who_are_you() {
 
   # Se il risultato non c'è (es. keep in --yes senza file), leggi da config.json
   if [ ! -f "$result_file" ]; then
-    AUTOLOGIN=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.autologinUrl||'');}catch(e){console.log('')}" 2>/dev/null)
-    ACTIVE_CF=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.codice_fiscale||'');}catch(e){console.log('')}" 2>/dev/null)
-    MEMBER_NAME=$(node -e "try{const c=require('$CONFIG_FILE'); console.log(c.memberName||'');}catch(e){console.log('')}" 2>/dev/null)
-    if [ -z "$ACTIVE_CF" ] && [ -n "$AUTOLOGIN" ]; then
-      ACTIVE_CF=$(cf_from_url "$AUTOLOGIN")
-    fi
+    load_account_from_config
     return 0
   fi
 
@@ -258,7 +264,15 @@ who_are_you() {
 
   rm -f "$result_file"
 
-  if [ "$action" != "keep" ] && [ -z "$AUTOLOGIN" ] && [ -z "$ACTIVE_CF" ]; then
+  # "Mantieni account attuale": whoareyou-cli restituisce solo {action:"keep"},
+  # senza ripetere i dati. Vanno riletti da config.json, altrimenti il
+  # salvataggio a valle scriverebbe autologinUrl/codice_fiscale/memberName
+  # VUOTI — cioè cancellerebbe l'account di chi voleva solo cambiare gli orari.
+  if [ "$action" = "keep" ] || { [ -z "$AUTOLOGIN" ] && [ -z "$ACTIVE_CF" ]; }; then
+    load_account_from_config
+  fi
+
+  if [ -z "$AUTOLOGIN" ] && [ -z "$ACTIVE_CF" ]; then
     warn "whoareyou-cli non ha restituito un account valido."
     return 1
   fi
@@ -277,36 +291,15 @@ apply_selected_account() {
 
 is_config_valid() {
   [ -f "$CONFIG_FILE" ] || return 1
-  # 1. JSON valido?
-  if ! node -e "JSON.parse(require('fs').readFileSync('$CONFIG_FILE','utf8'))" 2>/dev/null; then
-    return 1
-  fi
-  # 2. URL autologin presente e non fittizio?
-  local url
-  url=$(node -e "const c=require('$CONFIG_FILE'); console.log(c.autologinUrl||'');" 2>/dev/null)
-  [ -n "$url" ] || return 1
-  # Rifiuta placeholder tipici
-  case "$url" in
-    *CODICEFISCALE/TOKEN*) return 1 ;;
-    *YOUR_AUTOLogin*) return 1 ;;
-    *example*) return 1 ;;
-  esac
-  # 3. Deve rispettare il formato atteso
-  if [[ ! "$url" =~ ^https://tecsial\.gsdcampus\.it/autologin/[A-Z]{6}[0-9]{2}[A-Z][0-9]{2}[A-Z][0-9]{3}[A-Z]/[A-Za-z0-9]+$ ]]; then
-    return 1
-  fi
-  # 3b. (non più attivo) Il campo codice_fiscale non deve bloccare la validità se
-  # il database membri è vuoto/assente: in modalità manuale l'utente potrebbe non
-  # aver importato il CSV. Il CF viene sempre derivato/verificato a runtime.
-  # 4. Orario presente e con almeno un turno valido?
-  node -e "
-    const c = require('$CONFIG_FILE');
-    const { normalizeShifts, normalizeDays } = require('./src/lib/schedule');
-    const days = normalizeDays(c.workSchedule && c.workSchedule.days);
-    const shifts = normalizeShifts(c.workSchedule && c.workSchedule.shifts);
-    if (days.length === 0 || shifts.length === 0) process.exit(1);
-  " 2>/dev/null || return 1
-  return 0
+  # Delega a src/lib/config-check.js (condiviso con launch-ai-supervisor.sh):
+  # JSON valido + autologin nel formato atteso + almeno un giorno e un turno.
+  node "$CONFIG_CHECK_CLI" >/dev/null 2>&1
+}
+
+# Motivo dell'incompletezza: 'missing_file' | 'bad_json' | 'missing_autologin'
+# | 'missing_schedule' (prima configurazione interrotta dopo «Chi sei?»).
+config_state_reason() {
+  node "$CONFIG_CHECK_CLI" 2>/dev/null || true
 }
 
 read_config_url() {
@@ -341,16 +334,47 @@ if is_config_valid; then
   fi
 else
   MODIFY=true
+  # Distinguo "non c'è ancora niente" da "prima configurazione interrotta a metà":
+  # se l'utente ha scelto il membro in «Chi sei?» e poi ha annullato o chiuso il
+  # Terminale, config.json esiste con l'account ma senza orari.
+  CONFIG_REASON="$(config_state_reason)"
   if [ "$AUTO_YES" = true ]; then
-    echo ""
-    err "Configurazione mancante o non valida. Impossibile proseguire in modalità automatica."
-    info "Esegui una volta: cd $DIR && ./scripts/setup.sh (senza --yes) per configurare autologin e orari."
-    exit 1
+    if [ -t 0 ]; then
+      # C'è un terminale: RIPRENDIAMO la configurazione da dove si era interrotta
+      # invece di uscire con errore. Prima questo ramo faceva `exit 1` e bloccava
+      # "Aggiorna e avvia" a OGNI rilancio del comando curl: l'utente restava
+      # fermo finché non scopriva di dover lanciare ./scripts/setup.sh a mano.
+      echo ""
+      if [ "$CONFIG_REASON" = "missing_schedule" ]; then
+        warn "La configurazione precedente è rimasta a metà: account scelto, orari mai salvati."
+      else
+        warn "Configurazione assente o non valida: la prima configurazione non è stata completata."
+      fi
+      info "La riprendo adesso: ti richiedo account e orari (un minuto), poi proseguo da solo."
+      echo ""
+      read_with_timer 4 "${DIM}Tra 4s riprendo da «Chi sei?» (Invio per saltare).${NC}"
+      # Solo la parte di configurazione torna interattiva: installazioni e
+      # aggiornamenti a valle restano automatici.
+      AUTO_YES=false
+    else
+      echo ""
+      err "Configurazione mancante o non valida e nessun terminale interattivo disponibile."
+      info "Esegui una volta: cd $DIR && ./scripts/setup.sh (senza --yes) per configurare autologin e orari."
+      exit 1
+    fi
   fi
-  if [ -f "$CONFIG_FILE" ]; then
+  if [ "$CONFIG_REASON" = "missing_schedule" ]; then
+    echo ""
+    info "Configurazione da completare: account già presente, mancano i giorni e i turni."
+    echo ""
+  elif [ -f "$CONFIG_FILE" ]; then
     echo ""
     warn "config.json esistente ma non valido o contiene dati fittizi."
     warn "Verrà riconfigurato da zero."
+    echo ""
+  elif [ -f "$DIR/config.json.bak" ]; then
+    echo ""
+    info "Riconfigurazione: ti richiedo account e orari (se annulli ripristino i precedenti)."
     echo ""
   else
     echo ""
@@ -416,18 +440,19 @@ step "Chi sei?"
 if ! who_are_you; then
   # Se la riconfigurazione è stata annullata ma esiste un backup (creato da
   # install.sh in modalità "Cambia account/orari"), ripristiniamo la config
-  # precedente invece di lasciare l'utente senza account.
-  if [ -f "$DIR/config.json.bak" ] && [ ! -f "$CONFIG_FILE" ]; then
-    mv "$DIR/config.json.bak" "$CONFIG_FILE"
+  # precedente invece di lasciare l'utente senza account. Il backup vale anche
+  # quando config.json esiste ma è incompleto (setup interrotto a metà): senza
+  # questo controllo un annullamento lasciava sul disco la config mutilata.
+  if [ -f "$DIR/config.json.bak" ] && ! is_config_valid; then
+    mv -f "$DIR/config.json.bak" "$CONFIG_FILE"
     warn "Riconfigurazione annullata: ho ripristinato la configurazione precedente."
     ok "Account e orari ripristinati. Puoi rilanciare il comando curl quando vuoi cambiarli."
     exit 0
   fi
   err "Account non configurato. Impossibile proseguire."
+  info "Nessun problema: rilancia il comando curl quando vuoi e riprendo da qui."
   exit 1
 fi
-# Riconfigurazione completata con successo: il backup non serve più.
-rm -f "$DIR/config.json.bak" 2>/dev/null || true
 apply_selected_account
 
 # Helper di validazione giorni
@@ -480,11 +505,39 @@ prompt_time() {
   done
 }
 
-# Chiede un range e lo aggiunge all'array SHIFT_SPECS (stringhe "startHour,startMin,endHour,endMin")
-ask_shift() {
+# Indice 1-based del turno che si sovrappone all'intervallo [start_min, end_min),
+# oppure stringa vuota se nessuno. skip_idx (opzionale, 1-based) esclude dal
+# controllo il turno che si sta modificando.
+overlapping_shift_index() {
+  local start_min="$1" end_min="$2" skip_idx="${3:-0}"
+  local i=1 spec h1 m1 h2 m2 p_start p_end
+  for spec in "$SHIFT_SPECS[@]"; do
+    if [ "$i" -ne "$skip_idx" ]; then
+      h1=$(echo "$spec" | cut -d, -f1)
+      m1=$(echo "$spec" | cut -d, -f2)
+      h2=$(echo "$spec" | cut -d, -f3)
+      m2=$(echo "$spec" | cut -d, -f4)
+      p_start=$((h1 * 60 + m1))
+      p_end=$((h2 * 60 + m2))
+      if [ "$start_min" -lt "$p_end" ] && [ "$end_min" -gt "$p_start" ]; then
+        echo "$i"
+        return 0
+      fi
+    fi
+    i=$((i + 1))
+  done
+  echo ""
+  return 1
+}
+
+# Chiede inizio/fine e valida (fine > inizio, nessuna sovrapposizione).
+# Successo: imposta NEW_SPEC ("sh,sm,eh,em"). skip_idx esclude un turno dal
+# controllo di sovrapposizione (serve quando lo si sta modificando).
+ask_shift_times() {
   local label="$1"
   local default_start="$2"
   local default_end="$3"
+  local skip_idx="${4:-0}"
   echo ""
   echo -e "${BOLD}${label}${NC}"
   prompt_time "  Inizio" "$default_start"
@@ -492,7 +545,6 @@ ask_shift() {
   prompt_time "  Fine" "$default_end"
   local e_h=$LAST_H e_m=$LAST_M
 
-  # Validazione inizio < fine
   local start_min=$((s_h * 60 + s_m))
   local end_min=$((e_h * 60 + e_m))
   if [ "$start_min" -ge "$end_min" ]; then
@@ -500,25 +552,45 @@ ask_shift() {
     return 1
   fi
 
-  # Controlla sovrapposizione con turni già inseriti
-  local i=1
-  for spec in "$SHIFT_SPECS[@]"; do
-    local prev_h1 prev_m1 prev_h2 prev_m2
-    prev_h1=$(echo "$spec" | cut -d, -f1)
-    prev_m1=$(echo "$spec" | cut -d, -f2)
-    prev_h2=$(echo "$spec" | cut -d, -f3)
-    prev_m2=$(echo "$spec" | cut -d, -f4)
-    local p_start=$((prev_h1 * 60 + prev_m1))
-    local p_end=$((prev_h2 * 60 + prev_m2))
-    if [ "$start_min" -lt "$p_end" ] && [ "$end_min" -gt "$p_start" ]; then
-      warn "Questo turno si sovrappone con il turno $i (${prev_h1}:${prev_m1}-${prev_h2}:${prev_m2})."
-      return 1
-    fi
-    i=$((i + 1))
-  done
+  local clash
+  clash=$(overlapping_shift_index "$start_min" "$end_min" "$skip_idx" || true)
+  if [ -n "$clash" ]; then
+    warn "Questo orario si sovrappone al turno $clash ($(spec_to_label "$SHIFT_SPECS[$clash]"))."
+    return 1
+  fi
 
-  SHIFT_SPECS+=("${s_h},${s_m},${e_h},${e_m}")
+  NEW_SPEC="${s_h},${s_m},${e_h},${e_m}"
   return 0
+}
+
+# Chiede un range e lo aggiunge all'array SHIFT_SPECS (stringhe "startHour,startMin,endHour,endMin")
+ask_shift() {
+  ask_shift_times "$1" "$2" "$3" 0 || return 1
+  SHIFT_SPECS+=("$NEW_SPEC")
+  return 0
+}
+
+# Modifica il turno con indice 1-based: ripropone gli orari attuali come default,
+# quindi basta Invio per tenerli.
+edit_shift() {
+  local idx="$1" spec sh sm eh em cur_start cur_end
+  spec="$SHIFT_SPECS[$idx]"
+  [ -n "$spec" ] || return 1
+  sh=$(echo "$spec" | cut -d, -f1)
+  sm=$(echo "$spec" | cut -d, -f2)
+  eh=$(echo "$spec" | cut -d, -f3)
+  em=$(echo "$spec" | cut -d, -f4)
+  cur_start=$(node "$SCHEDULE_CLI" format-time "$sh" "$sm")
+  cur_end=$(node "$SCHEDULE_CLI" format-time "$eh" "$em")
+  echo ""
+  info "Invio tiene l'orario attuale; per cambiarlo scrivi il nuovo (es. 9:30, 1630)."
+  if ask_shift_times "Modifica turno $idx (ora: ${cur_start}-${cur_end})" "$cur_start" "$cur_end" "$idx"; then
+    SHIFT_SPECS[$idx]="$NEW_SPEC"
+    ok "Turno $idx aggiornato: $(spec_to_label "$NEW_SPEC")"
+    return 0
+  fi
+  info "Turno $idx lasciato invariato (${cur_start}-${cur_end})."
+  return 1
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -590,6 +662,21 @@ render_shifts() {
   fi
 }
 
+# Riga di riepilogo dei turni per il sottotitolo del menu (il menu a frecce
+# pulisce lo schermo, quindi la lista va dentro il menu stesso per restare visibile).
+shifts_subtitle() {
+  if [ ${#SHIFT_SPECS} -eq 0 ]; then
+    echo "Nessun turno impostato: aggiungine almeno uno per continuare."
+    return 0
+  fi
+  local out="" spec
+  for spec in "${SHIFT_SPECS[@]}"; do
+    [ -n "$out" ] && out+="   ·   "
+    out+="$(spec_to_label "$spec")"
+  done
+  echo "Turni attuali:  $out"
+}
+
 # Scelta giorni lavorativi con modelli rapidi (menu a frecce)
 configure_days() {
   echo ""
@@ -641,8 +728,10 @@ configure_shifts() {
     *) SHIFT_SPECS=("9,0,13,0" "16,0,20,0") ;;   # cancel/EOF → default
   esac
 
-  # Editor interattivo dei turni (menu a frecce dinamico sullo stato corrente)
-  local act ridx le def_start pick acts labels rlabels rpick
+  # Editor interattivo dei turni: la LISTA è il menu — ogni turno inserito è una
+  # voce selezionabile che ne riapre gli orari (prima la lista veniva stampata
+  # sopra il menu e il clear-screen del menu a frecce la cancellava subito).
+  local act ridx le def_start pick acts labels rlabels rpick idx
   while true; do
     sort_shifts
     echo ""
@@ -651,18 +740,29 @@ configure_shifts() {
     echo ""
     # Costruisco le azioni disponibili in base allo stato (turni presenti o no).
     acts=(); labels=()
-    acts+=("add");    labels+=("Aggiungi un turno")
+    idx=1
+    for spec in "$SHIFT_SPECS[@]"; do
+      acts+=("edit:$idx")
+      labels+=("Turno $idx: $(spec_to_label "$spec") — seleziona per cambiare inizio/fine")
+      idx=$((idx + 1))
+    done
+    acts+=("add");    labels+=("Aggiungi un turno — un altro intervallo nella giornata")
     if [ ${#SHIFT_SPECS} -gt 0 ]; then
-      acts+=("rm");   labels+=("Rimuovi un turno")
-      acts+=("clr");  labels+=("Svuota tutti i turni")
+      acts+=("rm");   labels+=("Rimuovi un turno — scegli quale eliminare")
+      acts+=("clr");  labels+=("Svuota tutti i turni — riparti da zero")
     fi
-    acts+=("conf");   labels+=("Conferma e continua")
+    acts+=("conf");   labels+=("Conferma e continua — vai al riepilogo finale")
     # Default sull'ultima voce (Conferma): Invio-only = conferma, come il vecchio [c].
     pick=$(node "$DIR/scripts/lib/prompt-cli.js" select \
-      --title "I tuoi turni — cosa vuoi fare?" --default ${#labels[@]} -- "${labels[@]}" 2>/dev/null || echo ${#labels[@]})
+      --title "I tuoi turni — seleziona un turno per modificarlo" \
+      --subtitle "$(shifts_subtitle)" \
+      --default ${#labels[@]} -- "${labels[@]}" 2>/dev/null || echo ${#labels[@]})
     act="${acts[$pick]}"
     [ -z "$act" ] && act="conf"   # cancel/EOF → conferma
     case "$act" in
+      edit:*)
+        edit_shift "${act#edit:}" || true
+        ;;
       add)
         if [ ${#SHIFT_SPECS} -ge 4 ]; then
           warn "Hai raggiunto il massimo di 4 turni."
@@ -760,6 +860,16 @@ while true; do
     fi
 
     if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+      # Guardia: senza autologin NON scriviamo (scrivere stringhe vuote
+      # cancellerebbe l'account di chi stava solo cambiando gli orari).
+      if [ -z "$AUTOLOGIN" ]; then
+        load_account_from_config
+      fi
+      if [ -z "$AUTOLOGIN" ]; then
+        err "Account non disponibile: non salvo per non sovrascrivere config.json."
+        info "Rilancia il comando curl e scegli il tuo nominativo in «Chi sei?»."
+        exit 1
+      fi
       # Scrive config.json via JSON.stringify per evitare problemi di escaping
       # con nomi contenenti virgolette o backslash. Preserva campi esistenti
       # come baseUrl, courseUrls, ollamaModel e le chiavi issue-* (reportIssues,
@@ -770,9 +880,11 @@ while true; do
         const cfgPath = '$CONFIG_FILE';
         let cfg = {};
         try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch(e) {}
-        cfg.codice_fiscale = process.env.ACTIVE_CF;
-        cfg.memberName = process.env.MEMBER_NAME;
-        cfg.autologinUrl = process.env.AUTOLOGIN;
+        // Solo valori non vuoti: un env vuoto NON deve azzerare l'account già
+        // presente (vedi guardia in setup.sh prima della scrittura).
+        if (process.env.ACTIVE_CF) cfg.codice_fiscale = process.env.ACTIVE_CF;
+        if (process.env.MEMBER_NAME) cfg.memberName = process.env.MEMBER_NAME;
+        if (process.env.AUTOLOGIN) cfg.autologinUrl = process.env.AUTOLOGIN;
         if (!cfg.baseUrl) cfg.baseUrl = 'https://tecsial.gsdcampus.it/';
         if (!Array.isArray(cfg.courseUrls)) cfg.courseUrls = [];
         if (!cfg.ollamaModel) cfg.ollamaModel = '${OLLAMA_MODEL}';
@@ -790,7 +902,10 @@ while true; do
           ? Math.max(1, Math.min(8, Math.floor(configuredBatchLimit))) : 8;
         if (!cfg.aiClaudeTimeoutMs) cfg.aiClaudeTimeoutMs = 900000;
         cfg.workSchedule = {
-          days: process.env.DAYS_JSON.split(',').map(Number).filter(Boolean),
+          // filter su 0..6 (NON filter(Boolean): scartava la domenica, giorno 0).
+          days: process.env.DAYS_JSON.split(',')
+            .map(Number)
+            .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6),
           shifts: JSON.parse('[' + process.env.SHIFTS_JSON + ']')
         };
         // Segnalazione issue: attiva di default per tutti via receiver server-side.
@@ -855,6 +970,11 @@ EOF
     break
   fi
 done
+
+# Configurazione completa (appena salvata o confermata): il backup di
+# install.sh non serve più. Prima veniva rimosso subito dopo «Chi sei?»,
+# quindi un'interruzione durante gli orari lo perdeva insieme alla config.
+rm -f "$DIR/config.json.bak" 2>/dev/null || true
 
 # 3. npm dependencies — solo se package.json/package-lock.json sono cambiati,
 # node_modules manca, oppure --force-update

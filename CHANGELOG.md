@@ -5,6 +5,27 @@ il comando curl mostra automaticamente le righe nuove di questo file.
 (Per il maintainer: aggiungere una sezione `## data` con bullet brevi a ogni
 push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
+## 2026-07-28
+
+- **"Aggiorna e avvia" ora dice la verità**: se l'aggiornamento non parte (rete o proxy che bloccano GitHub) lo scrive a chiare lettere invece di stampare "Progetto aggiornato". A fine giro compare sempre l'esito reale: `Aggiornato: 964824c → 42a07aa` oppure `Già all'ultima versione (964824c)`.
+- Il **controllo rete prima dell'aggiornamento** non pretende più che rispondano *tutti* gli indirizzi di prova: su reti aziendali filtrate bastava un blocco per saltare l'aggiornamento in silenzio. Ora basta una risposta e il timeout è più tollerante (8s).
+- Le installazioni **partite dallo zip** (senza cronologia git) non potevano aggiornarsi *mai*, senza dirlo: adesso il comando lo rileva, lo spiega e propone la riparazione automatica — account, orari, risposte e log restano al loro posto.
+- Il **checkup** (menu → "Diagnostica on-demand") dice se il Mac è aggiornabile: cartella valida, GitHub raggiungibile, di quanti aggiornamenti è indietro e stato dell'auto-aggiornamento.
+- Sui Mac dei colleghi la **versione** compare leggibile (`v1.1.0 · 42a07aa`) anche se il clone non ha le etichette di versione: prima si vedeva solo un codice esadecimale.
+- La plancia ora è **viva**: mascotte Pac-Man che mangia la strada da fare (con fantasmino quando un corso è in attesa), barra del video con spinner, orologio dei dati. Si ridisegna 4 volte al secondo senza sfarfallio e senza leggere più file di prima.
+- In alto compare la **versione installata** accanto al tuo nome.
+- **Q ora è chiaro**: chiude *questa scheda* del Terminale — non l'app e non le altre finestre, che possono fare altro. Niente più promesse tipo "chiudere non ferma nulla": se la chiusura interrompe i processi, il guardiano li riavvia entro ~2 minuti, e se il guardiano non è attivo la plancia lo dice in giallo. **F** resta la fermata vera, **Ctrl-C** esce lasciando la scheda aperta.
+- La plancia e `./status.sh` mostrano l'**auto-aggiornamento**: "controllato 4m fa · già all'ultima versione", oppure un avviso giallo se non controlla da più di 35 minuti o se non è attivo su quel Mac. Prima, quando non c'era niente di nuovo, l'auto-update non lasciava traccia e sembrava fermo.
+- Se il Mac si aggiorna **mentre la plancia è aperta**, la plancia lo dice: "Si è aggiornato da solo (964824c ▸ 1a2b3c4) — questa finestra mostra ancora la versione precedente, chiudila con Q e rilancia il comando curl".
+- **Notifica macOS** ad aggiornamento riuscito ("Aggiornato all'ultima versione"), così te ne accorgi anche senza nessun terminale aperto.
+- "Guarda dal vivo" (tasto **L**) è di sola lettura e non ferma niente: si torna alla plancia con **Q**.
+- Se annulli o chiudi il Terminale durante la **prima configurazione**, al rilancio il setup **riprende da dove eri** invece di dare errore: prima "Aggiorna e avvia" si bloccava a ogni tentativo.
+- Corretto un problema serio: scegliendo **"Mantieni account attuale"** per cambiare solo gli orari, il link di accesso e il nominativo venivano **cancellati** da `config.json` (e al riavvio sembrava "configurazione non valida"). Ora l'account resta al suo posto.
+- Nuovo **editor dei turni**: i turni impostati sono voci del menu e basta selezionarne uno per cambiarne inizio e fine (orari attuali già precompilati, Invio li tiene). Alla conferma si passa come sempre al riepilogo finale.
+- Scegliendo "Tutti i giorni" ora viene salvata anche la **domenica** (prima veniva scartata in silenzio).
+- Le risposte imparate dalla piattaforma si **distribuiscono da sole** ai colleghi a fine di ogni sessione: prima uscivano solo quelle risolte dall'AI.
+- Se la riconfigurazione dell'account viene annullata a metà, gli orari precedenti vengono ripristinati anche quando `config.json` era rimasto incompleto.
+
 ## 2026-07-21
 
 - Claude Code ora lavora **solo on-demand**: con inbox quiz vuota non partono neppure le CLI di verifica/installazione AI e non viene consumata nessuna richiesta.

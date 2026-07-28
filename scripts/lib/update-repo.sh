@@ -8,10 +8,19 @@
 #
 # Richiede: $DIR (root progetto) definito dal chiamante; git disponibile.
 # Non usa `set -e` proprio: ogni fallimento degrada con warning (unattended-safe).
+#
+# Ritorna 1 se l'aggiornamento NON è stato eseguito (fetch fallito): prima
+# proseguiva mergiando su un origin/main vecchio e dichiarava "progetto
+# aggiornato" anche quando non era stato scaricato nulla.
 
 update_repo() {
   local branch="${1:-main}"
-  git -C "$DIR" fetch --quiet origin "$branch" || { echo "[update-repo] fetch non riuscito, resto sulla versione locale."; return 1; }
+  local before after
+  before=$(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo "")
+  if ! git -C "$DIR" fetch --quiet origin "$branch"; then
+    echo "[update-repo] fetch non riuscito: nessun aggiornamento eseguito, resto su ${before:-versione locale}."
+    return 1
+  fi
 
   # Transizione known_answers.json -> gitignorato (v. commento in install.sh):
   # se è ancora tracciato e modificato, backup delle risposte, reset al HEAD
@@ -23,9 +32,7 @@ update_repo() {
     git -C "$DIR" checkout -- data/known_answers.json 2>/dev/null || true
   fi
 
-  if git -C "$DIR" merge --ff-only "origin/$branch" >/dev/null 2>&1; then
-    echo "[update-repo] progetto aggiornato (ff)."
-  else
+  if ! git -C "$DIR" merge --ff-only "origin/$branch" >/dev/null 2>&1; then
     # File tracciati sporchi: riallineo forzato a origin (repo = source of
     # truth; le modifiche legittime sono tutte gitignorate).
     echo "[update-repo] ff non possibile, riallineo a origin/$branch (reset --hard)."
@@ -34,6 +41,14 @@ update_repo() {
 
   if [ -n "$ka_restore" ] && [ -f "$ka_restore" ]; then
     mv -f "$ka_restore" "$DIR/data/known_answers.json" 2>/dev/null || rm -f "$ka_restore" 2>/dev/null
+  fi
+
+  # Esito basato sullo sha reale, non sul comando che è andato a buon fine.
+  after=$(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo "")
+  if [ -n "$before" ] && [ -n "$after" ] && [ "$before" != "$after" ]; then
+    echo "[update-repo] aggiornato: $before -> $after"
+  else
+    echo "[update-repo] già all'ultima versione (${after:-?})."
   fi
   return 0
 }

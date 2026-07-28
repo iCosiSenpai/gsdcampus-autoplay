@@ -11,6 +11,7 @@ unset FORCE_COLOR
 export NO_COLOR=1
 
 SCHEDULE_CLI="$DIR/scripts/lib/schedule-cli.js"
+CONFIG_CHECK_CLI="$DIR/scripts/lib/config-check-cli.js"
 CHECK_REQ="$DIR/scripts/check-requirements.sh"
 BATCH_RUNNER="$DIR/scripts/run-claude-quiz-batch.sh"
 TODO_FILE="$DIR/logs/ai_todo.json"
@@ -66,11 +67,20 @@ unset _batch_lock _batch_lock_owner
 ok "Pulizia istanze precedenti completata."
 
 step "1/5" "Verifica configurazione"
-if [ -f "$DIR/config.json" ] && node "$SCHEDULE_CLI" is-work-time >/dev/null 2>&1; then
+# `is-work-time` esce SEMPRE 0 (stampa yes/no): come test di validità era un
+# falso positivo. config-check-cli.js verifica account E orari, e riconosce una
+# prima configurazione interrotta a metà — caso in cui gli orari mancano e
+# src/lib/schedule.js ripiegherebbe sui default in silenzio.
+if [ -f "$CONFIG_CHECK_CLI" ] && node "$CONFIG_CHECK_CLI" >/dev/null 2>&1; then
   ok "config.json valido."
   info "Orario configurato: $(node "$SCHEDULE_CLI" describe 2>/dev/null || echo 'non disponibile')"
 else
-  warn "Configurazione mancante o incompleta. Avvio setup guidato."
+  CONFIG_REASON="$(node "$CONFIG_CHECK_CLI" 2>/dev/null || true)"
+  if [ "$CONFIG_REASON" = "missing_schedule" ]; then
+    warn "Configurazione rimasta a metà (account scelto, orari mai salvati): la completo adesso."
+  else
+    warn "Configurazione mancante o incompleta. Avvio setup guidato."
+  fi
   "$DIR/scripts/setup.sh"
 fi
 
@@ -87,6 +97,12 @@ step "3/5" "Banca risposte e inbox"
 mkdir -p "$DIR/logs"
 if [ -x "$DIR/scripts/update-known-answers.sh" ]; then
   "$DIR/scripts/update-known-answers.sh" || true
+fi
+# Direzione opposta (uscita): manda ai colleghi le risposte che questo Mac ha
+# imparato dalla piattaforma nei run precedenti. `share` non fa nulla se non c'è
+# delta; se il receiver è giù resta il marker e si ritenta al prossimo giro.
+if [ -f "$DIR/scripts/lib/answers-cli.js" ]; then
+  node "$DIR/scripts/lib/answers-cli.js" share || true
 fi
 TODO_FRESH="$(node -e "
   const fs=require('fs');

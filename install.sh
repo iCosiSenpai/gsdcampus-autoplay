@@ -239,9 +239,16 @@ echo ""
 # post-clone il doctor completo rifà questi check e molto altro).
 # Ritorna 0 se internet + GitHub raw sono raggiungibili.
 net_preflight() {
-  curl -m 5 -fsS -o /dev/null https://captive.apple.com 2>/dev/null || return 1
-  curl -m 5 -fsS -o /dev/null "https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh" 2>/dev/null || return 1
-  return 0
+  # Basta UNA risposta positiva. Prima servivano ENTRAMBE (captive.apple.com +
+  # raw.githubusercontent): su una rete aziendale che filtra uno dei due il
+  # preflight falliva e l'aggiornamento veniva SALTATO in silenzio, pur avendo
+  # internet funzionante. Timeout 8s: su connessioni lente 5s bastavano a
+  # generare falsi negativi.
+  curl -m 8 -fsS -o /dev/null "https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/main/install.sh" 2>/dev/null && return 0
+  # Endpoint del protocollo git: se risponde, `git fetch` funziona.
+  curl -m 8 -fsS -o /dev/null "https://github.com/iCosiSenpai/gsdcampus-autoplay/info/refs?service=git-upload-pack" 2>/dev/null && return 0
+  curl -m 8 -fsS -o /dev/null https://captive.apple.com 2>/dev/null && return 0
+  return 1
 }
 
 # 1. git
@@ -254,9 +261,18 @@ fi
 ok "git disponibile."
 
 # Aggiorna il codice all'ultima versione (senza toccare i file ignorati: config.json, log, ...)
+# Ritorna 1 se l'aggiornamento NON è stato eseguito (fetch fallito): prima
+# stampava "Progetto aggiornato" anche in quel caso, mergiando su un
+# origin/main vecchio — il collega leggeva "aggiornato" e restava indietro.
 update_repo() {
+  local before after
+  before=$(git rev-parse --short HEAD 2>/dev/null || echo "")
   info "Aggiorno il progetto all'ultima versione..."
-  git fetch --quiet origin "$BRANCH" || warn "fetch non riuscito, proseguo con la versione locale."
+  if ! git fetch --quiet origin "$BRANCH"; then
+    err "Aggiornamento NON eseguito: non riesco a contattare GitHub (rete o proxy)."
+    info "Resto sulla versione installata${before:+ ($before)}. Riprova più tardi."
+    return 1
+  fi
 
   # Transizione known_answers.json -> gitignorato. Nei commit vecchi questo file è
   # TRACCIATO e l'autoplay lo riscrive a ogni quiz risolto, quindi ogni collega attivo
@@ -273,7 +289,7 @@ update_repo() {
   fi
 
   if git merge --ff-only "origin/$BRANCH" >/dev/null 2>&1; then
-    ok "Progetto aggiornato."
+    :
   else
     # L'ff-only è fallito per altri file tracciati sporchi (non known_answers, già
     # gestito). Riallineo forzato a origin: la repo è la source of truth, i file
@@ -281,12 +297,16 @@ update_repo() {
     # gitignorate: config.json, logs/, data/accounts/, known_answers.json). Così il
     # "Aggiorna e avvia" non si ferma mai su uno stato sporco imprevisto. Le risposte
     # del collega sono preservate dal backup .__keep (ripristinato sotto).
-    warn "Aggiornamento pulito non riuscito (altri file locali modificati?). Riallineo a origin/$BRANCH..."
-    if git reset --hard "origin/$BRANCH" >/dev/null 2>&1; then
-      ok "Codice riallineato a origin/$BRANCH."
-    else
-      warn "Impossibile riallineare il codice; proseguo con la versione attuale."
-    fi
+    warn "Aggiornamento pulito non riuscito (file locali modificati). Riallineo a origin/$BRANCH..."
+    git reset --hard "origin/$BRANCH" >/dev/null 2>&1 || warn "Impossibile riallineare il codice."
+  fi
+
+  # Esito HONESTO basato sullo sha reale, non sul comando che è andato a buon fine.
+  after=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+  if [ -n "$before" ] && [ -n "$after" ] && [ "$before" != "$after" ]; then
+    ok "Aggiornato: $before → $after"
+  elif [ -n "$after" ]; then
+    ok "Già all'ultima versione ($after): nessun aggiornamento da scaricare."
   fi
 
   # Ripristino le risposte verificate del collega sul file ora gitignorato.
@@ -307,7 +327,7 @@ if [ -d "$TARGET/.git" ]; then
      && ! grep -q "drawMenuScreen" "$TARGET/scripts/lib/prompt-cli.js" 2>/dev/null; then
     if net_preflight; then
       info "Preparo il nuovo menu di benvenuto..."
-      (cd "$TARGET" && update_repo)
+      (cd "$TARGET" && update_repo) || warn "Menu non aggiornato (aggiornamento non riuscito): uso quello installato."
     else
       warn "Niente rete: uso temporaneamente il menu già installato."
     fi
@@ -349,8 +369,44 @@ if [ -d "$TARGET/.git" ]; then
     MODE="update"
   fi
 elif [ -d "$TARGET" ]; then
-  warn "Esiste già $TARGET ma non è una copia git. Non la sovrascrivo: uso il contenuto attuale."
-  MODE="launch"
+  # Cartella presente ma senza .git: tipico di chi è partito dallo zip di
+  # prepare-package.sh (che rimuove .git). In questo stato "Aggiorna e avvia"
+  # non può fare NIENTE e il Mac resta congelato su quella versione per sempre,
+  # in silenzio. Lo diciamo e offriamo la riparazione (conserva account e dati:
+  # config.json, data/ e logs/ sono gitignorati e non vengono toccati).
+  echo ""
+  warn "La cartella $TARGET NON è un'installazione aggiornabile (manca la cronologia git)."
+  warn "Finché resta così, gli aggiornamenti automatici non possono arrivare su questo Mac."
+  REPAIRED=false
+  if [ -n "$TTY_REDIR" ] && net_preflight; then
+    printf '%b' " ${BOLD}La trasformo in un'installazione aggiornabile? Account e dati restano. [y/N] ${NC}"
+    read -r REPLY < "$TTY_REDIR" || REPLY=""
+    echo ""
+    case "$REPLY" in
+      [yY]*)
+        info "Riparazione in corso..."
+        if (cd "$TARGET" \
+            && git init -q 2>/dev/null \
+            && { git remote add origin "$REPO_URL" 2>/dev/null || git remote set-url origin "$REPO_URL"; } \
+            && git fetch --quiet --depth 1 origin "$BRANCH" \
+            && git checkout -f -B "$BRANCH" "origin/$BRANCH" >/dev/null 2>&1); then
+          ok "Installazione riparata: da ora gli aggiornamenti arrivano da soli."
+          REPAIRED=true
+        else
+          warn "Riparazione non riuscita. Rimedio manuale: sposta la cartella e rilancia questo comando."
+          info "  mv ~/gsdcampus-autoplay ~/gsdcampus-autoplay-vecchia   (poi rilancia il curl)"
+        fi
+        ;;
+      *)
+        info "Ok, non tocco niente. Quando vuoi aggiornare rilancia questo comando e rispondi sì."
+        ;;
+    esac
+  else
+    info "Rimedio manuale (conserva account e dati):"
+    info "  cd ~/gsdcampus-autoplay && git init -q && git remote add origin $REPO_URL \\"
+    info "    && git fetch --depth 1 origin $BRANCH && git checkout -f -B $BRANCH origin/$BRANCH"
+  fi
+  if [ "$REPAIRED" = true ]; then MODE="update"; else MODE="launch"; fi
 else
   # Prima installazione: senza rete non si può clonare → fail-fast chiaro.
   if ! net_preflight; then
@@ -386,7 +442,8 @@ case "$MODE" in
       warn "Niente rete: salto l'aggiornamento e avvio la versione già installata."
     else
       OLD_HEAD=$(git -C "$TARGET" rev-parse HEAD 2>/dev/null || echo "")
-      update_repo
+      UPDATE_RC=0
+      update_repo || UPDATE_RC=$?
       # Box "Novità": righe aggiunte a CHANGELOG.md tra la versione di prima e
       # quella appena scaricata, in linguaggio semplice. Ogni grep con || true:
       # sotto pipefail un no-match (exit 1) abortirebbe l'installer.
@@ -414,6 +471,9 @@ case "$MODE" in
       # Dopo l'aggiornamento del codice, controlla se anche le dipendenze sono allineate.
       # Se package.json/package-lock.json sono cambiati, setup.sh le aggiornerà in modo
       # automatico e solo se necessario.
+      if [ "$UPDATE_RC" -ne 0 ]; then
+        warn "Il codice NON è stato aggiornato (vedi sopra): avvio la versione già installata."
+      fi
       if [ -f "$TARGET/scripts/check-requirements.sh" ] && ! "$TARGET/scripts/check-requirements.sh" --runtime >/dev/null 2>&1; then
         info "Dipendenze da aggiornare dopo il pull. Avvio setup condizionale..."
         sudo -v
@@ -423,7 +483,7 @@ case "$MODE" in
           "$TARGET/scripts/setup.sh" --yes
         fi
       else
-        ok "Codice e dipendenze già allineati."
+        ok "Dipendenze già allineate."
       fi
     fi
     # Auto-update periodico: attivato/aggiornato a ogni "Aggiorna e avvia"
@@ -451,7 +511,7 @@ case "$MODE" in
     if ! net_preflight; then
       warn "Niente rete: salto l'aggiornamento del codice, riconfiguro con la versione locale."
     else
-      update_repo
+      update_repo || warn "Aggiornamento non riuscito: riconfiguro con la versione locale."
     fi
     warn "Riconfigurazione: ti verrà richiesto di selezionare l'account dall'elenco membri e di configurare gli orari."
     # NON cancelliamo subito la config: la mettiamo da parte come backup, così se

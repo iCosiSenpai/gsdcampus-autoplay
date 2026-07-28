@@ -45,6 +45,20 @@ if [ -f "$UPDATE_MARKER" ]; then
   fi
 fi
 
+# ── Auto-aggiornamento periodico: quando ha controllato l'ultima volta ──
+# `up_to_date` a ogni giro non lascia log: senza questa riga un auto-update
+# fermo da giorni sembra identico a uno che gira e non trova novità.
+AU_LINE=$(node "$DIR/scripts/lib/update-state-cli.js" show 2>/dev/null || echo "")
+if [ -n "$AU_LINE" ]; then
+  case "$AU_LINE" in
+    *"non attivo"*|*"nessun controllo recente"*|*"senza rete"*|*"non riuscito"*|*"serve il comando curl"*)
+      warn "Auto-aggiornamento: $AU_LINE" ;;
+    *)
+      info "Auto-aggiornamento: $AU_LINE" ;;
+  esac
+  echo ""
+fi
+
 PID_FILE=".autoplay_pid"
 
 # ── Stato scheduler ──

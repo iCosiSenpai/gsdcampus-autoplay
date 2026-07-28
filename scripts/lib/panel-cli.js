@@ -25,16 +25,27 @@ const { readJsonSafe } = require('../../src/lib/io');
 const { redactSensitiveText } = require('../../src/lib/logger');
 const budget = require('../../src/lib/ai-budget');
 const schedule = require('../../src/lib/schedule');
+const updateState = require('../../src/lib/update-state');
 
 const WEEKDAYS = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
-const REFRESH_MS = 2500;
+const REFRESH_MS = 2500;   // rilettura dei file di stato
+const ANIM_MS = 250;       // ridisegno per le animazioni (usa i dati in cache)
 const EVENT_PATTERN = /Inizio corso|Controllo corso|Apertura:|Video finito|non risulta completata|Rilevato questionario|Quiz finale|superato|non superato|AI_QUIZ_REQUEST|quiz_needs_answers|SESSIONE PERSA|AUTOLOGIN NON VALIDO|session_unstable|need_help|frozen detected|Video element scomparso|Error/i;
+
+// LaunchAgent che rimette in piedi lo scheduler se muore (scripts/lib/install-scheduler-agent.sh).
+const KEEPALIVE_LABEL = 'com.gsdcampus.autoplay.keepalive';
 
 // ── Tema (UTF vs ASCII, come scripts/lib/ui.sh) ───────────────────────────
 const IS_UTF = /(utf-?8)/i.test(process.env.LC_ALL || process.env.LC_CTYPE || process.env.LANG || '');
 const GLYPH = IS_UTF
-  ? { ok: '✓', warn: '⚠', err: '✗', dot: '●', arrow: '▸', h: '─', bar: '█', barOff: '░', bul: '·' }
-  : { ok: '+', warn: '!', err: 'x', dot: '*', arrow: '>', h: '-', bar: '#', barOff: '.', bul: '-' };
+  ? {
+    ok: '✓', warn: '⚠', err: '✗', dot: '●', arrow: '▸', h: '─', bar: '█', barOff: '░', bul: '·',
+    pacOpen: 'ᗧ', pacClosed: '●', ghost: 'ᗣ', pellet: '•', track: '·', pause: '❙❙',
+  }
+  : {
+    ok: '+', warn: '!', err: 'x', dot: '*', arrow: '>', h: '-', bar: '#', barOff: '.', bul: '-',
+    pacOpen: 'C', pacClosed: 'o', ghost: 'M', pellet: 'o', track: '.', pause: '||',
+  };
 const SPIN = IS_UTF ? ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'] : ['-', '\\', '|', '/'];
 
 const ANSI = {
@@ -67,6 +78,27 @@ function progressBar(pct, width, glyph = GLYPH) {
   const p = Math.max(0, Math.min(100, Number(pct) || 0));
   const filled = Math.round((p / 100) * width);
   return glyph.bar.repeat(filled) + glyph.barOff.repeat(Math.max(0, width - filled));
+}
+
+/**
+ * Barra "Pac-Man": mangia la pista di pallini man mano che l'avanzamento cresce.
+ * Pura (testabile): `frame` fa aprire/chiudere la bocca, `ghost` mette un
+ * fantasmino in coda quando qualcosa è in attesa.
+ */
+function pacmanBar(pct, width, frame = 0, opts = {}) {
+  const glyph = opts.glyph || GLYPH;
+  const cells = Math.max(6, Number(width) || 12);
+  const p = Math.max(0, Math.min(100, Number(pct) || 0));
+  const pos = Math.round((p / 100) * (cells - 1));
+  const mouth = (Math.abs(Math.floor(frame)) % 2 === 0) ? glyph.pacOpen : glyph.pacClosed;
+  let out = '';
+  for (let i = 0; i < cells; i += 1) {
+    if (i < pos) out += glyph.h;                               // pista già mangiata
+    else if (i === pos) out += mouth;                          // Pac-Man
+    else if (opts.ghost && i === cells - 1) out += glyph.ghost; // inseguitore
+    else out += ((i - pos) % 5 === 0 ? glyph.pellet : glyph.track);
+  }
+  return out;
 }
 
 function formatDuration(ms) {
@@ -119,6 +151,38 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e && e.code === 'EPERM'; }
 }
 
+// Versione release per l'header. Letta UNA volta per processo: la plancia
+// ridisegna 4 volte al secondo e non deve lanciare git a ogni frame.
+// I cloni dei colleghi sono `--depth 1` e NON hanno i tag: lì `describe`
+// restituisce solo lo sha, quindi ripieghiamo su package.json + sha
+// ("v1.1.0 · 42a07aa") invece di mostrare un esadecimale nudo.
+let _versionCache;
+function readVersion(root) {
+  if (_versionCache !== undefined) return _versionCache;
+  let describe = '';
+  try {
+    describe = String(spawnSync('git', ['describe', '--tags', '--always'], {
+      cwd: root, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).stdout || '').trim();
+  } catch (_) { describe = ''; }
+  // "v1.1.0-62-g964824c" → "v1.1.0-62" (lo sha completo è già nella riga Aggiorn.)
+  const tag = describe.match(/^(v?\d+\.\d+\.\d+(?:-\d+)?)/);
+  if (tag) {
+    _versionCache = tag[1];
+    return _versionCache;
+  }
+  let pkg = '';
+  try { pkg = String(require(path.join(root, 'package.json')).version || ''); } catch (_) { pkg = ''; }
+  _versionCache = pkg ? `v${pkg}${describe ? ` · ${describe}` : ''}` : (describe || null);
+  return _versionCache;
+}
+
+// Il "guardiano" (keepalive) riavvia lo scheduler se muore: se non è installato,
+// chiudere la scheda del Terminale può davvero fermare tutto.
+function keepAliveInstalled(home = process.env.HOME || '') {
+  try { return fs.existsSync(path.join(home, 'Library', 'LaunchAgents', `${KEEPALIVE_LABEL}.plist`)); } catch (_) { return false; }
+}
+
 function tailLines(file, maxBytes = 65536) {
   try {
     const stat = fs.statSync(file);
@@ -153,10 +217,30 @@ function readModel(root, now = Date.now()) {
   let usage = null;
   try { usage = budget.usageSummary(root, now); } catch (_) { usage = null; }
 
+  // Auto-aggiornamento: "controllato N min fa" + esito. Serve a distinguere un
+  // auto-update vivo che non trova novità da uno fermo/disinstallato.
+  let autoUpdate = null;
+  try {
+    autoUpdate = updateState.describeUpdateState(
+      updateState.readUpdateState(root),
+      now,
+      { agentInstalled: updateState.isAgentInstalled(), disabled: updateState.isAutoUpdateDisabled(root) },
+    );
+  } catch (_) { autoUpdate = null; }
+
+  // Commit attualmente sul disco: confrontato con quello di quando la plancia è
+  // partita dice "il codice si è aggiornato mentre questa finestra era aperta".
+  let headSha = null;
+  try { headSha = updateState.readHeadSha(root); } catch (_) { headSha = null; }
+
   const schedPid = readPid(path.join(root, '.autoplay_pid'));
   const heartbeatFresh = Number.isFinite(Date.parse(status.schedulerHeartbeat || ''))
     && (now - Date.parse(status.schedulerHeartbeat)) < 90000;
   const schedAlive = pidAlive(schedPid) || heartbeatFresh;
+  // Lo status.json può essere di giorni fa (run vecchio): i dati "live" come il
+  // progresso video vanno mostrati solo se sono davvero freschi.
+  const statusUpdatedAt = Date.parse(status.lastUpdate || '');
+  const statusFresh = Number.isFinite(statusUpdatedAt) && (now - statusUpdatedAt) < 5 * 60 * 1000;
 
   const claudeWorking = pidAlive(readPid(path.join(root, '.claude_batch_pid')))
     || pidAlive(readPid(path.join(root, '.claude_runner_pid')));
@@ -184,15 +268,20 @@ function readModel(root, now = Date.now()) {
   return {
     now,
     member: config.memberName || config.codice_fiscale || 'account attivo',
+    version: readVersion(root),
+    keepAlive: keepAliveInstalled(),
     status,
     summary: status.courseStateSummary || null,
     census,
     todo,
     update,
     usage,
+    autoUpdate,
+    headSha,
     claudeState,
     claudeWorking,
     schedAlive,
+    statusFresh,
     workNow,
     nextStart,
     scheduleDesc,
@@ -247,11 +336,17 @@ function renderFrame(model, opts = {}) {
   const L = [];
   const head = computeHeadline(model);
 
-  // Header
+  // Header: mascotte animata + nome + versione release, badge di stato a destra.
   const badge = model.schedAlive
-    ? (model.workNow ? c(ANSI.green, `${GLYPH.dot} attivo`) : c(ANSI.yellow, `${GLYPH.dot} in pausa`))
+    ? (model.workNow ? c(ANSI.green, `${GLYPH.dot} attivo`) : c(ANSI.yellow, `${GLYPH.pause} in pausa`))
     : c(ANSI.red, `${GLYPH.dot} fermo`);
-  const title = `${c(ANSI.bold, 'GSD Campus')} ${c(ANSI.dim, GLYPH.bul)} ${model.member}`;
+  let mascot;
+  if (!model.schedAlive) mascot = c(ANSI.red, GLYPH.ghost);
+  else if (head.level === 'attention') mascot = c(ANSI.yellow, GLYPH.ghost);
+  else if (!model.workNow) mascot = c(ANSI.yellow, GLYPH.pacClosed);
+  else mascot = c(ANSI.green, spinIndex % 2 === 0 ? GLYPH.pacOpen : GLYPH.pacClosed);
+  const version = model.version ? ` ${c(ANSI.dim, GLYPH.bul)} ${c(ANSI.dim, model.version)}` : '';
+  const title = `${mascot} ${c(ANSI.bold, 'GSD Campus')} ${c(ANSI.dim, GLYPH.bul)} ${model.member}${version}`;
   const pad = Math.max(1, width - visLen(title) - visLen(badge));
   L.push(` ${title}${' '.repeat(pad)}${badge}`);
   L.push(rule);
@@ -265,7 +360,7 @@ function renderFrame(model, opts = {}) {
   if (head.cooldown) {
     L.push(`     ${c(ANSI.dim, 'Cosa puoi fare:')}`);
     L.push(`       ${c(ANSI.gray, GLYPH.bul)} lascia questa finestra aperta: riprova da sola.`);
-    L.push(`       ${c(ANSI.bold, 'Q')} chiudi la finestra: continua in background e riprova.`);
+    L.push(`       ${c(ANSI.bold, 'Q')} chiudi la scheda: il guardiano tiene in vita l'automazione e riprova.`);
     L.push(`       ${c(ANSI.bold, 'F')} ferma tutto e chiudi.`);
   }
   L.push('');
@@ -283,7 +378,17 @@ function renderFrame(model, opts = {}) {
   if (model.census && Array.isArray(model.census.courses) && model.census.courses.length) {
     const pcts = model.census.courses.map((x) => (Number.isFinite(x.pct) ? x.pct : 0));
     const avg = Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length);
-    row('Avanzam.', `${progressBar(avg, 18)} ${String(avg).padStart(3)}%`);
+    const ghost = !!(s && s.needHelp > 0);
+    row('Avanzam.', `${c(ANSI.yellow, pacmanBar(avg, 18, spinIndex, { ghost }))} ${String(avg).padStart(3)}%`);
+  }
+
+  // Video in corso: barra + tempo, con spinner che si muove ad ogni frame.
+  // Solo con status fresco: un run di giorni fa lascerebbe una percentuale finta.
+  if (model.statusFresh && (model.videoPct != null || model.status.videoProgress)) {
+    const vp = model.videoPct != null ? model.videoPct : 0;
+    const clock = model.status.videoProgress ? `  ${c(ANSI.dim, model.status.videoProgress)}` : '';
+    const live = model.schedAlive && model.workNow ? `${c(ANSI.cyan, SPIN[spinIndex % SPIN.length])} ` : '';
+    row('Video', `${live}${progressBar(vp, 16)} ${String(vp).padStart(3)}%${clock}`);
   }
 
   // Quiz
@@ -305,6 +410,12 @@ function renderFrame(model, opts = {}) {
     row('Turni', `${model.scheduleDesc}  ${GLYPH.bul} ${state}`);
   }
 
+  // Auto-aggiornamento: quando è stato l'ultimo controllo e com'è andato.
+  if (model.autoUpdate) {
+    const col = model.autoUpdate.level === 'warn' ? ANSI.yellow : ANSI.dim;
+    row('Aggiorn.', c(col, model.autoUpdate.text));
+  }
+
   // Attention: corsi in need_help (ma non blocco totale) + aggiornamento
   if (s && s.needHelp > 0 && head.level !== 'attention') {
     L.push('');
@@ -312,6 +423,12 @@ function renderFrame(model, opts = {}) {
   }
   if (model.update && model.update.remoteVersion) {
     L.push(`  ${c(ANSI.cyan, '↑')} Aggiornamento disponibile (${model.update.remoteVersion}) — rilancia il comando curl per riceverlo.`);
+  }
+  // Il codice è cambiato DOPO l'apertura di questa finestra (auto-update): i dati
+  // qui sono freschi, ma la schermata gira ancora sulla versione vecchia.
+  if (opts.bootSha && model.headSha && opts.bootSha !== model.headSha) {
+    L.push(`  ${c(ANSI.cyan, '↻')} Si è aggiornato da solo (${opts.bootSha} ${GLYPH.arrow} ${model.headSha}).`);
+    L.push(`     ${c(ANSI.dim, 'Questa finestra mostra ancora la versione precedente: chiudila con Q e rilancia il comando curl.')}`);
   }
 
   // Eventi recenti
@@ -325,33 +442,59 @@ function renderFrame(model, opts = {}) {
   L.push('');
   L.push(rule);
   const key = (k, label) => `${c(ANSI.bold, k)} ${label}`;
-  const actions = [key('L', 'guarda dal vivo'), key('F', 'ferma e chiudi'), key('R', 'aggiorna'), key('Q', 'chiudi')];
+  const actions = [
+    key('L', 'guarda dal vivo'),
+    key('R', 'aggiorna ora'),
+    key('Q', 'chiudi la scheda'),
+    key('F', 'ferma tutto'),
+  ];
   if (head.level === 'attention' && head.hint && head.hint.includes('C ')) actions.splice(3, 0, key('C', 'cambia collega'));
-  L.push('  ' + actions.join(`   `));
-  L.push(` ${c(ANSI.dim, 'si aggiorna da solo ' + GLYPH.bul + ' chiudere la finestra non ferma nulla')}`);
+  L.push('  ' + actions.join('   '));
+  // Q = chiude SOLO questa scheda del Terminale (non l'app, non le altre
+  // finestre che possono fare altro). Chiudere la scheda può interrompere i
+  // processi avviati da qui: lo diciamo, invece di promettere che "non ferma
+  // nulla". Con il guardiano installato ripartono da soli entro ~2 minuti.
+  L.push(`  ${c(ANSI.dim, `${GLYPH.bul} Q chiude solo questa scheda del Terminale (non l'app, non le altre finestre).`)}`);
+  if (model.keepAlive) {
+    L.push(`  ${c(ANSI.dim, `${GLYPH.bul} Se chiudendo la scheda i processi vengono interrotti, il guardiano li riavvia entro ~2 minuti.`)}`);
+  } else {
+    L.push(`  ${c(ANSI.yellow, `${GLYPH.warn} Guardiano non attivo: se chiudi la scheda l'automazione può fermarsi — rilancia il comando curl per riattivarlo.`)}`);
+  }
+  L.push(`  ${c(ANSI.dim, `${GLYPH.bul} F ferma davvero i corsi (e non riparte finché non lo riavvii tu).`)}`);
+  const clock = new Date(model.now || Date.now());
+  const hhmmss = [clock.getHours(), clock.getMinutes(), clock.getSeconds()]
+    .map((n) => String(n).padStart(2, '0')).join(':');
+  L.push(` ${c(ANSI.dim, `${SPIN[spinIndex % SPIN.length]} dati aggiornati alle ${hhmmss} ${GLYPH.bul} questa schermata si aggiorna da sola`)}`);
   return L.join('\n');
 }
 
 function renderLogView(root, opts = {}) {
   const color = !!opts.color;
   const width = Math.max(48, Math.min(120, opts.width || 100));
+  const spinIndex = opts.spinIndex || 0;
   const c = (code, s) => (color ? `${code}${s}${ANSI.reset}` : String(s));
   const lines = tailLines(path.join(root, 'logs', 'autoplay.log')).slice(-18).map((l) => redactSensitiveText(l).slice(0, width));
-  const out = [` ${c(ANSI.bold, 'Log dal vivo')} ${c(ANSI.dim, '(autoplay.log)')}`, ' ' + GLYPH.h.repeat(width)];
+  const out = [
+    ` ${c(ANSI.cyan, SPIN[spinIndex % SPIN.length])} ${c(ANSI.bold, 'Log dal vivo')} ${c(ANSI.dim, '(autoplay.log)')}`,
+    ' ' + GLYPH.h.repeat(width),
+  ];
   if (!lines.length) out.push(c(ANSI.dim, '   (nessun log ancora)'));
   else for (const l of lines) out.push('  ' + c(ANSI.dim, l));
   out.push(' ' + GLYPH.h.repeat(width));
-  out.push(`  ${c(ANSI.bold, 'Q')} torna alla plancia ${GLYPH.bul} si aggiorna da solo`);
+  out.push(`  ${c(ANSI.bold, 'Q')} torna alla plancia ${GLYPH.bul} sola lettura: guardare non ferma niente ${GLYPH.bul} si aggiorna da solo`);
   return out.join('\n');
 }
 
 // ── Loop interattivo ────────────────────────────────────────────────────────
-// Chiude la tab/finestra del Terminale al termine di "ferma" (best-effort, solo
-// per app note; altrimenti no-op e il processo esce lasciando la finestra aperta).
+// Chiude SOLO la scheda/sessione corrente del Terminale al termine di "ferma" o
+// di "Q" (best-effort, solo per app note). MAI l'applicazione: sullo stesso Mac
+// possono esserci altre finestre/schede che fanno tutt'altro. Terminali non
+// riconosciuti (VS Code, Warp, Ghostty…) → no-op: il processo esce e la scheda
+// resta aperta, la chiude l'utente.
 function terminalCloseScript(termProgram) {
   const t = String(termProgram || '');
-  if (/Apple_Terminal/i.test(t)) return 'tell application "Terminal" to close front window';
-  if (/iTerm/i.test(t)) return 'tell application "iTerm2" to tell current window to close';
+  if (/Apple_Terminal/i.test(t)) return 'tell application "Terminal" to close (selected tab of front window)';
+  if (/iTerm/i.test(t)) return 'tell application "iTerm2" to tell current window to tell current session to close';
   return null;
 }
 function closeTerminalTab() {
@@ -378,13 +521,18 @@ function main() {
   const color = args.color != null ? args.color : colorDefault;
   const width = (process.stdout.columns || 74) - 2;
 
+  // Commit con cui questa finestra è partita: se l'auto-update aggiorna i file
+  // mentre la plancia resta aperta, il confronto lo rende visibile al collega.
+  let bootSha = null;
+  try { bootSha = updateState.readHeadSha(args.root); } catch (_) { bootSha = null; }
+
   // Fallback non-interattivo: un frame e via (headless, pipe, --once).
   let ttyFd = null;
   if (!args.once) {
     try { ttyFd = fs.openSync('/dev/tty', 'r'); } catch (_) { ttyFd = null; }
   }
   if (args.once || !process.stdout.isTTY || ttyFd == null) {
-    process.stdout.write(renderFrame(readModel(args.root), { color, width }) + '\n');
+    process.stdout.write(renderFrame(readModel(args.root), { color, width, bootSha }) + '\n');
     if (ttyFd != null) { try { fs.closeSync(ttyFd); } catch (_) {} }
     return 0;
   }
@@ -395,15 +543,28 @@ function main() {
   let confirmStop = false;
   let timer = null;
   let closed = false;
+  // Dati in cache: la rilettura dei file resta a REFRESH_MS, il ridisegno gira a
+  // ANIM_MS così le animazioni (Pac-Man, spinner) sono fluide senza più I/O.
+  let model = readModel(args.root);
+  let lastRead = Date.now();
 
   const draw = () => {
     const frame = view === 'log'
-      ? renderLogView(args.root, { color, width })
-      : renderFrame(readModel(args.root), { color, width, spinIndex });
+      ? renderLogView(args.root, { color, width, spinIndex })
+      : renderFrame(model, { color, width, spinIndex, bootSha });
     const extra = (view === 'panel' && confirmStop)
-      ? `\n  ${color ? ANSI.red : ''}Premere di nuovo F per fermare tutto e chiudere la finestra, un altro tasto per annullare.${color ? ANSI.reset : ''}`
+      ? `\n  ${color ? ANSI.red : ''}Premere di nuovo F per fermare tutto e chiudere la scheda, un altro tasto per annullare.${color ? ANSI.reset : ''}`
       : '';
-    process.stdout.write('\x1b[H\x1b[2J' + frame + extra + '\n');
+    // Redraw IN PLACE: cursore a casa, ogni riga pulita fino a fine riga
+    // (\x1b[K) e pulizia finale sotto (\x1b[J). Con un clear-screen a 4 fps si
+    // vedrebbe sfarfallare.
+    const body = (frame + extra).split('\n').join('\x1b[K\n');
+    process.stdout.write(`\x1b[H${body}\x1b[K\n\x1b[J`);
+  };
+
+  const refreshNow = () => {
+    model = readModel(args.root);
+    lastRead = Date.now();
   };
 
   const teardown = () => {
@@ -416,15 +577,18 @@ function main() {
     process.stdout.write('\x1b[?25h\x1b[0m\n'); // mostra cursore, reset colore
   };
 
-  const quit = (msg) => {
+  const quit = (msg, opts = {}) => {
     teardown();
     if (msg) process.stdout.write(msg + '\n');
+    // Q chiude SOLO questa scheda del Terminale (mai l'app: altre finestre
+    // possono fare tutt'altro). Ctrl-C/SIGTERM invece lasciano la scheda aperta.
+    if (opts.closeTab) closeTerminalTab();
     process.exit(0);
   };
 
   const doStop = () => {
     teardown();
-    process.stdout.write('\nFermo il sistema e chiudo la finestra…\n');
+    process.stdout.write('\nFermo i corsi e chiudo questa scheda…\n');
     const stop = path.join(args.root, 'stop.sh');
     try { spawnSync(stop, [], { stdio: 'inherit' }); } catch (_) {}
     closeTerminalTab();
@@ -433,7 +597,9 @@ function main() {
 
   const onKey = (key) => {
     const k = String(key);
-    if (k === '\u0003') return quit('Chiuso. Il sistema continua a lavorare in background.'); // Ctrl-C
+    // Ctrl-C: esce dalla plancia ma NON chiude la scheda (è la via d'uscita
+    // "non distruttiva", utile anche in debug).
+    if (k === '\u0003') return quit('Plancia chiusa. I corsi restano come sono.');
     if (view === 'log') { if (/^[qQ\r\n\u001b]$/.test(k)) { view = 'panel'; draw(); } return; }
     if (confirmStop) {
       confirmStop = false;
@@ -442,18 +608,22 @@ function main() {
       return;
     }
     switch (k) {
-      case 'q': case 'Q': case '\u001b':
-        return quit('Chiuso. Il sistema continua a lavorare in background: puoi chiudere la finestra.');
+      case 'q': case 'Q': case '\u001b': {
+        const tail = model.keepAlive
+          ? 'Se i processi vengono interrotti, il guardiano li riavvia entro un paio di minuti.'
+          : 'Attenzione: il guardiano non è attivo — se l\'automazione si ferma, rilancia il comando curl.';
+        return quit(`Chiudo questa scheda del Terminale (non l'app). ${tail}`, { closeTab: true });
+      }
       case 'f': case 'F': confirmStop = true; draw(); break;
       case 'l': case 'L': view = 'log'; draw(); break;
-      case 'r': case 'R': draw(); break;
+      case 'r': case 'R': refreshNow(); draw(); break;
       default: break;
     }
   };
 
   try { input.setRawMode(true); } catch (_) {
     // Nessun raw mode disponibile: ripiega su singolo frame.
-    process.stdout.write(renderFrame(readModel(args.root), { color, width }) + '\n');
+    process.stdout.write(renderFrame(readModel(args.root), { color, width, bootSha }) + '\n');
     teardown();
     return 0;
   }
@@ -467,8 +637,14 @@ function main() {
   process.on('exit', () => { try { process.stdout.write('\x1b[?25h'); } catch (_) {} });
   process.on('uncaughtException', (e) => { teardown(); process.stderr.write(`[panel] ${e && e.message}\n`); process.exit(1); });
   process.stdout.write('\x1b[?25l'); // nascondi cursore
+  process.stdout.write('\x1b[2J');   // una sola pulizia iniziale: poi si ridisegna in place
   draw();
-  timer = setInterval(() => { spinIndex += 1; draw(); }, args.interval);
+  // Un solo timer a ritmo di animazione: rilegge i file solo ogni `interval`.
+  timer = setInterval(() => {
+    spinIndex += 1;
+    if (Date.now() - lastRead >= args.interval) refreshNow();
+    draw();
+  }, ANIM_MS);
   return 0;
 }
 
@@ -478,7 +654,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  parseClockSeconds, videoPercent, progressBar, formatDuration, relativeTime, formatWhen,
+  parseClockSeconds, videoPercent, progressBar, pacmanBar, formatDuration, relativeTime, formatWhen,
   courseIdFromUrl, computeHeadline, readModel, renderFrame, renderLogView, stripAnsi, visLen,
-  terminalCloseScript,
+  terminalCloseScript, readVersion, keepAliveInstalled,
 };

@@ -134,13 +134,23 @@ step() {
 }
 
 # ui_version <dir>: versione leggibile del progetto per i banner
-# (tag git se esiste, altrimenti commit corto) + data ultimo aggiornamento.
-# Stampa es. "abc1234 del 14/07/2026"; stringa vuota se git non disponibile.
+# (tag git se esiste, altrimenti versione di package.json + commit corto) +
+# data ultimo aggiornamento. I cloni dei colleghi sono `--depth 1` e NON hanno i
+# tag: `describe --tags` lì restituisce solo lo sha, quindi senza il fallback su
+# package.json il collega vedeva un codice esadecimale invece di una versione.
+# Stampa es. "v1.1.0 · 42a07aa · 28/07/2026"; vuoto se git non disponibile.
 ui_version() {
   local dir="${1:-.}"
-  local ver date
+  local ver date pkg
   ver=$(git -C "$dir" describe --tags --always 2>/dev/null || echo "")
   [ -n "$ver" ] || return 0
+  case "$ver" in
+    v[0-9]*) ;;   # tag vero (es. v1.1.0-62-g964824c): già leggibile
+    *)
+      pkg=$(node -e "try{process.stdout.write(String(require('$dir/package.json').version||''))}catch(e){}" 2>/dev/null || echo "")
+      [ -n "$pkg" ] && ver="v$pkg · $ver"
+      ;;
+  esac
   date=$(git -C "$dir" log -1 --format=%cd --date=format:'%d/%m/%Y' 2>/dev/null || echo "")
   if [ -n "$date" ]; then printf '%s · %s' "$ver" "$date"; else printf '%s' "$ver"; fi
 }

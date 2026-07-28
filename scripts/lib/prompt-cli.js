@@ -167,7 +167,7 @@ function printMenuItems(layout, items, selected) {
     const badge = recommended ? `  ${UI.green}${UI.bold}CONSIGLIATO${UI.reset}` : '';
     console.log(`${layout.indent}${marker}  ${UI.dim}${number}${UI.reset}  ${labelColor}${label}${UI.reset}${badge}`);
 
-    const descriptionLines = wrapText(description, descriptionWidth);
+    const descriptionLines = wrapText(description, descriptionWidth).filter((line) => line !== '');
     if (descriptionLines.length > 0) {
       descriptionLines.forEach((line) => {
         const style = active ? UI.accentSoft : UI.dim;

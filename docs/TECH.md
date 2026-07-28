@@ -23,8 +23,17 @@ Lo scheduler non è più solo un processo `nohup` legato al Terminale: un Launch
 
 > Il percorso di avvio (`start.sh`, lock/token, `caffeinate`) è **invariato**: il keepalive lo usa così com'è. Se il watchdog fallisce, il comportamento degrada a quello attuale (serve il comando curl), mai peggio.
 
-## Auto-update continuo (ogni ~10 min)
+### Chiudere la scheda: cosa succede davvero
 
+Lo scheduler parte con `nohup`, quindi un semplice `exit` del Terminale non lo tocca. Ma quando si chiude una **scheda con processi attivi**, Terminal.app propone di terminarli e la conferma manda un segnale a tutto il process group: `nohup` protegge da `SIGHUP`, non da `SIGKILL`. Per questo la plancia non promette più "chiudere la finestra non ferma nulla" e dice invece:
+
+- `Q` = **chiude solo questa scheda** (`terminalCloseScript()` in `panel-cli.js`: `selected tab of front window` su Terminal.app, `current session` su iTerm2 — mai `quit` dell'applicazione, perché altre schede/finestre dello stesso Mac possono fare tutt'altro). Terminali non riconosciuti → no-op, esce solo il processo. Nessuna sentinella scritta: se i processi vengono interrotti, il keepalive li riprende entro ~2 minuti.
+- `F` = fermata vera: `stop.sh` (sentinella `.user_stopped` + `bootout` del keepalive) e poi chiusura della scheda. Resta giù finché non lo riavvia un `start.sh` esplicito o il comando curl.
+- `Ctrl-C` = esce dalla plancia e **lascia la scheda aperta** (via d'uscita non distruttiva).
+
+La plancia mostra in chiaro se il guardiano è installato (plist `com.gsdcampus.autoplay.keepalive`): se manca, avvisa in giallo che chiudere la scheda può fermare l'automazione.
+
+## Auto-update continuo (ogni ~10 min)
 Il LaunchAgent `com.gsdcampus.autoplay.autoupdate` (`scripts/lib/install-launchd.sh`) non gira più alle 05:30: usa `StartInterval` (600s) e lancia `scripts/auto-update.sh` **ogni ~10 minuti**. Così un push del maintainer arriva alla flotta in pochi minuti, non la notte dopo.
 
 - **Costo quasi nullo quando non c'è nulla**: `auto-update.sh` fa un `git fetch` e, se `HEAD == origin/main`, esce in <1s. Solo con un commit nuovo procede.
@@ -32,6 +41,35 @@ Il LaunchAgent `com.gsdcampus.autoplay.autoupdate` (`scripts/lib/install-launchd
 - **Mai durante un quiz**: prima di fermare, `phase_is_busy` controlla `status.json` (fresco); se la fase è `quiz_dashboard`/`quiz_needs_answers`/`checking` rimanda al giro dopo. Un **video** invece si interrompe (la piattaforma salva la posizione).
 - **Restart**: `auto-update.sh` chiama `stop.sh` + `start.sh` (già collaudato); il keepalive copre il resto. Lock `noclobber` anti-doppio-run; il file si ricopia in `$TMPDIR` prima del `git` per non corrompersi.
 - Opt-out: `"autoUpdate": false` in `config.json` → l'agent viene rimosso.
+
+### Come si vede che sta funzionando
+
+`auto-update.sh` scrive `logs/auto-update-state.json` a **ogni** giro, anche quando non c'è niente di nuovo (`src/lib/update-state.js`, CLI `scripts/lib/update-state-cli.js`). Senza questo, il caso normale (`HEAD == origin/main`, uscita in <1s, nessun log) era indistinguibile da un agent morto o mai installato.
+
+- Plancia (`panel-cli.js`): riga `Aggiorn. ▸ controllato 4m fa · già all'ultima versione (964824c)`.
+- `./status.sh`: stessa riga in alto, con `warn` quando serve attenzione.
+- `node scripts/lib/update-state-cli.js show [--json]` per leggerla a mano.
+- Esiti tracciati: `up_to_date`, `updated`, `rollback`, `postponed`, `deps_required`, `update_failed`, `offline`, `disabled`.
+- **Avviso giallo** in due casi: nessun controllo da oltre 35 minuti (`STALE_MS`) → l'agent non gira; plist assente in `~/Library/LaunchAgents/` → auto-update non attivo su quel Mac (rimedio: rilanciare il comando curl, che riesegue `install-launchd.sh install`). Con `autoUpdate:false` in `config.json` la riga resta informativa ("disattivato"), non un avviso.
+- **Finestra rimasta aperta**: `readHeadSha()` (lettura diretta di `.git/HEAD`, nessun `git` spawnato per frame) confronta il commit di quando la plancia è partita con quello sul disco. Se differiscono la plancia avvisa che sta mostrando la versione precedente e invita a chiudere e rilanciare il curl. È il caso tipico del Mac del collega: l'auto-update aggiorna i file e riavvia lo scheduler, ma il processo della plancia continua col codice vecchio.
+- **Notifica macOS** ad aggiornamento riuscito (`auto_update_done`, throttle 6h): l'unico segnale per chi non ha nessun terminale aperto.
+- Lato maintainer: `scripts/lib/diag-ping.js` invia a ogni avvio del launcher la versione (short sha) + `storeTag` al Worker (`POST /diag`, visibile con `wrangler tail`) — nessun dato personale. Serve a vedere da remoto quale versione gira su ogni store.
+
+Verifica manuale dell'agent: `launchctl print gui/$(id -u)/com.gsdcampus.autoplay.autoupdate | grep -E "path|last exit|run interval"`. Un `last exit code = 127` significa che il plist punta a un percorso che non esiste più (progetto spostato/rinominato): `./scripts/lib/install-launchd.sh install` lo riallinea.
+
+### Perché un Mac può NON aggiornarsi (e come si vede)
+
+Tre modi silenziosi di restare indietro, tutti ora rilevati da `scripts/doctor.sh` (menu curl → "Diagnostica on-demand"):
+
+1. **Cartella senza cronologia git** — tipico di chi è partito dallo zip di `prepare-package.sh`, che rimuove `.git`. In quello stato `install.sh` cadeva nel ramo `elif [ -d "$TARGET" ]` → `MODE=launch`: nessun menu, nessun aggiornamento, per sempre. Ora l'installer lo dice e offre la riparazione (`git init` + `remote add` + `fetch --depth 1` + `checkout -f -B main origin/main`): i file tracciati vengono riportati alla versione del repo, tutto ciò che è gitignorato (`config.json`, `data/`, `logs/`) resta intatto. Verificato in sandbox: account, stato per-account, banca trusted e log sopravvivono.
+2. **Preflight di rete troppo severo** — `net_preflight()` pretendeva risposta da `captive.apple.com` **e** da `raw.githubusercontent.com` (timeout 5s). Su una rete di store che filtra uno dei due, o semplicemente lenta, l'update veniva saltato con un warning facile da non notare. Ora basta **una** risposta fra raw, l'endpoint `git-upload-pack` di GitHub e captive, con timeout 8s. Stessa logica in `auto-update.sh` (`net_ok()`).
+3. **Falso "Progetto aggiornato"** — con il `fetch` fallito, `update_repo()` proseguiva mergiando su un `origin/main` vecchio e stampava comunque il messaggio di successo. Ora il fetch fallito interrompe l'aggiornamento con un errore esplicito e `return 1`; l'esito finale è calcolato sullo **sha reale** prima/dopo (`Aggiornato: X → Y` / `Già all'ultima versione (X)`). I call site (`install.sh`, `auto-update.sh`) gestiscono il codice di ritorno.
+
+> `scripts/lib/update-repo.sh` e la copia inline in `install.sh` devono restare allineate: la seconda gira anche prima che il repo esista.
+
+**Versione mostrata sui Mac dei colleghi**: i cloni sono `--depth 1` e quindi **senza tag**, dove `git describe --tags --always` restituisce solo lo sha. `ui_version()` (`scripts/lib/ui.sh`) e `readVersion()` (`panel-cli.js`) ripiegano su `package.json` + sha → `v1.1.0 · 42a07aa` invece di un esadecimale nudo.
+
+**Le due vie di avvio sono lo stesso script**: il Worker `worker-install/install-proxy.js` serve `GET /` = proxy di `raw.githubusercontent.com/.../main/install.sh` (cache 60s) e `GET /avvia` = file `GSD Avvia.command` che esegue lo stesso `curl`. Quindi "Modo A" (doppio clic) e "Modo B" (comando) eseguono **identico** installer: se uno non aggiorna, non aggiorna nemmeno l'altro — il problema non è mai la via scelta, ma `origin/main` (nessun commit nuovo), la rete, o la cartella non aggiornabile.
 
 ## Diagnostica flotta (silenziosa)
 

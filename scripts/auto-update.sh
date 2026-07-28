@@ -61,6 +61,13 @@ LOG="$DIR/logs/auto-update.log"
 mkdir -p "$DIR/logs"
 alog() { log_plain "$LOG" "$1"; }
 
+# Traccia dell'ultimo giro (anche quando non c'è niente da fare): la plancia e
+# status.sh mostrano "controllato N minuti fa". Senza questo, un auto-update
+# fermo da giorni era indistinguibile da uno che gira e non trova novità.
+au_mark() {
+  node "$DIR/scripts/lib/update-state-cli.js" mark "$@" >/dev/null 2>&1 || true
+}
+
 # Rotazione log (>512KB → tieni l'ultima metà).
 if [ -f "$LOG" ] && [ "$(stat -f%z "$LOG" 2>/dev/null || echo 0)" -gt 524288 ]; then
   tail -c 262144 "$LOG" > "$LOG.tmp" 2>/dev/null && mv -f "$LOG.tmp" "$LOG"
@@ -69,6 +76,7 @@ fi
 # ── 2. Opt-out ───────────────────────────────────────────────────────────────
 AU_ENABLED=$(node -e "try{const c=require('$DIR/config.json');process.stdout.write(c.autoUpdate===false?'no':'yes')}catch(e){process.stdout.write('yes')}" 2>/dev/null || echo "yes")
 if [ "$AU_ENABLED" = "no" ]; then
+  au_mark disabled
   exit 0
 fi
 
@@ -106,15 +114,26 @@ trap 'exit 143' TERM
 trap 'exit 130' INT
 
 # ── 4. Rete + c'è qualcosa di nuovo? ────────────────────────────────────────
-if ! curl -m 5 -fsS -o /dev/null https://raw.githubusercontent.com 2>/dev/null; then
-  # Niente rete: esci in silenzio (niente log-spam a ogni giro offline).
+# Basta UNA risposta positiva: su reti aziendali filtrate uno dei due endpoint
+# può essere bloccato mentre git funziona. Prima un solo check fallito bastava a
+# far uscire in silenzio ogni giro, senza mai aggiornare.
+net_ok() {
+  curl -m 8 -fsS -o /dev/null https://raw.githubusercontent.com 2>/dev/null && return 0
+  curl -m 8 -fsS -o /dev/null "https://github.com/iCosiSenpai/gsdcampus-autoplay/info/refs?service=git-upload-pack" 2>/dev/null && return 0
+  return 1
+}
+if ! net_ok; then
+  # Niente rete: esci in silenzio (niente log-spam a ogni giro offline), ma
+  # registra il giro così si vede che l'auto-update è vivo.
+  au_mark offline
   exit 0
 fi
-git fetch --quiet origin main 2>/dev/null || exit 0
+git fetch --quiet origin main 2>/dev/null || { au_mark offline --detail "git fetch non riuscito"; exit 0; }
 OLD=$(git rev-parse HEAD 2>/dev/null || echo "")
 NEW=$(git rev-parse origin/main 2>/dev/null || echo "")
 if [ -z "$OLD" ] || [ -z "$NEW" ] || [ "$OLD" = "$NEW" ]; then
   rm -f "$DIR/logs/.update_available" 2>/dev/null || true
+  au_mark up_to_date --local "${OLD:0:7}"
   exit 0   # già aggiornati: zero rumore.
 fi
 alog "Aggiornamento disponibile: ${OLD:0:7} → ${NEW:0:7}"
@@ -125,6 +144,7 @@ alog "Aggiornamento disponibile: ${OLD:0:7} → ${NEW:0:7}"
 # può interrompere: la piattaforma salva la posizione e si riprende dal punto.
 if autoplay_instance_alive "$DIR" && phase_is_busy; then
   alog "Update rimandato: scheduler in fase delicata (quiz/setup corso). Riprovo al prossimo giro."
+  au_mark postponed --local "${OLD:0:7}" --remote "${NEW:0:7}"
   exit 0
 fi
 
@@ -164,7 +184,7 @@ restart_if_needed() {
 }
 
 # ── 6. Aggiorna codice + banca risposte ─────────────────────────────────────
-update_repo main >> "$LOG" 2>&1 || { alog "Update non riuscito: resto su ${OLD:0:7}."; restart_if_needed; exit 0; }
+update_repo main >> "$LOG" 2>&1 || { alog "Update non riuscito: resto su ${OLD:0:7}."; au_mark update_failed --local "${OLD:0:7}" --remote "${NEW:0:7}"; restart_if_needed; exit 0; }
 "$DIR/scripts/update-known-answers.sh" >> "$LOG" 2>&1 || true
 
 # ── 7. GATE: il nuovo codice deve passare dev-check, altrimenti ROLLBACK ────
@@ -186,6 +206,7 @@ if ! "$DIR/scripts/dev-check.sh" >> "$LOG" 2>&1; then
     fi
   fi
   notify_user "GSD Campus" "Aggiornamento annullato: la nuova versione era difettosa. Segnalato al responsabile, tutto continua a funzionare." auto_update_rollback || true
+  au_mark rollback --local "${OLD:0:7}" --remote "${NEW:0:7}"
   restart_if_needed
   exit 0
 fi
@@ -194,11 +215,16 @@ fi
 if [ -x "$DIR/scripts/check-requirements.sh" ] && ! "$DIR/scripts/check-requirements.sh" --runtime >> "$LOG" 2>&1; then
   alog "Aggiornamento codice OK ma servono dipendenze nuove: serve il comando curl (interattivo)."
   notify_user "GSD Campus" "Aggiornamento quasi completo: apri il Terminale e rilancia il comando di installazione per finire." auto_update_deps || true
+  au_mark deps_required --local "${NEW:0:7}" --remote "${NEW:0:7}"
   # Non riavviare: senza dipendenze start.sh fallirebbe comunque.
   exit 0
 fi
 
 rm -f "$DIR/logs/.update_available" 2>/dev/null || true
 alog "Aggiornato con successo a ${NEW:0:7}."
+au_mark updated --local "${NEW:0:7}" --remote "${NEW:0:7}" --updated-to "${NEW:0:7}"
+# Il collega non ha nessun terminale aperto quasi sempre: una notifica (throttle
+# 6h per tipo) è l'unico modo per accorgersi che l'aggiornamento è arrivato.
+notify_user "GSD Campus" "Aggiornato all'ultima versione: i corsi ripartono da soli, non devi fare niente." auto_update_done || true
 restart_if_needed
 exit 0

@@ -108,11 +108,43 @@ else
 fi
 
 # 7. Configurazione (config.json presente e leggibile dagli helper orari).
-if [ -f "$DIR/config.json" ] && node "$DIR/scripts/lib/schedule-cli.js" is-work-time >/dev/null 2>&1; then
+if [ -f "$DIR/config.json" ] && node "$DIR/scripts/lib/config-check-cli.js" >/dev/null 2>&1; then
   chk_ok "Configurazione account e orari valida"
 else
   chk_err "Configurazione mancante o non valida" "rilancia il comando curl (fa partire il setup guidato)"
 fi
+
+# 7b. Aggiornabilità: questo Mac può ricevere aggiornamenti? Tre modi di NON
+# poterli ricevere, tutti silenziosi prima di questo check: cartella senza
+# cronologia git (installazione da zip), remote non raggiungibile, LaunchAgent
+# dell'auto-update assente.
+if [ -d "$DIR/.git" ]; then
+  LOCAL_SHA=$(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo "")
+  if git -C "$DIR" fetch --quiet origin main 2>/dev/null; then
+    REMOTE_SHA=$(git -C "$DIR" rev-parse --short origin/main 2>/dev/null || echo "")
+    if [ -n "$LOCAL_SHA" ] && [ "$LOCAL_SHA" = "$REMOTE_SHA" ]; then
+      chk_ok "Codice all'ultima versione ($LOCAL_SHA)"
+    else
+      BEHIND=$(git -C "$DIR" rev-list --count HEAD..origin/main 2>/dev/null || echo "?")
+      chk_warn "Codice indietro di $BEHIND aggiornamento/i ($LOCAL_SHA → $REMOTE_SHA)" \
+        "scegli 'Aggiorna e avvia' nel menu del comando curl"
+    fi
+  else
+    chk_err "Impossibile contattare GitHub per gli aggiornamenti" \
+      "rete/proxy dello store: gli aggiornamenti non arrivano finché non si sblocca"
+  fi
+else
+  chk_err "Questa cartella non è aggiornabile (manca la cronologia git)" \
+    "rilancia il comando curl: propone la riparazione automatica (conserva account e dati)"
+fi
+
+AU_LINE=$(node "$DIR/scripts/lib/update-state-cli.js" show 2>/dev/null || echo "")
+case "$AU_LINE" in
+  "") ;;
+  *"non attivo"*|*"nessun controllo recente"*|*"non riuscito"*|*"serve il comando curl"*)
+    chk_warn "Auto-aggiornamento: $AU_LINE" "rilancia il comando curl per riattivarlo" ;;
+  *) chk_ok "Auto-aggiornamento: $AU_LINE" ;;
+esac
 
 # 8. Probe selettori DOM (fixture offline): avvisa se il layout atteso dalla
 # piattaforma non matcha più i marker critici (quiz form, link corsi, …).
