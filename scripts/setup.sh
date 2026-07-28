@@ -159,9 +159,10 @@ print_header
 # (raw-mode, eco in user-space) o i `read` degli orari, ruba i tasti digitati
 # dall'utente — caratteri non visibili + "Sorry, try again. Password:". Il sudo
 # lo rinfreschiamo in foreground al passo 5 (Ollama), dopo i prompt interattivi.
-info "Richiesta privilegi sudo (una volta, prima del setup)..."
+info "Ora ti chiedo la password del Mac — quella con cui lo accendi."
+info "Serve una volta sola per installare i programmi e non viene salvata da nessuna parte."
 sudo -v
-ok "Privilegi sudo acquisiti."
+ok "Grazie: non me la chiederà più."
 
 if [ "$AUTO_YES" = false ]; then
   read -q "REPLY?Procedere? [y/N] "
@@ -677,58 +678,167 @@ shifts_subtitle() {
   echo "Turni attuali:  $out"
 }
 
-# Scelta giorni lavorativi con modelli rapidi (menu a frecce)
+# Giorni di apertura: lista da spuntare (prima erano numeri da digitare,
+# "0=dom 1=lun …": lo schema più da tecnico di tutto il setup).
 configure_days() {
-  echo ""
-  echo -e "${BOLD}Giorni lavorativi${NC}"
-  echo "  Usa le frecce ↑/↓ e Invio per scegliere."
-  local choice
-  choice=$(node "$DIR/scripts/lib/prompt-cli.js" select \
-    --title "Giorni lavorativi" --default 1 -- \
-    "Lun–Ven  (5 giorni)" \
-    "Lun–Sab  (6 giorni)" \
-    "Tutti i giorni" \
-    "Personalizzati (inserisci i numeri a mano)" 2>/dev/null || echo 1)
-  case "$choice" in
-    1) DAYS="1,2,3,4,5" ;;
-    2) DAYS="1,2,3,4,5,6" ;;
-    3) DAYS="0,1,2,3,4,5,6" ;;
-    4)
-      while true; do
-        echo "Numeri: 0=dom 1=lun 2=mar 3=mer 4=gio 5=ven 6=sab"
-        read "DAYS?Giorni separati da virgola (es. 1,2,3,4,5): "
-        if valid_days "$DAYS"; then break; fi
-        warn "Input non valido. Usa solo numeri da 0 a 6 separati da virgola."
-      done ;;
-    *) DAYS="1,2,3,4,5" ;;   # cancel/EOF → default
-  esac
-  DAYS_JSON=$(format_days "$DAYS")
-  ok "Giorni: $(days_human "$DAYS_JSON")"
+  local picked
+  picked=$(node "$DIR/scripts/lib/prompt-cli.js" check \
+    --title "In quali giorni è aperto il negozio?" \
+    --subtitle "Spazio per spuntare · A tutti · N nessuno · Invio per confermare" \
+    --default "${DAYS_CHECK_DEFAULT:-1,2,3,4,5}" -- \
+    "lunedì" "martedì" "mercoledì" "giovedì" "venerdì" "sabato" "domenica" 2>/dev/null || echo "1,2,3,4,5")
+  [ -n "$picked" ] || picked="1,2,3,4,5"
+  DAYS_CHECK_DEFAULT="$picked"
+  # Le voci sono lun..dom (1..7): i giorni JS sono 0=dom … 6=sab.
+  DAYS=$(node -e "
+    const map = [1, 2, 3, 4, 5, 6, 0];
+    const out = String(process.argv[1] || '').split(',')
+      .map((x) => parseInt(x, 10) - 1)
+      .filter((i) => Number.isInteger(i) && i >= 0 && i < map.length)
+      .map((i) => map[i]);
+    process.stdout.write([...new Set(out)].sort((a, b) => a - b).join(','));
+  " "$picked" 2>/dev/null || echo "1,2,3,4,5")
+  [ -n "$DAYS" ] || DAYS="1,2,3,4,5"
+  DAYS_JSON="$DAYS"
+  ok "Giorni di apertura: $(node -e "
+    const { describeDaysHuman } = require('$DIR/src/lib/schedule-ui');
+    process.stdout.write(describeDaysHuman(String(process.argv[1]||'').split(',').map(Number)));
+  " "$DAYS_JSON" 2>/dev/null || days_human "$DAYS_JSON")"
+  return 0
 }
 
-# Configurazione turni: modello di partenza (menu a frecce) + editor interattivo
-configure_shifts() {
-  echo ""
-  echo -e "${BOLD}Turni di lavoro${NC}"
-  echo "Scegli un modello di partenza (frecce ↑/↓ + Invio), poi potrai aggiungere/rimuovere turni."
-  local seed
-  seed=$(node "$DIR/scripts/lib/prompt-cli.js" select \
-    --title "Turni di lavoro — scegli un modello di partenza" --default 1 -- \
-    "Classico — 09:00-13:00 e 16:00-20:00" \
-    "Continuato — 09:00-18:00" \
-    "Solo mattina — 09:00-13:00" \
-    "Solo pomeriggio — 14:00-18:00" \
-    "Parto da zero — nessun turno, li aggiungo io" 2>/dev/null || echo 1)
-  case "$seed" in
-    1) SHIFT_SPECS=("9,0,13,0" "16,0,20,0") ;;   # nuovo default
+# Orario del negozio → turni. Il collega ragiona per "apre / chiude / pausa
+# pranzo", non per "turni": traduciamo noi (src/lib/schedule-ui.js).
+ask_time() {
+  # $1 = titolo, $2 = default HH:MM, $3 = suggerimento
+  node "$DIR/scripts/lib/prompt-cli.js" time \
+    --title "$1" --default "$2" --hint "${3:-}" 2>/dev/null || echo "$2"
+}
+
+# Costruisce SHIFT_SPECS da apertura/chiusura/pausa usando l'helper condiviso.
+shifts_from_store_hours() {
+  local open="$1" close="$2" pstart="${3:-}" pend="${4:-}"
+  local out
+  out=$(node -e "
+    const { buildShiftsFromStoreHours } = require('$DIR/src/lib/schedule-ui');
+    const hm = (t) => { const [h, m] = String(t).split(':').map(Number); return { hour: h, min: m }; };
+    const [open, close, ps, pe] = process.argv.slice(1);
+    const res = buildShiftsFromStoreHours({
+      open: hm(open),
+      close: hm(close),
+      pause: ps && pe ? { start: hm(ps), end: hm(pe) } : null,
+    });
+    if (!res.ok) { console.error(res.reason); process.exit(1); }
+    process.stdout.write(res.shifts.map((s) => [s.startHour, s.startMin, s.endHour, s.endMin].join(',')).join(' '));
+  " "$open" "$close" "$pstart" "$pend" 2>/tmp/gsd_hours_err) || {
+    local reason
+    reason=$(cat /tmp/gsd_hours_err 2>/dev/null || echo "")
+    rm -f /tmp/gsd_hours_err
+    case "$reason" in
+      chiusura_prima_apertura) warn "La chiusura deve venire dopo l'apertura. Riprova." ;;
+      pausa_invertita) warn "La fine della pausa deve venire dopo l'inizio. Riprova." ;;
+      pausa_fuori_orario) warn "La pausa deve stare dentro l'orario di apertura. Riprova." ;;
+      *) warn "Orario non valido. Riprova." ;;
+    esac
+    return 1
+  }
+  rm -f /tmp/gsd_hours_err
+  SHIFT_SPECS=(${=out})
+  return 0
+}
+
+configure_hours() {
+  local choice
+  choice=$(node "$DIR/scripts/lib/prompt-cli.js" select \
+    --title "A che ora apre e chiude il negozio?" \
+    --subtitle "Nelle ore scelte l'automazione segue i corsi; fuori si mette in pausa da sola." \
+    --default 1 -- \
+    "09:00 – 20:00 con pausa 13:00-16:00 — il più comune" \
+    "09:00 – 18:00 senza pausa" \
+    "Solo mattina — 09:00 – 13:00" \
+    "Solo pomeriggio — 16:00 – 20:00" \
+    "Altro orario — lo scelgo con le frecce" 2>/dev/null || echo 1)
+  case "$choice" in
     2) SHIFT_SPECS=("9,0,18,0") ;;
     3) SHIFT_SPECS=("9,0,13,0") ;;
-    4) SHIFT_SPECS=("14,0,18,0") ;;
-    5) SHIFT_SPECS=() ;;
-    *) SHIFT_SPECS=("9,0,13,0" "16,0,20,0") ;;   # cancel/EOF → default
+    4) SHIFT_SPECS=("16,0,20,0") ;;
+    5) configure_hours_custom ;;
+    *) SHIFT_SPECS=("9,0,13,0" "16,0,20,0") ;;
   esac
+  sort_shifts
+  if [ ${#SHIFT_SPECS} -eq 0 ]; then
+    warn "Nessun orario impostato: uso il più comune (09:00-13:00 e 16:00-20:00)."
+    SHIFT_SPECS=("9,0,13,0" "16,0,20,0")
+  fi
+  ok "Orario: $(shifts_human_summary)"
+  return 0
+}
 
-  # Editor interattivo dei turni: la LISTA è il menu — ogni turno inserito è una
+configure_hours_custom() {
+  local open close pause pstart pend
+  while true; do
+    open=$(ask_time "A che ora apre?" "${LAST_OPEN:-09:00}" "Frecce ←→ per i minuti, ↑↓ per le ore")
+    close=$(ask_time "A che ora chiude?" "${LAST_CLOSE:-20:00}" "Deve essere dopo l'apertura")
+    pause=$(node "$DIR/scripts/lib/prompt-cli.js" select \
+      --title "C'è la pausa pranzo?" --default 1 -- \
+      "Sì, il negozio chiude a pranzo" \
+      "No, orario continuato" 2>/dev/null || echo 1)
+    pstart=""; pend=""
+    if [ "$pause" != "2" ]; then
+      pstart=$(ask_time "A che ora inizia la pausa?" "${LAST_PSTART:-13:00}" "Dentro l'orario di apertura")
+      pend=$(ask_time "A che ora riapre?" "${LAST_PEND:-16:00}" "Dentro l'orario di apertura")
+    fi
+    if shifts_from_store_hours "$open" "$close" "$pstart" "$pend"; then
+      LAST_OPEN="$open"; LAST_CLOSE="$close"; LAST_PSTART="$pstart"; LAST_PEND="$pend"
+      break
+    fi
+  done
+  # Chi ha bisogno di più di due fasce (raro) passa dall'editor avanzato.
+  local more
+  more=$(node "$DIR/scripts/lib/prompt-cli.js" select \
+    --title "Orario impostato: $(shifts_human_summary)" --default 1 -- \
+    "Va bene così" \
+    "Ho più di due fasce nella giornata — apri l'editor avanzato" 2>/dev/null || echo 1)
+  # if (non `[ … ] && cmd`): come ULTIMA istruzione di una funzione, un test
+  # falso ritorna non-zero e sotto `set -e` fa morire il setup in silenzio.
+  if [ "$more" = "2" ]; then
+    edit_shifts_advanced
+  fi
+  return 0
+}
+
+# Riepilogo parlato dei turni ("09:00-13:00 e 16:00-20:00").
+shifts_human_summary() {
+  local json="" spec
+  for spec in "$SHIFT_SPECS[@]"; do
+    [ -n "$json" ] && json+=","
+    json+="{\"startHour\":$(echo "$spec" | cut -d, -f1),\"startMin\":$(echo "$spec" | cut -d, -f2),\"endHour\":$(echo "$spec" | cut -d, -f3),\"endMin\":$(echo "$spec" | cut -d, -f4)}"
+  done
+  node -e "
+    const { describeShiftsHuman } = require('$DIR/src/lib/schedule-ui');
+    process.stdout.write(describeShiftsHuman(JSON.parse('[' + (process.argv[1] || '') + ']')));
+  " "$json" 2>/dev/null || echo "orario non disponibile"
+}
+
+# Anteprima settimanale: si VEDE quando lavora, prima di salvare.
+print_week_preview() {
+  local shifts_json="" spec
+  for spec in "$SHIFT_SPECS[@]"; do
+    [ -n "$shifts_json" ] && shifts_json+=","
+    shifts_json+="{\"startHour\":$(echo "$spec" | cut -d, -f1),\"startMin\":$(echo "$spec" | cut -d, -f2),\"endHour\":$(echo "$spec" | cut -d, -f3),\"endMin\":$(echo "$spec" | cut -d, -f4)}"
+  done
+  node -e "
+    const { renderWeekPreview } = require('$DIR/src/lib/schedule-ui');
+    const days = String(process.argv[1] || '').split(',').map(Number).filter((n) => !Number.isNaN(n));
+    const shifts = JSON.parse('[' + (process.argv[2] || '') + ']');
+    process.stdout.write(renderWeekPreview({ days, shifts }).join('\n'));
+  " "$DAYS_JSON" "$shifts_json" 2>/dev/null || true
+  echo ""
+}
+
+# Editor avanzato dei turni (fino a 4 fasce): resta per i casi particolari.
+edit_shifts_advanced() {
+  # Editor interattivo delle fasce: la LISTA è il menu — ogni turno inserito è una
   # voce selezionabile che ne riapre gli orari (prima la lista veniva stampata
   # sopra il menu e il clear-screen del menu a frecce la cancellava subito).
   local act ridx le def_start pick acts labels rlabels rpick idx
@@ -801,18 +911,23 @@ configure_shifts() {
   sort_shifts
 }
 
-# Loop di configurazione con validazione e conferma finale
+# Configurazione guidata: giorni → orario → anteprima e conferma. Ogni passo si
+# può rifare senza ricominciare da capo (CONFIG_STEP fa da segnaposto).
+CONFIG_STEP="days"
 while true; do
   if [ "$MODIFY" = true ]; then
-    echo ""
-    echo -e "${BOLD}Configurazione orari di lavoro${NC}"
-    echo ""
-    ui_kv "Account" "${BOLD}$MEMBER_NAME${NC} ${DIM}(CF: $ACTIVE_CF)${NC}"
-    ui_kv "Autologin" "$(mask_url "$AUTOLOGIN")"
-
-    step "Orari di lavoro"
-    configure_days
-    configure_shifts
+    if [ "$CONFIG_STEP" = "days" ]; then
+      echo ""
+      step "Quando lavora"
+      ui_kv "Collega" "${BOLD}$MEMBER_NAME${NC}"
+      ui_kv "Accesso al corso" "${GREEN}collegato al tuo nome ✓${NC}"
+      configure_days
+      CONFIG_STEP="hours"
+    fi
+    if [ "$CONFIG_STEP" = "hours" ]; then
+      configure_hours
+      CONFIG_STEP="confirm"
+    fi
 
     # Costruisci JSON shifts su una sola riga (JSON non richiede a capo; evita problemi di
     # escaping di \n in zsh, che lascerebbe backslash-n letterali rendendo il file non valido).
@@ -841,25 +956,39 @@ while true; do
 
     echo ""
     ui_hr
-    echo -e " ${BOLD}Riepilogo configurazione${NC}"
+    echo -e " ${BOLD}Ecco come lavorerà${NC}"
     ui_hr
-    ui_kv "Membro" "${BOLD}$MEMBER_NAME${NC} ${DIM}(CF: $ACTIVE_CF)${NC}"
-    ui_kv "Autologin" "$(mask_url "$AUTOLOGIN")"
-    ui_kv "Giorni" "$(days_human "$DAYS_JSON")"
-    ui_kv "Turni" "$shifts_summary"
-    ui_kv "Modello Cloud" "${OLLAMA_MODEL:-gemma4:31b-cloud}"
-    ui_kv "Issue" "${DIM}segnalazione bug al maintainer attiva${NC}"
+    ui_kv "Collega" "${BOLD}$MEMBER_NAME${NC}"
+    ui_kv "Accesso al corso" "${GREEN}collegato al tuo nome ✓${NC}"
+    ui_kv "Giorni" "$(node -e "
+      const { describeDaysHuman } = require('$DIR/src/lib/schedule-ui');
+      process.stdout.write(describeDaysHuman(String(process.argv[1]||'').split(',').map(Number)));
+    " "$DAYS_JSON" 2>/dev/null || days_human "$DAYS_JSON")"
+    ui_kv "Orario" "$(shifts_human_summary)"
     ui_hr
+    echo ""
+    # Anteprima: vedere la settimana rassicura più che rileggere una lista di orari.
+    print_week_preview
+    info "Fuori da queste ore si mette in pausa da sola e riprende al turno dopo."
     echo ""
 
     if [ "$AUTO_YES" = true ]; then
-      REPLY="y"
+      CONFIRM_PICK=1
     else
-      read -q "REPLY?Confermi? [y/N] "
-      echo ""
+      CONFIRM_PICK=$(node "$DIR/scripts/lib/prompt-cli.js" select \
+        --title "Va bene così?" --default 1 -- \
+        "Sì, salva e vai" \
+        "Cambio l'orario" \
+        "Cambio i giorni" 2>/dev/null || echo 1)
     fi
 
-    if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+    case "$CONFIRM_PICK" in
+      2) CONFIG_STEP="hours"; continue ;;
+      3) CONFIG_STEP="days"; continue ;;
+      *) : ;;   # 1 / annullato → salva
+    esac
+
+    if true; then
       # Guardia: senza autologin NON scriviamo (scrivere stringhe vuote
       # cancellerebbe l'account di chi stava solo cambiando gli orari).
       if [ -z "$AUTOLOGIN" ]; then
@@ -956,13 +1085,10 @@ EOF
       if [ -n "$ACTIVE_CF" ]; then
         node "$MEMBERS_CLI" migrate-legacy 2>/dev/null && ok "Stato migrato in data/accounts/$ACTIVE_CF/"
       fi
-      ok "Autologin: $(mask_url "$AUTOLOGIN")"
+      ok "Accesso al corso: collegato al tuo nome"
       ok "Giorni: $(days_human "$DAYS_JSON")"
-      ok "Turni: $shifts_summary"
+      ok "Orario: $shifts_summary"
       break
-    else
-      warn "Ricominciamo l'inserimento."
-      echo ""
     fi
   else
     ok "Configurazione esistente confermata."

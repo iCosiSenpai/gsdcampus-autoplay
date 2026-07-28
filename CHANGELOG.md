@@ -7,6 +7,12 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-28
 
+- **Prima configurazione senza tastiera**: niente più orari da scrivere né numeri dei giorni. I giorni si spuntano con la barra spaziatrice, l'orario si sceglie tra modelli pronti ("09:00–20:00 con pausa 13:00-16:00", il più comune) e con "Altro orario" si sposta l'ora con le frecce (←→ 15 minuti, ↑↓ un'ora).
+- Il setup chiede l'**orario del negozio** — apre, chiude, pausa pranzo — invece di parlare di "turni": le fasce le calcola lui.
+- **Anteprima della settimana** prima di salvare: si vede disegnato quando lavora e quando è chiuso. Se qualcosa non torna, "Cambio l'orario" o "Cambio i giorni" rifà solo quel passo invece di ricominciare.
+- **"Chi sei?" in una schermata**: si scrivono due lettere del cognome e l'elenco si restringe; se il Mac è già configurato la prima voce è "Continua come <nome>". Codice fiscale, link da incollare e import CSV sono finiti sotto "Non mi trovo nell'elenco…".
+- Via il gergo dalle schermate: niente codice fiscale nei riepiloghi, niente indirizzo di accesso (ora dice "collegato al tuo nome ✓"), e la richiesta della password del Mac è spiegata a parole.
+
 - **Plancia in stile Pac-Man**: la barra dell'avanzamento ora prende tutta la larghezza della finestra e ha un vero Pac-Man giallo che mastica (bocca spalancata → media → chiusa, come nel gioco) mentre mangia le pastiglie. I corsi in attesa di risposte diventano **fantasmini** in coda, coi colori dei quattro originali. Muri del labirinto blu, pastiglie bianche, tasti in giallo, e la mascotte nell'intestazione di tutti i comandi.
 
 - **Corsi bloccati sbloccati**: la stessa lezione vive su due indirizzi (elenco e riproduttore) e le lezioni "asincrone" erano invisibili all'automazione. Aprendo una lezione la piattaforma dice "Completa l'attività corrente" e porta su quella asincrona: il programma guardava quel video (20+ minuti) ma poi controllava la lezione sbagliata, che restava a 0% — tre tentativi a vuoto e corso fermo. Ora segue la lezione giusta, la porta a termine e riprende quella che voleva aprire.

@@ -40,20 +40,52 @@ Se il comando corto non dovesse funzionare, l'equivalente completo è:
 
 Il Terminale ti farà qualche domanda. Rispondi con calma, è tutto normale:
 
-- **Password del Mac** — quella che usi per accendere il computer. Te la chiede una volta sola.
+- **Password del Mac** — quella che usi per accendere il computer. Te la chiede una volta sola e non viene salvata.
 - Se chiede di **installare o aggiornare** qualcosa → rispondi **sì**.
-- **"Chi sei?"** — scegli il tuo nome dall'elenco che compare (frecce ↑ ↓ e **Invio**). Non devi incollare nessun link: è già tutto collegato al tuo nome.
-- **Giorni e orari** dello store — scegli una modalità pronta o personalizza:
+- **"Chi sei?"** — scrivi due lettere del tuo cognome e l'elenco si restringe: frecce ↑ ↓ e **Invio** per scegliere il tuo nome. Non devi incollare nessun link, è già collegato al tuo nome. Se il Mac era già configurato, la prima voce è *"Continua come <il tuo nome>"*: basta **Invio**.
+- **Giorni di apertura** — una lista da spuntare con la **barra spaziatrice** (lunedì-venerdì sono già spuntati):
 
-  | Modalità | Esempio |
-  |----------|---------|
-  | Continuato | 09:00–18:00 |
-  | Solo mattina | 09:00–13:00 |
-  | Solo pomeriggio | 14:00–18:00 |
-  | Classico | 09:30–13:00 e 16:30–20:00 |
-  | Personalizzato | fino a 3 turni a scelta |
+```
+   In quali giorni è aperto il negozio?
+ ▌  [x]  lunedì      [x] martedì   [x] mercoledì
+    [x]  giovedì     [x] venerdì   [ ] sabato    [ ] domenica
+```
 
-Fatto questo, parte da solo. Le volte successive queste domande non ricompaiono.
+- **Orario del negozio** — scegli l'orario già pronto che ti somiglia:
+
+```
+   A che ora apre e chiude il negozio?
+ ▌  01  09:00 – 20:00 con pausa 13:00-16:00   il più comune
+    02  09:00 – 18:00 senza pausa
+    03  Solo mattina — 09:00 – 13:00
+    04  Solo pomeriggio — 16:00 – 20:00
+    05  Altro orario — lo scelgo con le frecce
+```
+
+  Con **"Altro orario"** non devi scrivere niente: l'ora si sposta con le frecce (←→ quindici minuti, ↑↓ un'ora) e poi ti chiede se c'è la pausa pranzo.
+
+```
+   A che ora apre?
+
+         ‹   08:30   ›
+
+   ←→ 15 minuti   ↑↓ un'ora   INVIO confermo
+```
+
+- **Un'ultima occhiata** — prima di salvare vedi la tua settimana disegnata, e se qualcosa non torna cambi solo quel pezzo:
+
+```
+  Giorni             lunedì, martedì, mercoledì, giovedì, venerdì e sabato
+  Orario             08:30-13:00 e 16:00-19:30
+
+        07  09  11  13  15  17  19
+  lun   ···█████████······███████···
+  ...
+  dom   chiuso
+
+   Va bene così?
+ ▌  01  Sì, salva e vai      02  Cambio l'orario      03  Cambio i giorni
+```
 
 ---
 

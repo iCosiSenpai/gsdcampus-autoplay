@@ -136,7 +136,7 @@ function updateConfigForAccount(result) {
 // TUI helpers (menu a frecce, lettura riga) condivisi con gli script shell via
 // wrapper CLI. Estratti in scripts/lib/prompt-cli.js.
 const {
-  ttyMenu, numericMenu, menu,
+  ttyMenu, numericMenu, menu, filterMenu,
   readLine, readLineTTY, closeLineReader,
   clearScreen, printBox,
 } = require(path.join(__dirname, 'prompt-cli'));
@@ -165,6 +165,47 @@ async function pickMemberFromList(listOut, title) {
   const pick = await menu(items, title, '↑/↓ muovi · Invio seleziona · q annulla');
   if (!pick || pick.value == null) return null;
   return pick.value;
+}
+
+// Elenco completo pronto per la ricerca incrementale: una schermata sola invece
+// di menu → digita → lista → conferma.
+function membersForPicker() {
+  const out = execMembersCli(['list']);
+  if (!out || /Nessun membro/i.test(out)) return [];
+  return out
+    .split('\n')
+    .map((line) => {
+      const m = line.match(/^\s*(\d+)\)\s*(.+)$/);
+      if (!m) return null;
+      // Nasconde il codice fiscale dall'etichetta: all'utente non serve.
+      const label = m[2].replace(/\s*[—-]\s*[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]\s*$/, '').trim();
+      return { label: label || m[2].trim(), value: parseInt(m[1], 10) };
+    })
+    .filter(Boolean);
+}
+
+// Trova il nome scrivendo qualche lettera del cognome. Ritorna il risultato di
+// members-cli select, oppure null se si torna indietro.
+async function pickMemberByTyping() {
+  const items = membersForPicker();
+  if (items.length === 0) {
+    console.log('Elenco dei colleghi non disponibile su questo Mac.');
+    return null;
+  }
+  while (true) {
+    const chosen = await filterMenu(items, 'Come ti chiami?');
+    if (!chosen || chosen.value == null) return null;
+    const json = execMembersCliJson(['select', String(chosen.value)]);
+    if (json && validAutologin(json.autologin_url) && json.codice_fiscale) {
+      return {
+        action: 'select',
+        codice_fiscale: json.codice_fiscale,
+        autologinUrl: json.autologin_url,
+        memberName: [json.nome, json.cognome].filter(Boolean).join(' ').trim(),
+      };
+    }
+    console.log('Quel nominativo non ha un accesso valido. Prova con un altro o chiedi al referente.');
+  }
 }
 
 async function searchAndSelectMember(mode) {
@@ -281,11 +322,11 @@ async function main() {
 
   let subtitle = '';
   if (currentName && currentCf) {
-    subtitle = `Account attuale: ${currentName} (CF: ${currentCf})`;
+    subtitle = `Su questo Mac è configurato: ${currentName}`;
   } else if (currentUrl && validAutologin(currentUrl)) {
-    subtitle = `Account attuale: ${maskUrl(currentUrl)}`;
+    subtitle = 'Su questo Mac c\'è già un accesso configurato.';
   } else {
-    subtitle = 'Nessun account configurato.';
+    subtitle = 'Scegli il tuo nome: il collegamento al corso è già pronto.';
   }
 
   // Se --yes è attivo via env, mantieni l'account attuale se valido
@@ -317,35 +358,37 @@ async function main() {
       if (fs.existsSync(defCsv)) {
         importLabel = 'Importa elenco membri (CSV trovato in ~/Downloads)';
       }
-      menuSubtitle = 'Nessun elenco membri presente su questo Mac.\n' +
-        'Per scegliere il tuo account: importa il CSV dell\'elenco (se lo hai), ' +
-        'oppure incolla il tuo link di autologin personale.';
+      menuSubtitle = 'Su questo Mac non c\'è l\'elenco dei colleghi.\n' +
+        'Puoi caricarlo da un file CSV, oppure incollare il link di accesso che ti ha dato il referente.';
       items = [
         { label: importLabel, value: 'import' },
-        { label: 'Inserisci autologin manualmente (incolla il tuo link)', value: 'manual' }
+        { label: 'Ho un link di accesso dal referente — lo incollo', value: 'manual' }
       ];
       if (currentUrl && validAutologin(currentUrl)) {
-        items.push({ label: 'Mantieni account attuale', value: 'keep' });
+        items.push({ label: 'Continua come chi è già configurato', value: 'keep' });
       }
-      items.push({ label: 'Annulla', value: 'cancel' });
+      items.push({ label: 'Esci senza cambiare niente', value: 'cancel' });
     } else {
-      items = [
-        { label: 'Cerca per codice fiscale', value: 'cf' },
-        { label: 'Cerca per nome e cognome', value: 'name' },
-        { label: 'Mostra lista completa membri', value: 'list' },
-        { label: 'Inserisci autologin manualmente', value: 'manual' }
-      ];
+      // Voce più utile in cima: nel rilancio tipico si continua con lo stesso
+      // collega. Le strade "da tecnico" (codice fiscale, link incollato a mano,
+      // import CSV) stanno sotto "Non mi trovo…", dove non si sbaglia per caso.
+      items = [];
       if (currentUrl && validAutologin(currentUrl)) {
-        items.push({ label: 'Mantieni account attuale', value: 'keep' });
+        const who = currentName || 'il collega già configurato';
+        items.push({ label: `Continua come ${who} — è già configurato su questo Mac`, value: 'keep' });
+        items.push({ label: 'Sono un altro collega — cerco il mio nome', value: 'find' });
+      } else {
+        items.push({ label: 'Trova il mio nome nell\'elenco', value: 'find' });
       }
-      items.push({ label: 'Annulla', value: 'cancel' });
+      items.push({ label: 'Non mi trovo nell\'elenco…', value: 'help' });
+      items.push({ label: 'Esci senza cambiare niente', value: 'cancel' });
     }
 
     const choice = await menu(items, 'CHI SEI?', menuSubtitle);
     if (!choice || choice.value === 'cancel') return { action: 'cancel' };
 
     if (choice.value === 'keep') {
-      console.error('Account attuale confermato.');
+      console.error(`Bentornato ${currentName || ''}`.trim() + '.');
       return { action: 'keep' };
     }
 
@@ -355,8 +398,29 @@ async function main() {
       continue; // ridisegna il menu (dbCount aggiornato dopo l'import)
     }
 
+    if (choice.value === 'help') {
+      const alt = await menu([
+        { label: 'Cerca per codice fiscale', value: 'cf' },
+        { label: 'Ho un link di accesso dal referente — lo incollo', value: 'manual' },
+        { label: 'Aggiorna l\'elenco dei colleghi da un file CSV', value: 'import' },
+        { label: 'Torna indietro', value: 'back' },
+      ], 'Non ti trovi nell\'elenco?', 'Se il tuo nome non c\'è, avvisa il referente: aggiorna lui l\'elenco per tutti.');
+      if (!alt || alt.value === 'back') continue;
+      if (alt.value === 'import') {
+        const done = await importMembersCsv();
+        if (!done) console.error('Import non riuscito. Torno al menu principale.');
+        continue;
+      }
+      const res = alt.value === 'cf' ? await searchAndSelectMember('cf') : await manualAutologin();
+      if (!res) continue;
+      if (!updateConfigForAccount(res)) return { action: 'cancel', reason: 'Impossibile salvare config.json' };
+      console.error(`Ciao ${res.memberName} — da adesso seguo i tuoi corsi.`);
+      return res;
+    }
+
     let result = null;
     switch (choice.value) {
+      case 'find': result = await pickMemberByTyping(); break;
       case 'cf': result = await searchAndSelectMember('cf'); break;
       case 'name': result = await searchAndSelectMember('name'); break;
       case 'list': result = await listAndSelectMember(); break;
@@ -372,7 +436,7 @@ async function main() {
       if (!updateConfigForAccount(result)) {
         return { action: 'cancel', reason: 'Impossibile salvare config.json' };
       }
-      console.error(`Account selezionato: ${result.memberName} (CF: ${result.codice_fiscale})`);
+      console.error(`Ciao ${result.memberName} — da adesso seguo i tuoi corsi.`);
     }
     return result;
   }

@@ -331,6 +331,289 @@ function readLineTTY(question) {
   });
 }
 
+// ────────────────────────────────────────────────────────────────
+// Orologio a frecce: nessun orario da digitare
+// ────────────────────────────────────────────────────────────────
+// Prima gli orari si scrivevano a mano e in caso di errore comparivano i
+// formati accettati del parser ("H, HH, HH:MM, HH.MM, HHMM"): documentazione
+// tecnica al posto di una domanda. Qui l'orario si sposta con le frecce:
+// ←/→ 15 minuti, ↑/↓ un'ora. Impossibile scrivere qualcosa di non valido.
+const TIME_STEP_MIN = 15;
+
+/** Somma minuti restando dentro la giornata (0:00–23:59, con giro). Pure. */
+function stepMinutes(total, delta) {
+  const n = Math.round(Number(total) || 0) + Math.round(Number(delta) || 0);
+  return ((n % 1440) + 1440) % 1440;
+}
+
+/** minuti → "HH:MM". Pure. */
+function formatMinutes(total) {
+  const t = ((Math.round(Number(total) || 0) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+}
+
+/** "9", "9:30", "9.30", "0930" → minuti; null se non interpretabile. Pure. */
+function parseTimeToMinutes(text) {
+  const t = String(text == null ? '' : text).trim();
+  if (!t) return null;
+  let m = t.match(/^(\d{1,2})[:.](\d{2})$/);
+  if (m) {
+    const h = Number(m[1]); const mi = Number(m[2]);
+    return (h <= 23 && mi <= 59) ? h * 60 + mi : null;
+  }
+  m = t.match(/^(\d{1,2})$/);
+  if (m) return Number(m[1]) <= 23 ? Number(m[1]) * 60 : null;
+  m = t.match(/^(\d{3,4})$/);
+  if (m) {
+    const p = t.padStart(4, '0');
+    const h = Number(p.slice(0, 2)); const mi = Number(p.slice(2));
+    return (h <= 23 && mi <= 59) ? h * 60 + mi : null;
+  }
+  return null;
+}
+
+function drawTimeScreen(title, subtitle, minutes, hint) {
+  const layout = menuLayout(3, false);
+  clearScreen();
+  for (let i = 0; i < layout.top; i++) console.log('');
+  printMenuHeading(layout, title, subtitle, false);
+  console.log('');
+  const big = `${UI.accent}‹${UI.reset}   ${UI.bold}${formatMinutes(minutes)}${UI.reset}   ${UI.accent}›${UI.reset}`;
+  console.log(`${layout.indent}      ${big}`);
+  console.log('');
+  console.log(`${layout.indent}${UI.dim}${'─'.repeat(layout.inner)}${UI.reset}`);
+  console.log(`${layout.indent}${UI.accent}←→${UI.reset} ${UI.dim}${TIME_STEP_MIN} minuti${UI.reset}   ${UI.accent}↑↓${UI.reset} ${UI.dim}un'ora${UI.reset}   ${UI.accent}INVIO${UI.reset} ${UI.dim}confermo${UI.reset}`);
+  if (hint) console.log(`${layout.indent}${UI.dim}${hint}${UI.reset}`);
+}
+
+/**
+ * Selettore orario. Ritorna i minuti scelti (o il default se si annulla), così
+ * il chiamante ha SEMPRE un valore valido.
+ */
+function timeMenu(title, subtitle, defaultMinutes, hint) {
+  const start = Number.isFinite(defaultMinutes) ? stepMinutes(defaultMinutes, 0) : 9 * 60;
+  if (!process.stdin.isTTY) {
+    return readLine(`${title} [${formatMinutes(start)}]: `).then((answer) => {
+      const parsed = parseTimeToMinutes(answer);
+      return parsed == null ? start : parsed;
+    });
+  }
+  return new Promise((resolve) => {
+    let value = start;
+    const openedAt = Date.now();
+    drainPendingStdin();
+    readline.emitKeypressEvents(process.stdin);
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
+    const cleanup = () => {
+      process.stdin.removeListener('keypress', onKey);
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+    };
+    function onKey(str, key) {
+      if (!key) return;
+      if (Date.now() - openedAt < 150 && !(key.ctrl && key.name === 'c')) return;
+      if (key.ctrl && key.name === 'c') { cleanup(); resolve(start); return; }
+      switch (key.name) {
+        case 'right': value = stepMinutes(value, TIME_STEP_MIN); break;
+        case 'left': value = stepMinutes(value, -TIME_STEP_MIN); break;
+        case 'up': value = stepMinutes(value, 60); break;
+        case 'down': value = stepMinutes(value, -60); break;
+        case 'return': case 'enter': cleanup(); resolve(value); return;
+        case 'q': case 'escape': cleanup(); resolve(start); return;
+        default: return;
+      }
+      drawTimeScreen(title, subtitle, value, hint);
+    }
+    process.stdin.on('keypress', onKey);
+    drawTimeScreen(title, subtitle, value, hint);
+  });
+}
+
+// ────────────────────────────────────────────────────────────────
+// Lista da spuntare: i giorni non si scrivono più a numeri
+// ────────────────────────────────────────────────────────────────
+/** Attiva/disattiva un indice in una selezione. Pure. */
+function toggleSelection(selected, index) {
+  const set = new Set(selected);
+  if (set.has(index)) set.delete(index);
+  else set.add(index);
+  return [...set].sort((a, b) => a - b);
+}
+
+function drawCheckScreen(items, title, subtitle, selected, cursor) {
+  const layout = menuLayout(items.length, false);
+  clearScreen();
+  for (let i = 0; i < layout.top; i++) console.log('');
+  printMenuHeading(layout, title, subtitle, false);
+  console.log('');
+  items.forEach((item, i) => {
+    const on = selected.includes(i);
+    const active = i === cursor;
+    const marker = active ? `${UI.accent}▌${UI.reset}` : ' ';
+    const box = on ? `${UI.green}${UI.bold}[x]${UI.reset}` : `${UI.dim}[ ]${UI.reset}`;
+    const label = active ? `${UI.bold}${item}${UI.reset}` : (on ? item : `${UI.dim}${item}${UI.reset}`);
+    console.log(`${layout.indent}${marker}  ${box}  ${label}`);
+  });
+  console.log('');
+  console.log(`${layout.indent}${UI.dim}${'─'.repeat(layout.inner)}${UI.reset}`);
+  console.log(`${layout.indent}${UI.accent}↑↓${UI.reset} ${UI.dim}muovi${UI.reset}   ${UI.accent}SPAZIO${UI.reset} ${UI.dim}spunta${UI.reset}   ${UI.accent}INVIO${UI.reset} ${UI.dim}confermo${UI.reset}`);
+}
+
+/**
+ * Lista con caselle da spuntare. Ritorna gli indici selezionati (0-based);
+ * se si annulla o non si seleziona nulla, torna la preselezione.
+ */
+function checkMenu(items, title, subtitle, preselected = []) {
+  const initial = [...new Set(preselected.filter((i) => i >= 0 && i < items.length))].sort((a, b) => a - b);
+  if (!process.stdin.isTTY) {
+    items.forEach((it, i) => console.log(`  [${i + 1}] ${it}`));
+    return readLine('Numeri separati da virgola (Invio = come proposto): ').then((answer) => {
+      const picked = String(answer || '').split(',')
+        .map((x) => parseInt(String(x).trim(), 10) - 1)
+        .filter((i) => Number.isInteger(i) && i >= 0 && i < items.length);
+      return picked.length ? [...new Set(picked)].sort((a, b) => a - b) : initial;
+    });
+  }
+  return new Promise((resolve) => {
+    let selected = initial;
+    let cursor = initial.length ? initial[0] : 0;
+    const openedAt = Date.now();
+    drainPendingStdin();
+    readline.emitKeypressEvents(process.stdin);
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
+    const cleanup = () => {
+      process.stdin.removeListener('keypress', onKey);
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+    };
+    function onKey(str, key) {
+      if (!key) return;
+      if (Date.now() - openedAt < 150 && !(key.ctrl && key.name === 'c')) return;
+      if (key.ctrl && key.name === 'c') { cleanup(); resolve(initial); return; }
+      if (key.name === 'up') cursor = (cursor - 1 + items.length) % items.length;
+      else if (key.name === 'down') cursor = (cursor + 1) % items.length;
+      else if (key.name === 'space') selected = toggleSelection(selected, cursor);
+      else if (str === 'a' || str === 'A') selected = items.map((_, i) => i);
+      else if (str === 'n' || str === 'N') selected = [];
+      else if (key.name === 'return' || key.name === 'enter') {
+        cleanup();
+        resolve(selected.length ? selected : initial);
+        return;
+      } else if (key.name === 'q' || key.name === 'escape') { cleanup(); resolve(initial); return; }
+      else return;
+      drawCheckScreen(items, title, subtitle, selected, cursor);
+    }
+    process.stdin.on('keypress', onKey);
+    drawCheckScreen(items, title, subtitle, selected, cursor);
+  });
+}
+
+// ────────────────────────────────────────────────────────────────
+// Ricerca incrementale: una schermata sola per trovarsi nell'elenco
+// ────────────────────────────────────────────────────────────────
+/** Normalizza per confronti tolleranti (accenti, maiuscole, spazi). Pure. */
+function normalizeForFilter(text) {
+  return String(text == null ? '' : text)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Filtra le voci: tutte le parole digitate devono comparire (in qualsiasi
+ * ordine), così "rossi mar" trova "MARIO ROSSI". Pure.
+ */
+function filterItems(items, query) {
+  const words = normalizeForFilter(query).split(' ').filter(Boolean);
+  if (words.length === 0) return items.slice();
+  return items.filter((it) => {
+    const hay = normalizeForFilter(typeof it === 'string' ? it : it.label);
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+function drawFilterScreen(all, title, query, visible, cursor, maxRows) {
+  const layout = menuLayout(Math.min(visible.length, maxRows) + 2, false);
+  clearScreen();
+  for (let i = 0; i < layout.top; i++) console.log('');
+  const sub = `Scrivi qualche lettera del tuo cognome · ${visible.length} di ${all.length}`;
+  printMenuHeading(layout, title, sub, false);
+  console.log('');
+  const caret = `${UI.accent}▏${UI.reset}`;
+  console.log(`${layout.indent}  ${UI.dim}cerca:${UI.reset} ${UI.bold}${query || ''}${UI.reset}${caret}`);
+  console.log('');
+  if (visible.length === 0) {
+    console.log(`${layout.indent}  ${UI.dim}(nessun nome corrisponde: cancella con il tasto ⌫)${UI.reset}`);
+  } else {
+    const start = Math.max(0, Math.min(cursor - Math.floor(maxRows / 2), visible.length - maxRows));
+    const slice = visible.slice(Math.max(0, start), Math.max(0, start) + maxRows);
+    slice.forEach((item, idx) => {
+      const i = Math.max(0, start) + idx;
+      const active = i === cursor;
+      const label = typeof item === 'string' ? item : item.label;
+      const marker = active ? `${UI.accent}▌${UI.reset}` : ' ';
+      console.log(`${layout.indent}${marker}  ${active ? UI.bold + label + UI.reset : label}`);
+    });
+    if (visible.length > maxRows) {
+      console.log(`${layout.indent}   ${UI.dim}… altri ${visible.length - maxRows} nomi: continua a scrivere${UI.reset}`);
+    }
+  }
+  console.log('');
+  console.log(`${layout.indent}${UI.dim}${'─'.repeat(layout.inner)}${UI.reset}`);
+  console.log(`${layout.indent}${UI.accent}↑↓${UI.reset} ${UI.dim}muovi${UI.reset}   ${UI.accent}INVIO${UI.reset} ${UI.dim}sono io${UI.reset}   ${UI.accent}⌫${UI.reset} ${UI.dim}cancella${UI.reset}   ${UI.accent}ESC${UI.reset} ${UI.dim}torno indietro${UI.reset}`);
+}
+
+/**
+ * Elenco con filtro mentre si scrive. Ritorna la voce scelta oppure null.
+ * @param {Array<{label:string, value:any}|string>} items
+ */
+function filterMenu(items, title) {
+  if (!process.stdin.isTTY) {
+    return numericMenu(items, title, '');
+  }
+  const maxRows = Math.max(5, Math.min(12, (Number(process.stdout.rows) || 24) - 12));
+  return new Promise((resolve) => {
+    let query = '';
+    let visible = items.slice();
+    let cursor = 0;
+    const openedAt = Date.now();
+    drainPendingStdin();
+    readline.emitKeypressEvents(process.stdin);
+    if (process.stdin.isTTY) process.stdin.setRawMode(true);
+    process.stdin.resume();
+    const cleanup = () => {
+      process.stdin.removeListener('keypress', onKey);
+      if (process.stdin.isTTY) process.stdin.setRawMode(false);
+    };
+    const redraw = () => drawFilterScreen(items, title, query, visible, cursor, maxRows);
+    function onKey(str, key) {
+      if (!key) return;
+      if (Date.now() - openedAt < 150 && !(key.ctrl && key.name === 'c')) return;
+      if (key.ctrl && key.name === 'c') { cleanup(); resolve(null); return; }
+      if (key.name === 'escape') { cleanup(); resolve(null); return; }
+      if (key.name === 'return' || key.name === 'enter') {
+        if (visible.length === 0) return;
+        cleanup();
+        resolve(visible[Math.max(0, Math.min(cursor, visible.length - 1))]);
+        return;
+      }
+      if (key.name === 'up') cursor = Math.max(0, cursor - 1);
+      else if (key.name === 'down') cursor = Math.min(visible.length - 1, cursor + 1);
+      else if (key.name === 'backspace') {
+        query = query.slice(0, -1);
+        visible = filterItems(items, query);
+        cursor = 0;
+      } else if (str && !key.ctrl && !key.meta && str.length === 1 && str >= ' ') {
+        query += str;
+        visible = filterItems(items, query);
+        cursor = 0;
+      } else return;
+      redraw();
+    }
+    process.stdin.on('keypress', onKey);
+    redraw();
+  });
+}
+
 // Reader di linee robusto per stdin pipe/TTY. Legge linee complete, bufferizza
 // l'input residuo e risolve ogni Promise in ordine.
 let inputBuffer = '';
@@ -437,6 +720,10 @@ module.exports = {
   clearScreen, printBox,
   ttyMenu, numericMenu, menu,
   readLine, readLineTTY, closeLineReader,
+  // Widget nuovi (setup guidato) + helper puri usati dai test.
+  timeMenu, checkMenu, filterMenu,
+  stepMinutes, formatMinutes, parseTimeToMinutes, toggleSelection,
+  filterItems, normalizeForFilter, TIME_STEP_MIN,
 };
 
 // ────────────────────────────────────────────────────────────────
@@ -468,6 +755,49 @@ function parseArgs(argv) {
   return { title, subtitle, defaultN, brand, items };
 }
 
+// Sottocomandi per gli script shell (setup.sh):
+//   time  --title T [--subtitle S] [--default 09:00] [--hint "..."]  -> stdout "HH:MM"
+//   check --title T [--subtitle S] [--default 1,2,3] -- voce1 voce2   -> stdout "1,3"
+// Entrambi scrivono il MENU su /dev/tty e solo il risultato su stdout, come
+// `select`; exit sempre 0 (gli script girano in set -e).
+async function cliTime(realStdoutWrite) {
+  const { title, subtitle, defaultRaw, hint } = (() => {
+    const args = process.argv.slice(3);
+    const get = (flag, def = '') => {
+      const i = args.indexOf(flag);
+      return i > -1 && args[i + 1] ? args[i + 1] : def;
+    };
+    return {
+      title: get('--title', 'Orario'),
+      subtitle: get('--subtitle', ''),
+      defaultRaw: get('--default', '09:00'),
+      hint: get('--hint', ''),
+    };
+  })();
+  const def = parseTimeToMinutes(defaultRaw);
+  const value = await timeMenu(title, subtitle, def == null ? 9 * 60 : def, hint);
+  realStdoutWrite(`${formatMinutes(value)}\n`);
+}
+
+async function cliCheck(realStdoutWrite) {
+  const args = process.argv.slice(3);
+  const get = (flag, def = '') => {
+    const i = args.indexOf(flag);
+    return i > -1 && args[i + 1] ? args[i + 1] : def;
+  };
+  const sepIdx = args.indexOf('--');
+  const items = sepIdx > -1 ? args.slice(sepIdx + 1) : [];
+  const pre = String(get('--default', '')).split(',')
+    .map((x) => parseInt(String(x).trim(), 10) - 1)
+    .filter((i) => Number.isInteger(i) && i >= 0 && i < items.length);
+  if (items.length === 0) {
+    realStdoutWrite('\n');
+    return;
+  }
+  const picked = await checkMenu(items, get('--title', 'Scegli'), get('--subtitle', ''), pre);
+  realStdoutWrite(`${picked.map((i) => i + 1).join(',')}\n`);
+}
+
 async function cliMain() {
   // stdout è catturato da $() negli script shell: deve portare SOLO l'indice
   // finale. Il menu (clearScreen ANSI, cursori ▶, box, voci) va sul terminale
@@ -496,6 +826,18 @@ async function cliMain() {
     realStdoutWrite('0\n');
     process.exit(0);
   });
+
+  const sub = process.argv[2];
+  if (sub === 'time' || sub === 'check') {
+    try {
+      if (sub === 'time') await cliTime(realStdoutWrite);
+      else await cliCheck(realStdoutWrite);
+    } catch (_) {
+      realStdoutWrite('\n');
+    }
+    closeLineReader();
+    process.exit(0);
+  }
 
   const { title, subtitle, defaultN, brand, items } = parseArgs(process.argv);
   if (!items || items.length === 0) {
