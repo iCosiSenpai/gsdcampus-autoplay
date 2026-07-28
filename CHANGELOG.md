@@ -7,6 +7,11 @@ push rilevante; il box "Novità" mostra al massimo 10 righe.)
 
 ## 2026-07-28
 
+- **Corsi bloccati sbloccati**: le lezioni "asincrone" erano invisibili all'automazione. Aprendo una lezione la piattaforma dice "Completa l'attività corrente" e porta su quella asincrona: il programma guardava quel video (20+ minuti) ma poi controllava la lezione sbagliata, che restava a 0% — tre tentativi a vuoto e corso fermo. Ora segue la lezione giusta, la porta a termine e riprende quella che voleva aprire.
+- **Se chiudi Chrome per sbaglio** l'automazione lo dice in chiaro, riapre un browser e riprende dal punto salvato, invece di registrare un errore critico.
+- Il **checkup** avvisa se la cartella del progetto è stata spostata o rinominata: in quel caso i servizi in background morivano in silenzio (niente aggiornamenti, niente riavvio automatico).
+- Nel README c'è una sezione **"Ho toccato qualcosa per sbaglio"** con cosa succede e cosa fare per i casi più comuni (logout AI, Chrome chiuso, finestra chiusa, cartella spostata, Wi-Fi staccato).
+
 - **Modo A riparato**: il file "GSD Avvia" arriva ora come archivio e dentro c'è il file **già eseguibile**. Prima, scaricato dal browser, il doppio clic rispondeva "non hai i permessi necessari" e non partiva niente. Ogni doppio clic scarica l'ultima versione: aggiorna sempre.
 - **"Aggiorna e avvia" ora dice la verità**: se l'aggiornamento non parte (rete o proxy che bloccano GitHub) lo scrive a chiare lettere invece di stampare "Progetto aggiornato". A fine giro compare sempre l'esito reale: `Aggiornato: 964824c → 42a07aa` oppure `Già all'ultima versione (964824c)`.
 - Il **controllo rete prima dell'aggiornamento** non pretende più che rispondano *tutti* gli indirizzi di prova: su reti aziendali filtrate bastava un blocco per saltare l'aggiornamento in silenzio. Ora basta una risposta e il timeout è più tollerante (8s).

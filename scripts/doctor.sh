@@ -146,6 +146,23 @@ case "$AU_LINE" in
   *) chk_ok "Auto-aggiornamento: $AU_LINE" ;;
 esac
 
+# 7c. I LaunchAgent puntano ancora a QUESTA cartella? Se il progetto viene
+# spostato o rinominato, launchd continua a lanciare il vecchio percorso e i job
+# muoiono in silenzio (exit 127): niente auto-aggiornamento, niente watchdog.
+for _label in com.gsdcampus.autoplay.autoupdate com.gsdcampus.autoplay.keepalive; do
+  _plist="$HOME/Library/LaunchAgents/${_label}.plist"
+  _human="${_label##*.}"
+  if [ ! -f "$_plist" ]; then
+    continue   # assente: già segnalato altrove (auto-update) o disattivato per scelta
+  fi
+  if grep -c "$DIR/" "$_plist" >/dev/null 2>&1; then
+    chk_ok "Servizio in background '$_human' allineato a questa cartella"
+  else
+    chk_err "Servizio '$_human' punta a un'altra cartella (progetto spostato?)" \
+      "rilancia il comando curl, oppure: ./scripts/lib/install-launchd.sh install e ./scripts/lib/install-scheduler-agent.sh install"
+  fi
+done
+
 # 8. Probe selettori DOM (fixture offline): avvisa se il layout atteso dalla
 # piattaforma non matcha più i marker critici (quiz form, link corsi, …).
 if node "$DIR/scripts/lib/selector-probe.js" >/dev/null 2>&1; then

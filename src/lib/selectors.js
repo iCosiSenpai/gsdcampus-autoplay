@@ -16,7 +16,10 @@ const SELECTORS = {
     courseLinks: 'a[href*="/corso/show/"]',
   },
   course: {
-    lessonLinks: 'a[href*="/lezione/show/"]',
+    // Include le lezioni "asincrone": `[href*="/lezione/show/"]` NON matcha
+    // `/lezioneAsincrona/show/` (vedi src/lib/lesson-url.js), quindi quelle
+    // lezioni erano invisibili al runner e bloccavano il corso.
+    lessonLinks: 'a[href*="/lezione/show/"], a[href*="/lezioneAsincrona/show/"]',
     quizLinks: 'a[href*="/questionario/"]',
     usageForm: '#conferma_vincolo_orario_form',
   },

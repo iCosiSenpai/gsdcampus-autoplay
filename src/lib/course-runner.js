@@ -103,7 +103,9 @@ function createCourseRunner(deps) {
           return { href: a.href, pct: m ? parseFloat(m[1].replace(',', '.')) : null };
         });
       }, lessonSel);
-      const found = rows.find(r => r.href === lessonHref);
+      // Match per identità (famiglia + id): l'href sulla pagina corso può
+      // differire per host/query da quello su cui siamo finiti.
+      const found = rows.find(r => sameLesson(r.href, lessonHref));
       return found ? found.pct : null;
     } catch (e) {
       if (e instanceof SessionError) throw e; // propaga il drop, non inghiottirlo
@@ -115,6 +117,7 @@ function createCourseRunner(deps) {
     const emptyUrls = new Set();
     const stuckUrls = new Set(); // lezioni bloccate al <100% dopo 3 tentativi: saltate, non abbandonano il corso
     const lessonAttempts = new Map();
+    const redirectCounts = new Map(); // link chiesto -> volte in cui la piattaforma ci ha spostati altrove
     let missingPermissionCount = 0;
     let iter = 0;
 
@@ -259,9 +262,10 @@ function createCourseRunner(deps) {
       try {
         scoredLinks = await page.evaluate(() => {
           const allLinks = [...document.querySelectorAll('a')];
+          const isLesson = (href) => /\/lezione[A-Za-z]*\/show\/\d+/.test(href);
           const lessonOrQuiz = allLinks.filter(a => {
             const href = a.href || '';
-            return href.includes('/lezione/show/') || href.includes('/questionario/');
+            return isLesson(href) || href.includes('/questionario/');
           });
           let links = lessonOrQuiz.length > 0 ? lessonOrQuiz : [];
           // Fallback sui bottoni "Apri" se non abbiamo trovato href diretti.
@@ -276,7 +280,7 @@ function createCourseRunner(deps) {
             const pct = m ? parseFloat(m[1].replace(',', '.')) : 100;
             const href = a.href || '';
             const linkText = (a.innerText || '').trim();
-            const kind = /\/lezione\/show\//.test(href) ? 'lezione' : (/\/questionario\//.test(href) ? 'questionario' : 'altro');
+            const kind = isLesson(href) ? 'lezione' : (/\/questionario\//.test(href) ? 'questionario' : 'altro');
             return { href, text: text.slice(0, 120), linkText, kind, pct };
           });
         });
@@ -300,7 +304,7 @@ function createCourseRunner(deps) {
         const anchors = [...document.querySelectorAll('a')];
         const hasLessonOrQuiz = anchors.some(a => {
           const h = a.href || '';
-          return h.includes('/lezione/show/') || h.includes('/questionario/');
+          return /\/lezione[A-Za-z]*\/show\/\d+/.test(h) || h.includes('/questionario/');
         });
         if (hasLessonOrQuiz) return false;
         return anchors.some(a => /scarica\s+il\s+pdf|\.pdf|data:application\/pdf/i.test((a.href || '') + ' ' + (a.innerText || '')));
@@ -569,13 +573,37 @@ function createCourseRunner(deps) {
         throw new SessionError('Sessione caduta durante l\'apertura della lezione (pagina di login). Esco senza re-login per non degradare il token.');
       }
 
+      // ── Reindirizzamenti della piattaforma ─────────────────────────────────
+      // Aprendo una lezione si può finire su un'ALTRA lezione: la piattaforma
+      // mostra "Completa l'attività corrente prima di accedere a questo
+      // contenuto" e porta al cancello, tipicamente una /lezioneAsincrona/.
+      // Prima il runner guardava QUEL video (20+ minuti) ma poi verificava il
+      // progresso della lezione CHIESTA — sempre 0% — quindi 3 tentativi a
+      // vuoto e corso bloccato. Ora la lezione su cui lavoriamo è quella REALE.
+      const landedUrl = page.url();
+      let workHref = nextHref;
+      let redirected = false;
+      if (isLessonUrl(landedUrl) && !sameLesson(landedUrl, nextHref)) {
+        const seen = (redirectCounts.get(nextHref) || 0) + 1;
+        redirectCounts.set(nextHref, seen);
+        if (seen > 2) {
+          log(`Reindirizzato di nuovo da ${nextHref} a ${landedUrl} (${seen}ª volta): il cancello non si apre, salto questa lezione.`);
+          stuckUrls.add(nextHref);
+          continue;
+        }
+        workHref = landedUrl;
+        redirected = true;
+        log(`Reindirizzato da ${nextHref} a ${workHref}: la piattaforma chiede di completare prima questa attività. La seguo.`);
+        saveSession({ courseUrl, lessonUrl: workHref, phase: 'lesson' });
+      }
+
       const isQuizDashboard = await page.evaluate(() => {
         const btn = document.querySelector('a.btn-primary, button.btn-primary');
         return !!btn && btn.innerText.toLowerCase().includes('avvia compilazione');
       }).catch(() => false);
 
       if (isQuizDashboard) {
-        monitor.update({ phase: 'quiz_dashboard', lessonUrl: nextHref });
+        monitor.update({ phase: 'quiz_dashboard', lessonUrl: workHref });
         log('Dashboard Quiz...');
         const startUrl = await page.evaluate(() => {
           const btn = Array.from(document.querySelectorAll('a.btn-primary')).find(a => a.innerText.toLowerCase().includes('avvia compilazione'));
@@ -596,27 +624,32 @@ function createCourseRunner(deps) {
       // come contenuto generico.
       const isQuiz = await page.evaluate(() => !!document.querySelector('form h1, form h2, form h3, form h4, form h5')).catch(() => false);
       if (isQuiz) {
-        monitor.update({ phase: 'quiz', lessonUrl: nextHref });
+        monitor.update({ phase: 'quiz', lessonUrl: workHref });
         emptyUrls.clear();
-        await solveQuizWrapper(page, courseUrl, nextHref);
+        await solveQuizWrapper(page, courseUrl, workHref);
         continue;
       }
 
       const hasVideo = await page.evaluate(() => !!document.querySelector('video')).catch(() => false);
       if (hasVideo) {
-        monitor.update({ phase: 'video', lessonUrl: nextHref });
+        monitor.update({ phase: 'video', lessonUrl: workHref });
         emptyUrls.clear();
         await watchVideo(page, log, monitor, shiftCheck);
 
         // Verifica che la piattaforma abbia effettivamente registrato il progresso a 100%.
-        const lessonProgress = await getLessonProgressOnCoursePage(page, courseUrl, nextHref);
+        const lessonProgress = await getLessonProgressOnCoursePage(page, courseUrl, workHref);
         if (lessonProgress !== null && lessonProgress >= 99) {
-          log(`Lezione ${nextHref} verificata al ${lessonProgress}%: completata.`);
-          courseState.addCompletedLesson(ROOT, state, courseUrl, nextHref);
+          log(`Lezione ${workHref} verificata al ${lessonProgress}%: completata.`);
+          courseState.addCompletedLesson(ROOT, state, courseUrl, workHref);
+          if (redirected) {
+            // Cancello superato: la lezione che avevamo chiesto ora è raggiungibile.
+            log(`Attività bloccante completata: riprovo ${nextHref}.`);
+            emptyUrls.clear();
+          }
         } else {
-          const attempts = (lessonAttempts.get(nextHref) || 0) + 1;
-          lessonAttempts.set(nextHref, attempts);
-          log(`Lezione ${nextHref} non risulta completata sulla piattaforma (progresso: ${lessonProgress}%). Tentativo ${attempts}.`);
+          const attempts = (lessonAttempts.get(workHref) || 0) + 1;
+          lessonAttempts.set(workHref, attempts);
+          log(`Lezione ${workHref} non risulta completata sulla piattaforma (progresso: ${lessonProgress}%). Tentativo ${attempts}.`);
           if (attempts >= 3) {
             // NON abbandonare il corso per una singola lezione bloccata: la salto e
             // continuo con le altre lezioni dello STESSO corso (progressione
@@ -627,10 +660,13 @@ function createCourseRunner(deps) {
             // Le lezioni saltate sono ri-provate nel prossimo run scheduler
             // (stuckUrls è in-memory), così i race temporanei (piattaforma che
             // persiste il 100% in ritardo) si auto-risolvono.
-            log(`Lezione ${nextHref} bloccata a ${lessonProgress}% dopo 3 tentativi. La salto e continuo con le prossime lezioni del corso.`);
-            stuckUrls.add(nextHref);
+            log(`Lezione ${workHref} bloccata a ${lessonProgress}% dopo 3 tentativi. La salto e continuo con le prossime lezioni del corso.`);
+            stuckUrls.add(workHref);
+            // Se ci eravamo finiti per reindirizzamento, salta anche la lezione
+            // chiesta: senza il cancello aperto ci riporterebbe sempre qui.
+            if (redirected) stuckUrls.add(nextHref);
           } else {
-            emptyUrls.add(nextHref);
+            emptyUrls.add(redirected ? nextHref : workHref);
           }
         }
         continue;
@@ -638,27 +674,28 @@ function createCourseRunner(deps) {
 
       // Lezione senza <video>: PDF / testo / SCORM / bottone "completa".
       // Non loopare in silenzio: prova handler dedicati, poi skip o need_help.
-      const nonVideo = await handleNonVideoLesson(page, nextHref, log);
+      const nonVideo = await handleNonVideoLesson(page, workHref, log);
       if (nonVideo === 'completed') {
-        log(`Lezione non-video ${nextHref}: fruizione segnata (${nonVideo}).`);
+        log(`Lezione non-video ${workHref}: fruizione segnata (${nonVideo}).`);
         emptyUrls.clear();
-        courseState.addCompletedLesson(ROOT, state, courseUrl, nextHref);
+        courseState.addCompletedLesson(ROOT, state, courseUrl, workHref);
         continue;
       }
       if (nonVideo === 'pdf_ok') {
-        log(`Lezione PDF ${nextHref}: link scarica presente; marco localmente e proseguo.`);
+        log(`Lezione PDF ${workHref}: link scarica presente; marco localmente e proseguo.`);
         emptyUrls.clear();
-        courseState.addCompletedLesson(ROOT, state, courseUrl, nextHref);
+        courseState.addCompletedLesson(ROOT, state, courseUrl, workHref);
         continue;
       }
-      log(`Senza contenuto fruibile automaticamente (${nextHref}, kind=${nonVideo}).`);
-      const attempts = (lessonAttempts.get(nextHref) || 0) + 1;
-      lessonAttempts.set(nextHref, attempts);
+      log(`Senza contenuto fruibile automaticamente (${workHref}, kind=${nonVideo}).`);
+      const attempts = (lessonAttempts.get(workHref) || 0) + 1;
+      lessonAttempts.set(workHref, attempts);
       if (attempts >= 3) {
-        log(`Lezione non-video ${nextHref} non gestibile dopo 3 tentativi. La salto.`);
-        stuckUrls.add(nextHref);
+        log(`Lezione non-video ${workHref} non gestibile dopo 3 tentativi. La salto.`);
+        stuckUrls.add(workHref);
+        if (redirected) stuckUrls.add(nextHref);
       } else {
-        emptyUrls.add(nextHref);
+        emptyUrls.add(redirected ? nextHref : workHref);
       }
       await page.waitForTimeout(COURSE_SETTLE_MS);
     }

@@ -98,6 +98,21 @@ Non devi tenere niente aperto: se la scheda si chiude — o se il Mac si riavvia
 
 ---
 
+## 🙋 "Ho toccato qualcosa per sbaglio"
+
+Niente panico: non si rompe nulla e quasi tutto si sistema da solo.
+
+- **Ho chiuso Chrome / il Mac ha aggiornato Chrome** — il browser dei corsi è invisibile e separato dal tuo: se muore, l'automazione ne apre un altro e riprende dal punto salvato.
+- **Ho fatto logout dall'AI (Ollama)** — i corsi vanno avanti comunque. Si fermano solo i quiz nuovi, le domande restano in attesa e nessun tentativo viene consumato: al prossimo avvio col comando (o doppio clic) ti riapre il login e riprende.
+- **Ho chiuso la finestra del Terminale** — l'automazione riparte da sola entro un paio di minuti. Se vuoi fermarla davvero usa **F** nella plancia.
+- **Ho spostato o rinominato la cartella** — rilancia il comando: rimette a posto i servizi in background (senza il comando resterebbe ferma in silenzio).
+- **Ho aperto il corso nel mio browser mentre lavorava** — la piattaforma può chiudere la sessione: l'automazione aspetta una mezz'ora e riprende. Il link non va cambiato.
+- **Ho staccato il Wi-Fi / il Mac ha dormito** — riprende appena torna la rete o al risveglio.
+
+Per un controllo completo: rilancia il comando e scegli **"Diagnostica on-demand"**. Dice in chiaro se il Mac è aggiornabile, se i servizi in background sono a posto e cosa manca.
+
+---
+
 ## 📅 Ogni giorno
 
 Non devi fare nulla: segue gli orari da solo, si ferma a fine turno e riparte al turno dopo.

@@ -24,7 +24,7 @@ function finalizeState() {
   try { writeAiTodo(ROOT); } catch (_) {}
 }
 const { writeJsonAtomic } = require('./lib/io');
-const { OffHoursExit, AutologinError, SessionError, AllCoursesNeedHelpExit, DashboardEmptyError, NeedHelpExit } = require('./lib/errors');
+const { OffHoursExit, AutologinError, SessionError, AllCoursesNeedHelpExit, DashboardEmptyError, NeedHelpExit, isBrowserGoneError } = require('./lib/errors');
 const {
   dashboardUrl,
   userAgent,
@@ -566,6 +566,16 @@ async function runAutoplay() {
           process.exit(4);
         }
         monitor.update({ phase: 'session_lost', lastError: e.message });
+      } else if (isBrowserGoneError(e)) {
+        // Chrome chiuso da fuori (Uscita forzata dell'utente, aggiornamento del
+        // browser, crash): non è la piattaforma e non è il token. Niente dump
+        // d'errore (la pagina non esiste più): il finally riapre un browser
+        // nuovo e il run riprende dal punto salvato dalla piattaforma.
+        log('BROWSER CHIUSO DALL\'ESTERNO:', e.message);
+        monitor.update({
+          phase: 'browser_closed',
+          lastError: 'Il browser dell\'automazione è stato chiuso: riapro e riprendo da solo.',
+        });
       } else {
         log('ERRORE CRITICO:', e);
         await monitor.recordError(null, e, 'outer');

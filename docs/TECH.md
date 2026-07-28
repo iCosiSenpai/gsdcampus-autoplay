@@ -33,7 +33,30 @@ Lo scheduler parte con `nohup`, quindi un semplice `exit` del Terminale non lo t
 
 La plancia mostra in chiaro se il guardiano è installato (plist `com.gsdcampus.autoplay.keepalive`): se manca, avvisa in giallo che chiudere la scheda può fermare l'automazione.
 
+## Cosa succede se… (azioni involontarie dell'utente)
+
+Comportamento reale, verificato sul codice. Regola generale: **niente è irreversibile**, il peggio che capita è una pausa fino al prossimo giro dello scheduler o del watchdog.
+
+| Azione | Cosa succede | Recupero |
+| --- | --- | --- |
+| **Logout da Ollama** (o Ollama chiuso dalla GUI) | Solo la risoluzione quiz si ferma. `run-claude-quiz-batch.sh` prova `ollama pull`, fallisce e esce **24**: handoff intatto, nessun tentativo quiz consumato. Lo scheduler logga "login Ollama richiesto" e manda una notifica macOS (throttle 6h). I **corsi continuano**: i video non usano l'AI. | Al primo giro interattivo (comando curl / doppio clic) il batch esegue `ollama signin`, apre il browser e riprende. Non serve nessuna API key. |
+| **Uscita forzata di Chrome** dal Dock / Monitoraggio Attività | Il browser dell'automazione è un processo separato **headless** (nessuna icona nel Dock): l'uscita forzata del Chrome dell'utente non lo tocca. Se muore comunque (aggiornamento di Chrome, crash, kill mirato), `isBrowserGoneError()` lo riconosce: log "BROWSER CHIUSO DALL'ESTERNO", fase `browser_closed`, nessun dump d'errore inutile. | Il retry esterno riapre un browser nuovo (backoff 30s → 60s → …) e riprende dal punto salvato **dalla piattaforma**: al massimo si riguarda l'ultimo pezzo di video. |
+| **Chiusura della scheda del Terminale** (o Cmd+Q) | La plancia muore; lo scheduler è `nohup` ma se il Terminale termina i processi della scheda cade anche lui. | Il keepalive (`com.gsdcampus.autoplay.keepalive`) lo rilancia entro ~2 minuti. La plancia lo dice in chiaro e avvisa in giallo se il keepalive non è installato. |
+| **Tasto F nella plancia / `./stop.sh`** | Stop **volontario**: scrive `.user_stopped` e fa `bootout` del keepalive, così niente lo resuscita (nemmeno l'auto-update). | Riparte solo con `./start.sh` o col comando curl. |
+| **Cartella del progetto spostata o rinominata** | I LaunchAgent puntano al vecchio percorso: launchd li lancia e muoiono con `exit 127`, in silenzio. Niente auto-aggiornamento, niente watchdog. | `doctor.sh` ora lo rileva ("Servizio … punta a un'altra cartella"); il comando curl reinstalla entrambi gli agent. |
+| **Cartella copiata da uno zip** (senza `.git`) | Il Mac non può aggiornarsi. | `install.sh` lo rileva e offre la riparazione automatica (conserva account, dati e risposte). |
+| **`config.json` cancellato o modificato male** | `config-check-cli.js` lo classifica (`missing_file`/`bad_json`/…) e il launcher apre il setup guidato. Con orari mancanti il setup **riprende** invece di fallire. | Selezione account dall'elenco: nessun link da incollare. |
+| **`data/known_answers.json` cancellato** | `ensureKnownBankSeeded()` lo risemina dalla banca pubblica al primo quiz; il sync periodico rimette il resto. | Nessuna azione. Le risposte sono anche sul Worker. |
+| **`data/members.db` cancellato** | «Chi sei?» resta senza elenco e offre import CSV o incolla-link. L'account già configurato continua a funzionare (l'autologin sta in `config.json`). | Il file torna col primo aggiornamento (è tracciato nel repo). |
+| **Il collega apre il corso nel proprio browser** mentre l'automazione lavora | Due sessioni sullo stesso account: la piattaforma può invalidare la sessione → `SessionError` → fase `session_unstable`, exit 4. **Nessun re-login a raffica** (degraderebbe il token). | Cooldown scheduler (default 30 min) e ripartenza da sola. Il link NON è da cambiare. |
+| **Wi-Fi staccato / rete dello store giù** | Autoplay: errore di navigazione → retry con backoff. Auto-update: segna `offline` e riprova al giro dopo. Banca risposte: merge locale, fetch remoto saltato. Nessun crash. | Automatico al ritorno della rete. |
+| **Mac addormentato / coperchio chiuso** | Mentre lo scheduler gira, `caffeinate -i -s -m -w <pid>` impedisce lo sleep idle. In clamshell senza alimentazione il Mac dorme comunque. | Al risveglio lo scheduler riprende; i job launchd mancati partono al wake. |
+| **Node/Chrome disinstallati o aggiornati** | `check-requirements.sh --runtime` fallisce → il launcher esegue il setup condizionale. Senza Chrome di sistema si usa Chromium di Playwright (fallback automatico). | Comando curl. |
+| **Processo `node autoplay` ucciso da Monitoraggio Attività** | Lo scheduler vede l'uscita anomala → backoff crescente (60s → 120s → 300s → 1800s); dopo 5 crash consecutivi fase `crash_loop`, notifica e retry dopo 30 min. | Automatico; il keepalive copre anche la morte dello scheduler. |
+| **Quiz aperto a mano dal collega** | L'autoplay è attempt-protective: finalizza solo con **tutte** le risposte note. Un tentativo consumato a mano resta contato dalla piattaforma. | Nessun rimedio automatico: è l'unico caso in cui un tentativo si può perdere davvero. |
+
 ## Auto-update continuo (ogni ~10 min)
+
 Il LaunchAgent `com.gsdcampus.autoplay.autoupdate` (`scripts/lib/install-launchd.sh`) non gira più alle 05:30: usa `StartInterval` (600s) e lancia `scripts/auto-update.sh` **ogni ~10 minuti**. Così un push del maintainer arriva alla flotta in pochi minuti, non la notte dopo.
 
 - **Costo quasi nullo quando non c'è nulla**: `auto-update.sh` fa un `git fetch` e, se `HEAD == origin/main`, esce in <1s. Solo con un commit nuovo procede.

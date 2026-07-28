@@ -62,4 +62,26 @@ class NeedHelpExit extends Error {
   }
 }
 
-module.exports = { OffHoursExit, AutologinError, SessionError, AllCoursesNeedHelpExit, DashboardEmptyError, NeedHelpExit };
+/**
+ * True se l'errore dice che il BROWSER dell'automazione non c'è più: l'utente ha
+ * fatto "Uscita forzata" su Chrome, l'ha aggiornato mentre girava, oppure il
+ * processo è andato in crash. Non è un problema della piattaforma né del token:
+ * va loggato come tale e il run va semplicemente ripreso con un nuovo browser.
+ * @param {any} err
+ * @returns {boolean}
+ */
+function isBrowserGoneError(err) {
+  const m = String((err && (err.message || err)) || '');
+  return /Target (page|context|browser) (has been )?closed|Target closed|Browser (has been )?closed|browser has disconnected|Protocol error.*(Target|Session)\.?closed|Session closed|Connection closed|browserContext\.newPage: Browser closed|websocket.*closed/i
+    .test(m);
+}
+
+module.exports = {
+  OffHoursExit,
+  AutologinError,
+  SessionError,
+  AllCoursesNeedHelpExit,
+  DashboardEmptyError,
+  NeedHelpExit,
+  isBrowserGoneError,
+};
