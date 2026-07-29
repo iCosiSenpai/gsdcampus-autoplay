@@ -127,6 +127,30 @@ function readTail(file, n) {
   }
 }
 
+// Età di un file in forma leggibile. Serve perché una coda di log può SEMBRARE
+// il contesto dell'errore ed essere invece vecchia di ore: è successo davvero
+// (issue #25-27, coda ferma a 5 ore prima del fatto segnalato). Senza questo
+// dato si legge il log sbagliato convinti che sia quello giusto.
+function fileAge(file) {
+  try {
+    const min = Math.round((Date.now() - fs.statSync(file).mtimeMs) / 60000);
+    if (min < 1) return 'adesso';
+    if (min < 60) return `${min} min fa`;
+    const h = Math.floor(min / 60);
+    return h < 48 ? `${h}h fa` : `${Math.floor(h / 24)} giorni fa`;
+  } catch (e) {
+    return 'assente';
+  }
+}
+
+// Un blocco di log per il body, con età in testa. Torna null se il file manca,
+// così le sezioni vuote non finiscono nell'issue.
+function logSection(title, file, lines) {
+  const tail = readTail(file, lines);
+  if (!tail) return null;
+  return [`### ${title}  _(${fileAge(file)})_`, '```', redactText(tail), '```'].join('\n');
+}
+
 function gitHead() {
   try {
     return execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -173,7 +197,16 @@ function gatherContext(phase, reasonArg) {
     phase,
     reason,
     storeTag: storeTagOf(cfg),
-    logTail: readTail(path.join(ROOT, 'logs', 'autoplay.log'), LOG_TAIL_LINES) || '(log non disponibile)',
+    // Tre log, non uno. `autoplay.log` racconta la sessione browser, ma quando
+    // a fallire è l'AVVIO (scheduler_start_failed) l'autoplay non è mai partito:
+    // la sua coda è vecchia di ore e il motivo vero sta in autoplay.out (dove
+    // start.sh manda stdout/stderr) e in scheduler.log. Allegare solo il primo
+    // rendeva la segnalazione illeggibile proprio nei casi in cui serviva.
+    logSections: [
+      logSection(`logs/autoplay.log — ultime ${LOG_TAIL_LINES} righe`, path.join(ROOT, 'logs', 'autoplay.log'), LOG_TAIL_LINES),
+      logSection('logs/autoplay.out — avvio (stdout/stderr di start.sh)', path.join(ROOT, 'logs', 'autoplay.out'), 25),
+      logSection('logs/scheduler.log — decisioni dello scheduler', path.join(ROOT, 'logs', 'scheduler.log'), 15),
+    ].filter(Boolean),
     summary: status.courseStateSummary || null,
     lastQuiz: status.lastQuizResult || null,
     lastUpdate: status.lastUpdate || null,
@@ -194,7 +227,14 @@ function buildDraft(ctx) {
   L.push('## Sintomo', redactText(ctx.reason || '(nessun messaggio di errore)').trim() || '(nessun messaggio)', '');
   L.push('## Stato corsi', ctx.summary ? redactText(JSON.stringify(ctx.summary)) : '(non disponibile)');
   if (ctx.lastQuiz) L.push('', 'Ultimo quiz: ' + redactText(String(ctx.lastQuiz)));
-  L.push('', `## Contesto (ultime ${LOG_TAIL_LINES} righe di logs/autoplay.log, redatte)`, '```', redactText(ctx.logTail), '```', '');
+  // L'età di ogni log è in testa al suo blocco: una coda vecchia di ore non
+  // deve più sembrare il contesto dell'errore appena segnalato.
+  L.push('', '## Contesto (log redatti)', '');
+  if (ctx.logSections && ctx.logSections.length) {
+    L.push(ctx.logSections.join('\n\n'), '');
+  } else {
+    L.push('(nessun log disponibile)', '');
+  }
   L.push('## Ambiente',
     '- store: ' + (store || '(ignoto: né storeTag né account configurati)') +
       (store && store.startsWith('mac-') ? '  ← risolvi con `node scripts/lib/members-cli.js whois ' + store + '`' : ''),
@@ -372,7 +412,7 @@ async function cmdSend() {
   sendViaGh(token, draft, file);
 }
 
-module.exports = { redactText, collapseProgress, storeTagOf, memberTag };
+module.exports = { redactText, collapseProgress, storeTagOf, memberTag, fileAge };
 
 if (require.main === module) {
   const cmd = process.argv[2];

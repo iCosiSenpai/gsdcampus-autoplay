@@ -5,11 +5,15 @@
  */
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const {
   redactText,
   collapseProgress,
   storeTagOf,
   memberTag,
+  fileAge,
 } = require('../scripts/lib/issue-report');
 
 describe('collapseProgress', () => {
@@ -80,5 +84,32 @@ describe('attribuzione store', () => {
   it('senza CF né storeTag resta vuoto', () => {
     assert.equal(storeTagOf({}), '');
     assert.equal(memberTag(''), '');
+  });
+});
+
+// Regressione: nelle issue #25-27 la coda di log allegata era vecchia di 5 ore
+// e sembrava il contesto dell'errore appena segnalato. L'età va mostrata.
+describe('fileAge', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-age-'));
+  const write = (name, ageMin) => {
+    const f = path.join(dir, name);
+    fs.writeFileSync(f, 'x');
+    const t = new Date(Date.now() - ageMin * 60000);
+    fs.utimesSync(f, t, t);
+    return f;
+  };
+
+  it('file mancante → assente, mai un errore', () => {
+    assert.equal(fileAge(path.join(dir, 'non-esiste.log')), 'assente');
+  });
+
+  it('appena scritto → adesso', () => {
+    assert.equal(fileAge(write('ora.log', 0)), 'adesso');
+  });
+
+  it('minuti, ore e giorni', () => {
+    assert.equal(fileAge(write('min.log', 42)), '42 min fa');
+    assert.equal(fileAge(write('ore.log', 5 * 60)), '5h fa');
+    assert.equal(fileAge(write('giorni.log', 6 * 24 * 60)), '6 giorni fa');
   });
 });
