@@ -153,6 +153,14 @@ for _label in com.gsdcampus.autoplay.autoupdate com.gsdcampus.autoplay.keepalive
   _plist="$HOME/Library/LaunchAgents/${_label}.plist"
   _human="${_label##*.}"
   if [ ! -f "$_plist" ]; then
+    # Plist assente ma job ANCORA registrato = orfano: punta a un percorso che
+    # non esiste piu' (tipicamente una copia temporanea) e fallisce a ogni
+    # intervallo con exit 127, in silenzio. Visto sul campo: un job che puntava
+    # a /tmp/gsd-pre/scripts/auto-update.sh, sopravvissuto alla sua cartella.
+    if launchctl print "gui/$(id -u)/${_label}" >/dev/null 2>&1; then
+      chk_err "Servizio '$_human' orfano: registrato ma senza file di configurazione" \
+        "rimuovilo con: launchctl bootout gui/\$(id -u)/${_label}  poi rilancia il comando curl"
+    fi
     continue   # assente: già segnalato altrove (auto-update) o disattivato per scelta
   fi
   if grep -c "$DIR/" "$_plist" >/dev/null 2>&1; then
