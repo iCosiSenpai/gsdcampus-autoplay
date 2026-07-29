@@ -163,6 +163,25 @@ describe('plancia: versione e modalita sviluppo', () => {
     assert.match(frame({ ...baseModel, versionDate: null }), /v1\.1\.0-63/);
   });
 
+  it('dice a parole "aggiornato": un numero di versione da solo non lo dice', () => {
+    // "v1.1.0-87" e' l'ultima uscita e sembra identico a una vecchia: senza una
+    // parola affermativa si conclude di essere rimasti indietro.
+    const out = frame({ ...baseModel, updateResult: 'up_to_date', update: null });
+    assert.match(out, /aggiornato/);
+  });
+
+  it('senza rete lo dichiara invece di far credere che sia aggiornato', () => {
+    const out = frame({ ...baseModel, updateResult: 'offline', update: null });
+    assert.match(out, /non ho potuto controllare/);
+    assert.equal(/✓ aggiornato/.test(out), false);
+  });
+
+  it('un aggiornamento in attesa batte l esito precedente', () => {
+    const out = frame({ ...baseModel, updateResult: 'up_to_date', update: { remoteVersion: 'v1.1.0-90' } });
+    assert.match(out, /aggiornamento pronto/);
+    assert.equal(/✓ aggiornato/.test(out), false);
+  });
+
   it('segnala in alto un aggiornamento gia scaricato', () => {
     const out = frame({ ...baseModel, update: { remoteVersion: 'v1.1.0-90' } });
     assert.match(out, /aggiornamento pronto/);

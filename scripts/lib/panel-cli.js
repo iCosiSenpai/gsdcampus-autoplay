@@ -605,6 +605,9 @@ function readModel(root, now = Date.now()) {
     member: config.memberName || config.codice_fiscale || 'account attivo',
     version: readVersion(root),
     versionDate: readVersionDate(root),
+    // Esito dell'ultimo controllo aggiornamenti: serve a dire "aggiornato" in
+    // modo affermativo invece di lasciare che un numero parli da solo.
+    updateResult: (readJsonSafe(path.join(logs, 'auto-update-state.json'), {}, { warn: false }) || {}).result || null,
     devMode: config.devMode === true,
     keepAlive: keepAliveInstalled(),
     status,
@@ -694,13 +697,21 @@ function renderFrame(model, opts = {}) {
   // Versione + data del commit: insieme rispondono a "si e' aggiornato?".
   // Se un aggiornamento e' gia stato scaricato ma non ancora adottato, si dice
   // qui, dove uno guarda -- non solo in fondo al riquadro.
+  // Versione + data + ESITO. Un numero di versione da solo non dice a nessuno
+  // se e' aggiornato: "1.1.0-87" e' l'ultima uscita e sembra identico a una
+  // vecchia. Serve una parola, non un contatore.
   let version = '';
   if (model.version) {
     const stamp = model.versionDate ? ` ${c(ANSI.dim, model.versionDate)}` : '';
-    const pending = model.update && model.update.remoteVersion
-      ? ` ${c(ANSI.yellow, '↑ aggiornamento pronto')}`
-      : '';
-    version = ` ${c(ANSI.dim, GLYPH.bul)} ${c(ANSI.pellet, model.version)}${stamp}${pending}`;
+    let esito = '';
+    if (model.update && model.update.remoteVersion) {
+      esito = ` ${c(ANSI.yellow, `${GLYPH.warn} aggiornamento pronto`)}`;
+    } else if (model.updateResult === 'up_to_date' || model.updateResult === 'updated') {
+      esito = ` ${c(ANSI.green, `${GLYPH.ok} aggiornato`)}`;
+    } else if (model.updateResult === 'offline') {
+      esito = ` ${c(ANSI.dim, 'senza rete: non ho potuto controllare')}`;
+    }
+    version = ` ${c(ANSI.dim, GLYPH.bul)} ${c(ANSI.pellet, model.version)}${stamp}${esito}`;
   }
   const title = `${mascot} ${c(ANSI.pac, 'GSD CAMPUS')} ${c(ANSI.maze, GLYPH.bul)} ${c(ANSI.bold, model.member)}${version}`;
   const pad = Math.max(1, width - visLen(title) - visLen(badge));
