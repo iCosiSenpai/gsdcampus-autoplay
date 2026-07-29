@@ -19,11 +19,39 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 UID_NUM="$(id -u)"
 
 remove_agent() {
+  # bootout PRIMA di cancellare il plist: al contrario, il job resta registrato
+  # in launchd e continua a fallire per sempre senza che nessuno lo veda.
   launchctl bootout "gui/$UID_NUM" "$PLIST" 2>/dev/null || true
+  launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null || true
   rm -f "$PLIST"
 }
 
+# Un agent registrato ma senza plist e' un orfano: punta a un percorso che non
+# esiste piu' (tipicamente una copia temporanea) e fallisce a ogni intervallo con
+# "command not found", in silenzio. Visto sul campo: un job che puntava a
+# /tmp/gsd-pre/scripts/auto-update.sh, sopravvissuto alla cartella.
+drop_orphan_agent() {
+  [ -f "$PLIST" ] && return 0
+  if launchctl print "gui/$UID_NUM/$LABEL" >/dev/null 2>&1; then
+    echo "trovato un agent auto-update orfano (senza plist): lo rimuovo."
+    launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null || true
+  fi
+}
+
 install_agent() {
+  drop_orphan_agent
+
+  # Installare da una copia temporanea produce un agent che punta a un percorso
+  # destinato a sparire: da quel momento fallisce a ogni giro e l'aggiornamento
+  # automatico e' morto senza un segnale. Meglio non installarlo affatto.
+  case "$DIR" in
+    /tmp/*|/private/tmp/*|/var/folders/*)
+      echo "installazione temporanea ($DIR): NON attivo l'auto-update periodico." >&2
+      echo "Rilancia il comando curl dalla cartella definitiva per attivarlo." >&2
+      return 0
+      ;;
+  esac
+
   # Opt-out esplicito: config.json { "autoUpdate": false } → agent rimosso.
   local enabled
   enabled=$(node -e "try{const c=require('$DIR/config.json');process.stdout.write(c.autoUpdate===false?'no':'yes')}catch(e){process.stdout.write('yes')}" 2>/dev/null || echo "yes")
