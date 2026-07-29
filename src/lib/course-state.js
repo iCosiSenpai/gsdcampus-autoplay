@@ -284,6 +284,82 @@ function isTerminalCourse(c) {
   return c.status === 'done' || c.status === 'need_help';
 }
 
+// Conteggio ONESTO dei corsi: incrocia lo stato locale con le percentuali del
+// censimento e, in caso di disaccordo, crede alla piattaforma.
+//
+// Il conteggio dei 'done' da solo mente. Su un percorso reale ha detto "7 su 7
+// finiti" mentre la dashboard dava un corso al 10,39%: il record era rimasto
+// 'done' da un giro in cui le lezioni successive non erano ancora sbloccate.
+//
+// Il modello della piattaforma, verificato: la percentuale di /corso/show/<id>
+// conta SOLO le lezioni ed e' pesata sulla durata; le lezioni si sbloccano a
+// scaglioni; il questionario compare quando la percentuale arriva a 100; e il
+// 100% NON vuol dire questionario superato. Quindi un corso e' concluso quando il
+// contenuto e' al 100% E le valutazioni sono superate. Mai per uno solo dei due.
+//
+// @param {object} state - lo stato dei corsi (id -> record)
+// @param {Array<{url?:string, pct?:number}>} censusCourses - i corsi dal censimento
+// @returns {{finished:number, awaitingAssessment:number, incomplete:number,
+//            blocked:number, disagreeing:number, total:number, sentence:string,
+//            perCourse:Array<{id:string, standing:string, pct:number|null}>}}
+function honestCourseCounts(state, censusCourses) {
+  const counts = { finished: 0, awaitingAssessment: 0, incomplete: 0, blocked: 0, disagreeing: 0 };
+  const perCourse = [];
+  for (const entry of censusCourses || []) {
+    const id = courseIdFromUrl(entry && entry.url);
+    if (!id) continue;
+    const record = (state || {})[id];
+    const pct = entry && Number.isFinite(entry.pct) ? entry.pct : null;
+
+    let standing;
+    if (record && record.status === 'need_help') {
+      standing = 'bloccato';
+      counts.blocked++;
+    } else if (pct != null && pct < 100) {
+      if (record && record.status === 'done') {
+        standing = `in corso (${pct}%) — lo stato lo dava per concluso`;
+        counts.disagreeing++;
+      } else {
+        standing = `in corso (${pct}%)`;
+        counts.incomplete++;
+      }
+    } else {
+      // Contenuto al 100% (o percentuale ignota): decidono le valutazioni.
+      const url = `/corso/show/${id}`;
+      const hasAssessments = record && record.assessments && Object.keys(record.assessments).length > 0;
+      const passed = hasAssessments
+        ? allAssessmentsPassed({ [id]: record }, url)
+        : Boolean(record && (record.finalQuizPassed === true || record.completionEvidence));
+      if (passed) {
+        standing = 'concluso';
+        counts.finished++;
+      } else {
+        standing = 'video completati, questionario da fare';
+        counts.awaitingAssessment++;
+      }
+    }
+    perCourse.push({ id, standing, pct });
+  }
+
+  const total = counts.finished + counts.awaitingAssessment + counts.incomplete
+    + counts.blocked + counts.disagreeing;
+  const parts = [`${counts.finished} su ${total} conclusi`];
+  if (counts.awaitingAssessment > 0) {
+    parts.push(counts.awaitingAssessment === 1
+      ? '1 con il questionario da fare'
+      : `${counts.awaitingAssessment} con il questionario da fare`);
+  }
+  if (counts.disagreeing > 0) {
+    parts.push(counts.disagreeing === 1
+      ? '1 dato per concluso ma incompleto'
+      : `${counts.disagreeing} dati per conclusi ma incompleti`);
+  }
+  if (counts.incomplete > 0) parts.push(`${counts.incomplete} in corso`);
+  if (counts.blocked > 0) parts.push(`${counts.blocked} bloccati`);
+
+  return { ...counts, total, sentence: parts.join(', '), perCourse };
+}
+
 function isCourseDoneOrNeedHelp(state, url) {
   return isTerminalCourse(getCourse(state, url));
 }
@@ -341,6 +417,7 @@ module.exports = {
   allAssessmentsPassed,
   isQuestionnairePassed,
   questionnaireNumberFromUrl,
+  honestCourseCounts,
   reopenCourse,
   isTerminalCourse,
   isCourseDoneOrNeedHelp,

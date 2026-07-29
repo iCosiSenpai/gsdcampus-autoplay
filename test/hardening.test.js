@@ -165,3 +165,76 @@ describe('notification hardening', () => {
     assert.equal(throttleAllows(root, 'quiz_sospeso', '159', 'new-work'), true);
   });
 });
+
+
+describe('conteggio onesto dei corsi', () => {
+  const { honestCourseCounts } = require('../src/lib/course-state');
+
+  it('un corso dato per concluso ma sotto il 100% non conta come concluso', () => {
+    // E' l'equivoco misurato: la plancia diceva "7 su 7 finiti" mentre la
+    // dashboard dava un corso al 10,39%. Il record era rimasto 'done' da un giro
+    // in cui le lezioni successive non erano ancora sbloccate.
+    const state = {
+      100: { status: 'done', finalQuizPassed: false },
+    };
+    const census = [{ url: 'https://x/corso/show/100', pct: 10.39 }];
+    const r = honestCourseCounts(state, census);
+    assert.equal(r.finished, 0);
+    assert.equal(r.disagreeing, 1);
+    assert.match(r.sentence, /0 su 1 conclusi/);
+    assert.match(r.sentence, /dato per concluso ma incompleto/);
+  });
+
+  it('video al 100% con questionario da fare non e un corso concluso', () => {
+    // La percentuale conta SOLO le lezioni: il 100% dice che i video sono stati
+    // visti, non che la valutazione e' superata.
+    const state = {
+      100: {
+        status: 'in_progress',
+        assessments: {
+          'modulo:920': {
+            id: 'modulo:920',
+            url: 'https://x/questionario/VA/dashboard/69/modulo/920',
+            status: 'pending',
+          },
+        },
+      },
+    };
+    const r = honestCourseCounts(state, [{ url: 'https://x/corso/show/100', pct: 100 }]);
+    assert.equal(r.finished, 0);
+    assert.equal(r.awaitingAssessment, 1);
+    assert.match(r.sentence, /questionario da fare/);
+  });
+
+  it('video al 100% e valutazione superata: concluso', () => {
+    const state = {
+      100: {
+        status: 'done',
+        completionEvidence: 'all_assessments_passed',
+        assessments: {
+          'modulo:920': {
+            id: 'modulo:920',
+            url: 'https://x/questionario/VA/dashboard/69/modulo/920',
+            status: 'passed',
+          },
+          'corso:156': {
+            id: 'corso:156',
+            url: 'https://x/questionario/VA/dashboard/69/corso/156',
+            status: 'failed',
+          },
+        },
+      },
+    };
+    // Lo stesso questionario sotto due id conta una volta: e' superato.
+    const r = honestCourseCounts(state, [{ url: 'https://x/corso/show/100', pct: 100 }]);
+    assert.equal(r.finished, 1);
+    assert.equal(r.sentence, '1 su 1 conclusi');
+  });
+
+  it('un corso bloccato si conta a parte', () => {
+    const state = { 100: { status: 'need_help', needHelpReason: 'domande non note' } };
+    const r = honestCourseCounts(state, [{ url: 'https://x/corso/show/100', pct: 100 }]);
+    assert.equal(r.blocked, 1);
+    assert.match(r.sentence, /1 bloccati/);
+  });
+});

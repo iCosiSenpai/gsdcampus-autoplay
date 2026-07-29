@@ -32,6 +32,26 @@ if (s.lastQuizResult) lines.push(['Esito quiz', s.lastQuizResult]);
 if (s.courseStateSummary) {
   const cs = s.courseStateSummary;
   lines.push(['Corsi', `done: ${cs.done || 0}, need_help: ${cs.needHelp || 0}, in_progress: ${cs.inProgress || 0}`]);
+  // Il conteggio dei 'done' da solo mente: un record puo' essere rimasto 'done' da
+  // un giro in cui le lezioni successive non erano ancora sbloccate. Si incrocia
+  // col censimento e, se le due fonti non concordano, si dice la verita'.
+  try {
+    const courseState = require('../../src/lib/course-state');
+    const account = require('../../src/lib/account');
+    const paths = account.stateFilePaths(ROOT);
+    const stateFile = JSON.parse(fs.readFileSync(paths.courseState, 'utf8'));
+    const state = stateFile.courses || stateFile;
+    const census = JSON.parse(fs.readFileSync(path.join(ROOT, 'logs', 'course_census.json'), 'utf8'));
+    const honest = courseState.honestCourseCounts(state, census.courses);
+    if (honest.total > 0) {
+      lines.push(['Avanzamento reale', honest.sentence]);
+      if (honest.disagreeing > 0 || honest.awaitingAssessment > 0) {
+        for (const c of honest.perCourse) {
+          if (c.standing !== 'concluso') lines.push([`  #${c.id}`, c.standing]);
+        }
+      }
+    }
+  } catch (_) { /* senza censimento resta il conteggio grezzo */ }
 }
 if (s.phase === 'autologin_invalid') {
   lines.push(['ATTENZIONE', "Stato salvato segnala autologin scaduto: VERIFICA dal vivo (node scripts/lib/healthcheck-cli.js) prima di concludere."]);
