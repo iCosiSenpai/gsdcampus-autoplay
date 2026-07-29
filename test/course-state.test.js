@@ -10,6 +10,7 @@ const {
   summarize,
   allDoneOrNeedHelp,
   isCourseDoneOrNeedHelp,
+  isTerminalCourse,
 } = require('../src/lib/course-state');
 
 describe('courseIdFromUrl', () => {
@@ -100,5 +101,48 @@ describe('allDoneOrNeedHelp / isCourseDoneOrNeedHelp', () => {
 
   it('lista vuota → false', () => {
     assert.equal(allDoneOrNeedHelp(state, []), false);
+  });
+});
+
+// Regressione: i due predicati divergevano su un done legacy (status done ma
+// finalQuizPassed false e nessuna completionEvidence). La scoperta corsi lo
+// teneva come lavoro da fare, il controllo di fine lavoro lo contava come
+// terminale: a dashboard vuota l'autoplay dichiarava "tutti i corsi completati"
+// invece di segnalare post_login_blocked.
+describe('done legacy da ricontrollare: predicati allineati', () => {
+  const legacy = {
+    status: 'done',
+    finalQuizPassed: false,
+    completedLessons: ['https://x/lezione/show/1'],
+  };
+  const state = { '19568': legacy, '8122': { status: 'done', finalQuizPassed: true } };
+
+  it('non è terminale: va ancora lavorato', () => {
+    assert.equal(isTerminalCourse(legacy), false);
+    assert.equal(isCourseDoneOrNeedHelp(state, 'https://x/corso/show/19568'), false);
+  });
+
+  it('allDoneOrNeedHelp concorda, sia su URL sia su ID nudi', () => {
+    assert.equal(allDoneOrNeedHelp(state, ['19568', '8122']), false);
+    assert.equal(
+      allDoneOrNeedHelp(state, [
+        'https://x/corso/show/19568',
+        'https://x/corso/show/8122',
+      ]),
+      false
+    );
+  });
+
+  it('un done con prova di completamento resta terminale', () => {
+    assert.equal(isTerminalCourse({ status: 'done', finalQuizPassed: true }), true);
+    assert.equal(
+      isTerminalCourse({ status: 'done', finalQuizPassed: false, completionEvidence: 'no-assessment' }),
+      true
+    );
+  });
+
+  it('record assente non è terminale', () => {
+    assert.equal(isTerminalCourse(undefined), false);
+    assert.equal(allDoneOrNeedHelp(state, ['99999']), false);
   });
 });

@@ -36,21 +36,67 @@ source "$DIR/scripts/lib/notify.sh"
 # Issue GitHub automatiche per problemi BLOCCANTI (dedup per classe+versione).
 source "$DIR/scripts/lib/report-issue.sh"
 
-# Mappa gli exit code che richiedono intervento umano su una notifica macOS.
+# Campo di logs/status.json come stringa. Path ASSOLUTO: il CWD dello scheduler
+# non è garantito, e un require relativo restituiva silenziosamente vuoto.
+status_field() {
+  node -e "
+    try {
+      const p = require('path').join(process.argv[1], 'logs', 'status.json');
+      process.stdout.write(String(require(p)[process.argv[2]] || '').slice(0, 200));
+    } catch (e) {}
+  " "$DIR" "$1" 2>/dev/null || echo ""
+}
+
+# Mappa gli exit code che richiedono intervento umano su una notifica macOS e,
+# per i problemi di codice/infra, su una issue GitHub automatica.
 # SOLO side-effect: non tocca EXIT_CODE né i rami decisionali (l'exit-code API
 # 0/2/3/4 del contratto scheduler↔autoplay resta intatta).
+#
+# Perché qui e non dentro src/autoplay.js: ogni uscita terminale dell'autoplay
+# scrive la fase in status.json e poi esce con un codice preciso, e lo scheduler
+# li osserva già tutti. Un solo punto di aggancio invece di sei sparsi nei catch.
 notify_on_exit() {
+  local phase reason
   case "${1:-}" in
     2)
-      local phase
-      phase=$(node -e "try{process.stdout.write(require('./logs/status.json').phase||'')}catch(e){}" 2>/dev/null || echo "")
+      phase=$(status_field phase)
       if [[ "$phase" != "awaiting_ai" && "$phase" != "complete" ]]; then
         notify_user "GSD Campus" "Il corso ha bisogno di aiuto: apri il Terminale e rilancia il comando di avvio." need_help || true
+        # Corsi bloccati che né la banca né l'AI hanno saputo sbloccare: è
+        # lavoro per il maintainer, non solo una notifica a schermo che nessuno
+        # legge sul Mac di un collega.
+        # Default assegnato a parte, non con ${reason:-...}: in bash 3.2 (quello
+        # di serie su macOS) un apostrofo dentro l'espansione conta come quoting
+        # e rompe il parsing dell'intero file.
+        reason=$(status_field lastError)
+        [ -n "$reason" ] || reason="Corsi bloccati: automazione ferma, nessun corso lavorabile."
+        report_blocking_issue "$DIR" need_help "$reason"
       fi
       ;;
     3) notify_user "GSD Campus" "Il link di accesso al corso è scaduto: serve quello nuovo dal referente." autologin_invalid || true
        node "$DIR/scripts/lib/diag-ping.js" error autologin_invalid >/dev/null 2>&1 &
+       # autologin_invalid è spesso un FALSO allarme (calo di sessione transitorio
+       # durante la scoperta corsi). Apriamo l'issue solo se la sonda live conferma
+       # che il link non autentica più davvero: è la fonte di verità, e senza questo
+       # gate la repo si riempirebbe di segnalazioni per link perfettamente validi.
+       if ! node "$DIR/scripts/lib/healthcheck-cli.js" >/dev/null 2>&1; then
+         report_blocking_issue "$DIR" autologin_invalid "Sonda live: il link di autologin non autentica più."
+       else
+         log "Exit 3 ma la sonda live dice che l'autologin è VALIDO: nessuna issue (falso allarme)."
+       fi
        ;;
+    4)
+      phase=$(status_field phase)
+      # Exit 4 copre due casi opposti. session_unstable = la piattaforma ha
+      # rate-limitato i re-login con token valido: si risolve da solo col
+      # cooldown, segnalarlo sarebbe rumore. post_login_blocked = interstitial
+      # sconosciuto che blocca TUTTI i Mac finché non si aggiorna il codice.
+      if [[ "$phase" == "post_login_blocked" ]]; then
+        reason=$(status_field lastError)
+        [ -n "$reason" ] || reason="Dashboard vuota dopo il login: pagina di blocco non gestita."
+        report_blocking_issue "$DIR" post_login_blocked "$reason"
+      fi
+      ;;
   esac
   return 0
 }

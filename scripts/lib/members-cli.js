@@ -23,6 +23,10 @@
  *       data/accounts/<CF>/ del membro attivo. Idempotente, non sovrascrive.
  *   node scripts/lib/members-cli.js queue list|set|clear|add
  *       Coda multi-CF su questo Mac (config.memberQueue). set CF1,CF2 o set CF1 CF2.
+ *   node scripts/lib/members-cli.js whois <mac-xxxxxx>
+ *       Risolve l'ID opaco che compare nelle issue auto-report nel membro
+ *       corrispondente. L'ID è sha256(CF) troncato: pubblicamente non dice
+ *       nulla, qui torna il nome perché abbiamo members.db in locale.
  */
 
 const fs = require('fs');
@@ -224,7 +228,26 @@ if (cmd === 'search') {
     process.exit(1);
   }
 
+} else if (cmd === 'whois') {
+  const tag = String(process.argv[3] || '').trim().toLowerCase();
+  if (!tag) { console.error('Uso: members-cli.js whois <mac-xxxxxx>'); process.exit(1); }
+  // Stessa derivazione di issue-report.js (memberTag): sha256(CF maiuscolo),
+  // primi 6 hex. Confrontiamo per forza bruta su members.db — poche centinaia
+  // di righe, e non esiste inverso di un hash.
+  const crypto = require('crypto');
+  const wanted = tag.startsWith('mac-') ? tag : 'mac-' + tag;
+  const hit = db.listMembers(ROOT).find((m) => {
+    const cf = String(m.codice_fiscale || '').trim().toUpperCase();
+    return 'mac-' + crypto.createHash('sha256').update(cf).digest('hex').slice(0, 6) === wanted;
+  });
+  if (!hit) {
+    console.log(`Nessun membro corrisponde a ${wanted}.`);
+    console.log('Il Mac che ha segnalato potrebbe non essere in members.db, oppure usa uno storeTag esplicito.');
+    process.exit(1);
+  }
+  console.log(`${wanted} → ${hit.cognome || ''} ${hit.nome || ''} (CF: ${hit.codice_fiscale})`.trim());
+
 } else {
-  console.error(`Comando sconosciuto: ${cmd}\nComandi: search | list | select | active | set-active | stats | migrate-legacy | queue`);
+  console.error(`Comando sconosciuto: ${cmd}\nComandi: search | list | select | active | set-active | stats | migrate-legacy | queue | whois`);
   process.exit(1);
 }

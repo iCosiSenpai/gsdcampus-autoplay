@@ -25,6 +25,32 @@ Oltre al flusso sopra (avviato dall'AI, con conferma umana), alcuni problemi **b
 - `crash_loop` (`scheduler.sh`) — l'automazione si è fermata per crash ripetuti.
 - `preflight_failed` (`scheduler.sh`) — i selettori DOM non combaciano (serve un fix del codice).
 - `scheduler_start_failed` (`launch-ai-supervisor.sh`) — il launcher non è riuscito ad avviare lo scheduler.
+- `need_help` (`scheduler.sh`, exit 2) — corsi bloccati che né la banca né l'AI hanno sbloccato. Escluse le fasi `awaiting_ai` e `complete`, che non sono problemi.
+- `post_login_blocked` (`scheduler.sh`, exit 4) — dashboard vuota dopo il login: interstitial non gestito che blocca tutti i Mac. **Non** viene segnalato `session_unstable`, che condivide l'exit 4 ma è solo rate-limiting con token valido e si risolve da solo col cooldown.
+- `autologin_invalid` (`scheduler.sh`, exit 3) — segnalato **solo se la sonda live conferma** che il link non autentica più. Senza questo gate la repo si riempirebbe di segnalazioni per link validi, perché la fase viene scritta anche da un calo di sessione transitorio.
+
+Gli errori che avvengono **dentro** `src/autoplay.js` non si segnalano da soli: l'aggancio è nello scheduler, che osserva già l'exit code di ogni run e la fase scritta in `logs/status.json`. Un punto solo invece di sei sparsi nei catch dell'autoplay.
+
+### Da quale Mac arriva la segnalazione
+
+Il titolo porta un'etichetta store: `[auto-report] [mac-db8759] post_login_blocked: ...`.
+
+È `config.storeTag` se configurato (etichetta leggibile, es. `StoreRoma1`), altrimenti un **ID opaco** `mac-<6 hex>` derivato da `sha256(CF)`. Non usiamo hostname o username del Mac perché la repo è **pubblica** e quelli sono dati personali (`RE_HOME` li redae apposta). L'hash è a senso unico: pubblicamente non identifica nessuno, il maintainer lo risolve in locale perché ha `members.db`:
+
+```bash
+node scripts/lib/members-cli.js whois mac-db8759
+# → mac-db8759 → COSI ALESSIO (CF: CSOLSS95L23D862R)
+```
+
+### Qualità del contesto
+
+La coda del log nel body **comprime le righe di avanzamento video** (`Video: 5:30 / 18:57`, una ogni 30s) in un riepilogo `… N righe omesse`. Senza questo, le 40 righe di coda erano tutte contatori e l'errore che ha causato la segnalazione restava fuori dalla finestra — obbligando comunque ad andare a leggere il log sul Mac del collega.
+
+### Auto-fix con Kiro
+
+`.github/workflows/kiro-triage.yml` aggiunge la label `kiro` alle auto-report la cui fase è un difetto **del repo** (`post_login_blocked`, `preflight_failed`, `crash_loop`, `auto_update_rollback`). Le fasi di credenziali/dati (`autologin_invalid`, `need_help`, `scheduler_start_failed`) restano al maintainer: nessuna patch le risolve, e girarle a Kiro produrrebbe solo PR inutili.
+
+Kiro **non** richiede una GitHub Action: è una GitHub App da installare una volta su app.kiro.dev (Settings → Agent → Connect GitHub). Il workflow serve solo a decidere quali issue etichettare.
 
 Meccanismo: `scripts/lib/report-issue.sh` → `report_blocking_issue <root> <klass> <reason>` riusa lo stesso `issue-report.js` (draft+send, redazione PII, gate `reportIssues:false`) e lo stesso receiver Worker. **Deduplica** per classe+versione (marker `logs/.issued_<klass>_<sha>`, gitignorato): una sola issue per problema finché non cambia la versione (nuovo deploy = nuovo tentativo). Best-effort, non blocca l'automazione.
 

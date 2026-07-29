@@ -209,12 +209,22 @@ function addCompletedLesson(root, state, url, lessonUrl) {
   return updateCourse(root, state, url, { completedLessons: list });
 }
 
-function isCourseDoneOrNeedHelp(state, url) {
-  const c = getCourse(state, url);
+// Predicato terminale su un SINGOLO record. Estratto perché i due chiamanti
+// (isCourseDoneOrNeedHelp su URL, allDoneOrNeedHelp anche su ID nudi) devono
+// decidere allo stesso modo: prima divergevano, e un done legacy da
+// ricontrollare risultava "da lavorare" per la scoperta corsi ma "terminale"
+// per il controllo di fine lavoro. Su una dashboard vuota questo mascherava un
+// post_login_blocked da "tutti i corsi completati".
+function isTerminalCourse(c) {
+  if (!c) return false;
   // I done legacy senza prova di quiz/no-assessment vanno ricontrollati una
   // volta. I record nuovi portano completionEvidence e restano terminali.
   if (c.status === 'done' && c.finalQuizPassed === false && !c.completionEvidence) return false;
   return c.status === 'done' || c.status === 'need_help';
+}
+
+function isCourseDoneOrNeedHelp(state, url) {
+  return isTerminalCourse(getCourse(state, url));
 }
 
 function summarize(state) {
@@ -232,12 +242,13 @@ function summarize(state) {
 // alcuni chiamanti passano Object.keys(state) (ID nudi). isCourseDoneOrNeedHelp
 // via courseIdFromUrl gestisce gli URL; per gli ID nudi guardiamo direttamente
 // state[id]. Un corso non presente in state NON conta come done/need_help.
+// Usa lo STESSO predicato della scoperta corsi (isTerminalCourse): un done
+// legacy ancora da ricontrollare non deve chiudere il lavoro.
 function allDoneOrNeedHelp(state, urls) {
   if (!urls || urls.length === 0) return false;
   return urls.every(u => {
     const id = courseIdFromUrl(u);
-    const c = id ? getCourse(state, u) : state[u];
-    return c && (c.status === 'done' || c.status === 'need_help');
+    return isTerminalCourse(id ? getCourse(state, u) : state[u]);
   });
 }
 
@@ -268,6 +279,7 @@ module.exports = {
   markAssessment,
   allAssessmentsPassed,
   reopenCourse,
+  isTerminalCourse,
   isCourseDoneOrNeedHelp,
   summarize,
   allDoneOrNeedHelp,

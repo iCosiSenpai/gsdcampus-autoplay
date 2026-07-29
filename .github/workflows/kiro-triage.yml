@@ -1,0 +1,59 @@
+# Instrada le segnalazioni automatiche a Kiro.
+#
+# Kiro NON richiede una Action: è una GitHub App (app.kiro.dev → Settings →
+# Agent → Connect GitHub) che lavora le issue con label `kiro`. Questo workflow
+# serve solo a decidere QUALI auto-report meritano quella label.
+#
+# Perché filtrare invece di etichettare tutto: le auto-report arrivano da tutti
+# i Mac della flotta e la maggior parte NON è un bug di codice. Un link di
+# autologin scaduto o un corso bloccato da una domanda senza risposta non si
+# risolvono con una patch, e girarli a Kiro produrrebbe solo PR inutili da
+# revisionare. Passano quindi solo le classi in cui il difetto è nel repo.
+name: Instrada auto-report a Kiro
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  triage:
+    # La label auto-report la mette il receiver col PAT del maintainer: un utente
+    # qualsiasi della repo pubblica non può applicarla, quindi è un gate valido.
+    if: contains(github.event.issue.labels.*.name, 'auto-report')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Etichetta kiro se è un problema di codice
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Il titolo passa da variabile d'ambiente, MAI interpolato nello script:
+          # la repo è pubblica e un titolo è testo controllato da chi apre l'issue.
+          TITLE: ${{ github.event.issue.title }}
+          NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Titolo: "[auto-report] [mac-ab12cd] <fase>: <motivo>"
+          phase=$(printf '%s' "$TITLE" \
+            | sed -n 's/^\[auto-report\][[:space:]]*\(\[[^]]*\][[:space:]]*\)\{0,1\}\([a-z_]*\).*/\2/p')
+
+          echo "Fase rilevata: '${phase:-<nessuna>}'"
+
+          case "$phase" in
+            # Il difetto è nel repo: interstitial non gestito, selettori DOM che
+            # non combaciano più, crash ripetuti, rollback di un aggiornamento.
+            post_login_blocked|preflight_failed|crash_loop|auto_update_rollback)
+              gh issue edit "$NUMBER" --repo "$REPO" --add-label kiro
+              echo "→ passata a Kiro."
+              ;;
+            # Credenziali, dati o stato del singolo Mac: nessuna patch li risolve.
+            autologin_invalid|need_help|scheduler_start_failed)
+              echo "→ non è un bug di codice: resta al maintainer."
+              ;;
+            *)
+              echo "→ fase non riconosciuta: resta al maintainer."
+              ;;
+          esac

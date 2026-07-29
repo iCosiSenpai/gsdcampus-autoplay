@@ -46,6 +46,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { readJsonSafe } = require(path.join(__dirname, '..', '..', 'src', 'lib', 'io'));
 const account = require(path.join(__dirname, '..', '..', 'src', 'lib', 'account'));
@@ -90,12 +91,37 @@ function redactText(s) {
 
 // --- Helper contesto -------------------------------------------------------
 
+// L'autoplay logga l'avanzamento video ogni 30s. Su una lezione lunga sono
+// centinaia di righe identiche, e la coda dell'issue finiva per contenere SOLO
+// quelle: l'errore che ha causato la segnalazione restava fuori dalla finestra
+// e il maintainer doveva comunque andare a leggere il log sul Mac del collega.
+// Comprimiamo ogni sequenza in una riga di riepilogo, preservando l'ordine.
+const RE_VIDEO_PROGRESS = /\|\s*Video:\s*\d+:\d{2}\s*\/\s*\d+:\d{2}\s*$/;
+
+function collapseProgress(lines) {
+  const out = [];
+  let run = 0;
+  const flush = () => {
+    if (run === 1) out.push(pending);
+    else if (run > 1) out.push(`   … ${run} righe di avanzamento video omesse`);
+    run = 0;
+  };
+  let pending = '';
+  for (const line of lines) {
+    if (RE_VIDEO_PROGRESS.test(line)) { run++; pending = line; continue; }
+    flush();
+    out.push(line);
+  }
+  flush();
+  return out;
+}
+
 function readTail(file, n) {
   try {
     const data = fs.readFileSync(file, 'utf8');
     const lines = data.split('\n');
     if (lines.length && lines[lines.length - 1] === '') lines.pop();
-    return lines.slice(-n).join('\n');
+    return collapseProgress(lines).slice(-n).join('\n');
   } catch (e) {
     return null;
   }
@@ -116,12 +142,37 @@ function draftPath() {
   return path.join(paths.accountDir, '.issue_draft.json');
 }
 
+// Etichetta store: dice DA QUALE Mac arriva la segnalazione, senza identificare
+// la persona. Stessa policy di caratteri di diag-ping.js (solo innocui: uno slug
+// non può veicolare PII strutturata), e passa comunque per redactText, così un
+// CF messo qui per errore non finisce nella repo pubblica.
+//
+// Se storeTag non è configurato ripieghiamo su un ID OPACO derivato dal CF:
+// senza attribuzione, con più Mac in flotta le issue erano indistinguibili. Non
+// usiamo hostname o username del Mac perché la repo è pubblica e quelli sono
+// dati personali (RE_HOME li redae apposta). L'hash è a senso unico: pubblico
+// non dice nulla, il maintainer lo risolve con `members-cli.js whois <tag>`.
+function memberTag(cf) {
+  const clean = String(cf || '').trim().toUpperCase();
+  if (!clean) return '';
+  return 'mac-' + crypto.createHash('sha256').update(clean).digest('hex').slice(0, 6);
+}
+
+function storeTagOf(cfg) {
+  const explicit = String((cfg && cfg.storeTag) || '')
+    .replace(/[^a-zA-Z0-9_.:+-]/g, '')
+    .slice(0, 32);
+  return explicit || memberTag(cfg && cfg.codice_fiscale);
+}
+
 function gatherContext(phase, reasonArg) {
   const status = readJsonSafe(path.join(ROOT, 'logs', 'status.json'), {});
+  const cfg = readJsonSafe(path.join(ROOT, 'config.json'), {}, { warn: false }) || {};
   const reason = reasonArg || (status.lastError ? String(status.lastError) : '');
   return {
     phase,
     reason,
+    storeTag: storeTagOf(cfg),
     logTail: readTail(path.join(ROOT, 'logs', 'autoplay.log'), LOG_TAIL_LINES) || '(log non disponibile)',
     summary: status.courseStateSummary || null,
     lastQuiz: status.lastQuizResult || null,
@@ -134,7 +185,10 @@ function gatherContext(phase, reasonArg) {
 
 function buildDraft(ctx) {
   const shortReason = redactText(ctx.reason || '').replace(/\s+/g, ' ').trim().slice(0, 60);
-  const title = `[auto-report] ${ctx.phase}${shortReason ? ': ' + shortReason : ''}`;
+  const store = redactText(ctx.storeTag || '');
+  // Lo store va nel TITOLO: con più Mac in flotta, issue identiche per fase
+  // erano indistinguibili nella lista e sembravano duplicati.
+  const title = `[auto-report]${store ? ' [' + store + ']' : ''} ${ctx.phase}${shortReason ? ': ' + shortReason : ''}`;
   const L = [];
   L.push('## Fase', '`' + ctx.phase + '`', '');
   L.push('## Sintomo', redactText(ctx.reason || '(nessun messaggio di errore)').trim() || '(nessun messaggio)', '');
@@ -142,6 +196,8 @@ function buildDraft(ctx) {
   if (ctx.lastQuiz) L.push('', 'Ultimo quiz: ' + redactText(String(ctx.lastQuiz)));
   L.push('', `## Contesto (ultime ${LOG_TAIL_LINES} righe di logs/autoplay.log, redatte)`, '```', redactText(ctx.logTail), '```', '');
   L.push('## Ambiente',
+    '- store: ' + (store || '(ignoto: né storeTag né account configurati)') +
+      (store && store.startsWith('mac-') ? '  ← risolvi con `node scripts/lib/members-cli.js whois ' + store + '`' : ''),
     '- commit: ' + ctx.head,
     '- OS: ' + ctx.osPlatform,
     '- Node: ' + ctx.nodeVersion, '');
@@ -316,7 +372,7 @@ async function cmdSend() {
   sendViaGh(token, draft, file);
 }
 
-module.exports = { redactText };
+module.exports = { redactText, collapseProgress, storeTagOf, memberTag };
 
 if (require.main === module) {
   const cmd = process.argv[2];
