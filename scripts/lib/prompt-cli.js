@@ -900,7 +900,7 @@ async function cliMain() {
     process.exit(0);
   }
 
-  const { title, subtitle, preamble, defaultN, brand, items } = parseArgs(process.argv);
+  const { title, subtitle, preamble, defaultN, brand, items, timeoutSec } = parseArgs(process.argv);
   if (!items || items.length === 0) {
     realStdoutWrite('0\n');
     process.exit(0);
@@ -914,7 +914,14 @@ async function cliMain() {
       // numericMenu ritorna l'item o null; mappa a indice.
       chosen = await numericMenu(items, title, subtitle, { preamble });
     }
-  } catch (_) {
+  } catch (e) {
+    // NON ingoiare in silenzio: un errore di programmazione qui dentro diventava
+    // indistinguibile da "l'utente ha annullato", e install.sh rispondeva
+    // "Operazione annullata. Niente e' stato modificato." senza uno straccio di
+    // indizio. Successo davvero: un ReferenceError su una variabile non
+    // destrutturata ha bloccato il menu per tutti. Lo stderr non sporca il
+    // valore di ritorno (che va su stdout) ma lascia la traccia.
+    process.stderr.write(`[prompt-cli] menu non riuscito: ${e && e.message ? e.message : e}\n`);
     chosen = null;
   }
 
