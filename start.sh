@@ -112,10 +112,32 @@ step "3/5" "Controllo istanze attive"
 source "$DIR/scripts/lib/pid-utils.sh"
 if autoplay_instance_alive "$DIR"; then
   OLD_PID=$(autoplay_instance_pid "$DIR" 2>/dev/null || echo "?")
-  warn "Autoplay già in esecuzione (PID $OLD_PID, identità verificata)."
-  info "Monitor: ./status.sh"
-  info "Ferma:   ./stop.sh"
-  exit 1
+  if [ "${GSD_LAUNCHER:-0}" = "1" ]; then
+    # Il collega ha appena chiesto ESPLICITAMENTE "aggiorna e avvia": fermare la
+    # vecchia e ripartire e' esattamente quello che si aspetta. Rifiutare qui
+    # faceva fallire il launcher, che rispondeva "Scheduler non avviato" e per
+    # giunta apriva una issue scheduler_start_failed -- erano le #25/#26/#27,
+    # tre segnalazioni in quattro minuti dallo stesso Mac che riprovava.
+    #
+    # Il launcher prova gia a fermarla, ma solo se il PID corrisponde a un
+    # processo scheduler/autoplay; il controllo di "viva" qui e' piu largo
+    # (basta il runtime-lock), quindi restava questo buco in mezzo.
+    warn "C'è già un'automazione in esecuzione (PID $OLD_PID): la fermo e riparto."
+    "$DIR/stop.sh" >/dev/null 2>&1 || true
+    sleep 1
+    autoplay_clean_stale_lock "$DIR" >/dev/null 2>&1 || true
+    if autoplay_instance_alive "$DIR"; then
+      err "Non riesco a fermare l'automazione precedente (PID $OLD_PID)."
+      info "Fermala a mano con ./stop.sh e rilancia il comando."
+      exit 1
+    fi
+    ok "Vecchia automazione fermata."
+  else
+    warn "Autoplay già in esecuzione (PID $OLD_PID, identità verificata)."
+    info "Monitor: ./status.sh"
+    info "Ferma:   ./stop.sh"
+    exit 1
+  fi
 fi
 autoplay_clean_stale_lock "$DIR" >/dev/null 2>&1 || true
 if [ -f "$PID_FILE" ]; then
