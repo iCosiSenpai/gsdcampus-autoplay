@@ -78,43 +78,92 @@ const ANSI = {
 const GHOST_COLORS = ['\x1b[38;5;203m', '\x1b[38;5;213m', '\x1b[38;5;87m', '\x1b[38;5;214m'];
 
 // ── Sprite (Pac-Man e mostro veri) ────────────────────────────────────────
-// In una singola cella di terminale un Pac-Man "vero" non esiste: `ᗧ` e' un
-// ripiego e si vede. Qui le sagome sono disegnate a pixel e rese con i mezzi
-// blocchi — ogni carattere vale DUE pixel verticali (▀ alto, ▄ basso, █
-// entrambi) — quindi 8x8 pixel stanno in 8 colonne e 4 righe. Niente emoji:
-// sono a doppia larghezza e sfascerebbero l'allineamento del riquadro.
+// In una singola cella di terminale un Pac-Man "vero" non esiste, e nessuna
+// libreria lo cambia: il limite e' la griglia di caratteri, non il codice che
+// ci scrive sopra. Niente emoji (doppia larghezza: sfascerebbero il riquadro) e
+// niente immagini inline (iTerm2/Kitty le supportano, Terminal.app — quello di
+// serie sui Mac aziendali — no).
+//
+// La strada che funziona ovunque e' aumentare la RISOLUZIONE: con i mezzi
+// blocchi ogni carattere vale due pixel verticali (▀ alto, ▄ basso, █ entrambi),
+// quindi 16x16 pixel stanno in 16 colonne e 8 righe. E le sagome sono GENERATE
+// dalla geometria, non disegnate a mano: la curva e' davvero un cerchio, e
+// l'angolo della bocca essendo un parametro si puo' animare per davvero.
 const SPRITE_COLORS = {
   Y: '\x1b[1;38;5;226m',  // giallo Pac-Man
   B: '\x1b[1;38;5;21m',   // blu del mostro
   W: '\x1b[1;97m',        // bianco degli occhi
-  P: '\x1b[1;38;5;213m',  // rosa (Pinky)
+  P: '\x1b[1;38;5;213m',  // rosa (fermo)
 };
 
-const SPRITE_PAC = [
-  '..YYYY..',
-  '.YYYYYY.',
-  'YYYYY...',
-  'YYYY....',
-  'YYYY....',
-  'YYYYY...',
-  '.YYYYYY.',
-  '..YYYY..',
-];
+/**
+ * Disco pieno con uno spicchio tolto: Pac-Man che guarda a destra.
+ * @param {number} size lato in pixel (pari)
+ * @param {number} mouthDeg apertura della bocca in gradi (0 = chiusa)
+ * @returns {string[]} righe di pixel ('Y' pieno, '.' vuoto)
+ */
+function pacmanPixels(size, mouthDeg, ch = 'Y') {
+  const r = size / 2 - 0.5;
+  const rows = [];
+  for (let y = 0; y < size; y += 1) {
+    let row = '';
+    for (let x = 0; x < size; x += 1) {
+      const dx = x - r, dy = y - r;
+      const dentro = Math.sqrt(dx * dx + dy * dy) <= r;
+      const ang = Math.abs(Math.atan2(dy, dx) * 180 / Math.PI);
+      row += (dentro && ang > mouthDeg / 2) ? ch : '.';
+    }
+    rows.push(row);
+  }
+  return rows;
+}
 
-const spriteGhost = (c) => [
-  '..CCCC..',
-  '.CCCCCC.',
-  'CCWWCWWC',
-  'CCWWCWWC',
-  'CCCCCCCC',
-  'CCCCCCCC',
-  'CCCCCCCC',
-  'C..CC..C',
-].map((r) => r.replace(/C/g, c));
+/**
+ * Mostro: cupola tonda sopra, corpo dritto, fondo ondulato, due occhi che
+ * guardano nella direzione data. `ch` sceglie il colore del corpo.
+ */
+function ghostPixels(size, ch = 'B', lookDx = 0) {
+  const r = size / 2 - 0.5;
+  const ondaH = Math.max(1, Math.round(size / 8));
+  const passo = Math.max(1, Math.round(size / 5));
+  const rows = [];
+  for (let y = 0; y < size; y += 1) {
+    let row = '';
+    for (let x = 0; x < size; x += 1) {
+      const dx = x - r, dy = y - r;
+      // Sopra la meta': cupola circolare. Sotto: fianchi dritti.
+      let acceso = y <= r ? Math.sqrt(dx * dx + dy * dy) <= r : Math.abs(dx) <= r;
+      // Fondo a onde: le "gambe" del fantasma.
+      if (acceso && y >= size - ondaH && Math.floor(x / passo) % 2 === 1) acceso = false;
+      let c = acceso ? ch : '.';
+      if (acceso) {
+        // Occhi RETTANGOLARI e allineati alle righe pari. Con occhi tondi i
+        // pixel cadevano a cavallo della coppia di righe che forma una cella, e
+        // uscivano mezzi blocchi in reverse: una macchia illeggibile invece di
+        // due occhi.
+        const oh = Math.max(2, Math.round(size / 4));          // altezza
+        const ow = Math.max(2, Math.round(size / 5));          // larghezza
+        const oy = Math.max(0, Math.round(size * 0.25 / 2) * 2); // riga pari
+        const pw = Math.max(1, Math.round(ow / 2));            // pupilla
+        for (const ox of [Math.round(r - size * 0.28), Math.round(r + size * 0.28) - ow + 1]) {
+          if (x >= ox && x < ox + ow && y >= oy && y < oy + oh) {
+            c = 'W';
+            // Pupilla nella meta' bassa, spostata verso dove guarda.
+            const px = ox + (lookDx < 0 ? 0 : ow - pw);
+            if (x >= px && x < px + pw && y >= oy + oh - Math.max(1, Math.round(oh / 2))) c = ch;
+          }
+        }
+      }
+      row += c;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
 
 /**
  * Converte una griglia di pixel in righe di testo con i mezzi blocchi.
- * Pura e testabile: il colore lo mettono le lettere della griglia.
+ * Pura e testabile: il colore lo portano le lettere della griglia.
  * @returns {string[]} meta' delle righe in ingresso
  */
 function renderSprite(rows, color = true) {
@@ -131,8 +180,8 @@ function renderSprite(rows, color = true) {
       const tc = SPRITE_COLORS[tk] || '';
       const bc = SPRITE_COLORS[bk] || '';
       if (t && b) {
-        // Colori diversi sopra/sotto: mezzo blocco alto sul colore di sotto in
-        // reverse, cosi si ottengono due pixel di colore diverso in una cella.
+        // Colori diversi sopra/sotto: mezzo blocco alto in reverse sul colore
+        // di sotto — due pixel di colore diverso in una cella sola.
         line += tk === bk ? `${tc}█${ANSI.reset}` : `${bc}\x1b[7m${tc}▀${ANSI.reset}`;
       } else if (t) line += `${tc}▀${ANSI.reset}`;
       else if (b) line += `${bc}▄${ANSI.reset}`;
@@ -141,6 +190,13 @@ function renderSprite(rows, color = true) {
     out.push(line);
   }
   return out;
+}
+
+// Ciclo della bocca: chiusa → spalancata → chiusa. Con la sagoma generata
+// l'animazione e' quella vera dell'arcade, non due glifi che si alternano.
+const MOUTH_CYCLE = [4, 26, 50, 62, 50, 26];
+function mouthAngle(frame) {
+  return MOUTH_CYCLE[Math.abs(Math.floor(frame)) % MOUTH_CYCLE.length];
 }
 
 // ── Helper puri ───────────────────────────────────────────────────────────
@@ -658,10 +714,18 @@ function renderFrame(model, opts = {}) {
   // schermo lo stato, e l'informazione viene prima della decorazione.
   const altezzaOk = !opts.termRows || opts.termRows >= 30;
   if (color && width >= 60 && altezzaOk && opts.sprites !== false) {
-    const pac = renderSprite(SPRITE_PAC, true);
-    // Blu quando l'automazione lavora (il mostro insegue), rosa quando e' ferma.
-    const ghost = renderSprite(spriteGhost(model.schedAlive ? 'B' : 'P'), true);
-    const gap = ' '.repeat(Math.max(2, Math.min(30, width - 30)));
+    // 16x16 dove c'e' spazio (curva davvero tonda), 8x8 sulle finestre piu'
+    // piccole: meglio una sagoma piccola che una sagoma tagliata.
+    const grande = width >= 76 && (!opts.termRows || opts.termRows >= 34);
+    const size = grande ? 16 : 8;
+    // La bocca si muove solo mentre l'automazione lavora: un Pac-Man che
+    // mastica a vuoto su un Mac fermo sarebbe una bugia carina.
+    const apertura = model.schedAlive ? mouthAngle(spinIndex / 2) : 4;
+    const pac = renderSprite(pacmanPixels(size, apertura), true);
+    // Blu mentre lavora (il mostro insegue), rosa quando e' ferma. Gli occhi
+    // guardano verso Pac-Man.
+    const ghost = renderSprite(ghostPixels(size, model.schedAlive ? 'B' : 'P', -1), true);
+    const gap = ' '.repeat(Math.max(2, width - size * 2 - 8));
     L.push('');
     for (let i = 0; i < pac.length; i += 1) {
       L.push(`   ${pac[i]}${gap}${ghost[i]}`);
@@ -1239,6 +1303,6 @@ module.exports = {
   formatDuration, relativeTime, formatWhen, formatEventStamp, parseLogTimeline,
   courseIdFromUrl, computeHeadline, readModel, renderFrame, renderLogView, stripAnsi, visLen,
   terminalCloseScript, readVersion, keepAliveInstalled, planPanelRestart,
-  renderSprite, SPRITE_PAC, spriteGhost,
+  renderSprite, pacmanPixels, ghostPixels, mouthAngle,
   renderRegistryView,
 };

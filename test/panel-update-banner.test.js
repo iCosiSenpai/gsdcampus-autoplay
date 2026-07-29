@@ -15,7 +15,7 @@ process.env.LANG = 'en_US.UTF-8';
 
 const {
   renderFrame, stripAnsi, pacmanBar, pacmanSegments, paintPacman, PAC_FRAMES,
-  terminalCloseScript, planPanelRestart, renderSprite, SPRITE_PAC, spriteGhost,
+  terminalCloseScript, planPanelRestart, renderSprite, pacmanPixels, ghostPixels, mouthAngle,
 } = require('../scripts/lib/panel-cli');
 const { readHeadSha } = require('../src/lib/update-state');
 
@@ -85,46 +85,71 @@ describe('plancia: riga auto-aggiornamento', () => {
 });
 
 describe('sprite Pac-Man e mostro', () => {
-  // In una cella sola un Pac-Man "vero" non esiste: le sagome sono a pixel e
-  // rese coi mezzi blocchi, due pixel verticali per carattere.
+  // Le sagome sono GENERATE dalla geometria, non disegnate a mano: la curva e'
+  // davvero un cerchio e l'angolo della bocca, essendo un parametro, si anima.
   it('otto righe di pixel diventano quattro righe di testo', () => {
-    const out = renderSprite(SPRITE_PAC, false);
-    assert.equal(out.length, 4);
-    assert.equal(SPRITE_PAC.length, 8);
+    assert.equal(renderSprite(pacmanPixels(8, 40), false).length, 4);
+    assert.equal(renderSprite(pacmanPixels(16, 40), false).length, 8);
   });
 
   it('ogni riga conserva la larghezza della griglia', () => {
-    for (const r of renderSprite(SPRITE_PAC, false)) assert.equal(r.length, 8);
-    for (const r of renderSprite(spriteGhost('B'), false)) assert.equal(r.length, 8);
+    for (const r of renderSprite(pacmanPixels(16, 40), false)) assert.equal(r.length, 16);
+    for (const r of renderSprite(ghostPixels(16, 'B'), false)) assert.equal(r.length, 16);
   });
 
-  it('il mostro ha gli occhi: pixel bianchi dentro la sagoma', () => {
-    const g = spriteGhost('B');
+  it('la sagoma e tonda: gli angoli restano vuoti', () => {
+    const px = pacmanPixels(16, 0);
+    assert.equal(px[0][0], '.', 'angolo alto-sinistra vuoto');
+    assert.equal(px[15][15], '.', 'angolo basso-destra vuoto');
+    assert.equal(px[8][8], 'Y', 'centro pieno');
+  });
+
+  it('la bocca si apre a destra e piu gradi = piu pixel tolti', () => {
+    const conta = (rows) => rows.join('').split('Y').length - 1;
+    const chiusa = conta(pacmanPixels(16, 0));
+    const aperta = conta(pacmanPixels(16, 60));
+    assert.ok(aperta < chiusa, 'la bocca aperta toglie pixel');
+    // Lo spicchio sta a destra: la meta destra perde piu pixel della sinistra.
+    const rows = pacmanPixels(16, 60);
+    const dx = rows.map((r) => r.slice(8)).join('').split('Y').length - 1;
+    const sx = rows.map((r) => r.slice(0, 8)).join('').split('Y').length - 1;
+    assert.ok(dx < sx, 'lo spicchio e a destra');
+  });
+
+  it('il ciclo della bocca torna al punto di partenza', () => {
+    assert.equal(mouthAngle(0), mouthAngle(6));
+    assert.ok(new Set([0, 1, 2, 3, 4, 5].map(mouthAngle)).size > 2, 'piu di due posizioni');
+  });
+
+  it('il mostro ha occhi bianchi e fondo ondulato', () => {
+    const g = ghostPixels(16, 'B');
     assert.ok(g.some((r) => r.includes('W')), 'occhi presenti');
-    assert.ok(g[g.length - 1].includes('.'), 'fondo ondulato');
+    assert.ok(g[g.length - 1].includes('.'), 'fondo interrotto = onde');
+    assert.ok(g[1].includes('B'), 'cupola piena in alto');
   });
 
-  it('il colore del mostro e parametrico (blu quando lavora)', () => {
-    assert.ok(spriteGhost('B').every((r) => !r.includes('C')));
-    assert.notDeepEqual(spriteGhost('B'), spriteGhost('P'));
+  it('il colore del corpo e parametrico (blu quando lavora)', () => {
+    assert.ok(ghostPixels(16, 'B').some((r) => r.includes('B')));
+    assert.ok(ghostPixels(16, 'P').some((r) => r.includes('P')));
+    assert.equal(ghostPixels(16, 'P').some((r) => r.includes('B')), false);
   });
 
-  it('senza colore resta comunque una sagoma leggibile', () => {
-    const out = renderSprite(SPRITE_PAC, false).join('');
-    assert.ok(/[#-]/.test(out), 'pixel resi anche in ASCII');
-    assert.equal(/\u001b/.test(out), false, 'nessun escape ANSI');
+  it('le pupille seguono lo sguardo', () => {
+    assert.notDeepEqual(ghostPixels(16, 'B', -1), ghostPixels(16, 'B', 1));
   });
 
-  it('su finestra bassa il banner non compare: prima l informazione', () => {
-    const alta = renderFrame(baseModel, { color: true, width: 74, termRows: 40 });
-    const bassa = renderFrame(baseModel, { color: true, width: 74, termRows: 20 });
+  it('senza colore resta una sagoma leggibile, senza escape ANSI', () => {
+    const out = renderSprite(pacmanPixels(16, 40), false).join('');
+    assert.ok(/[#-]/.test(out));
+    assert.equal(/\u001b/.test(out), false);
+  });
+
+  it('su finestra bassa o stretta il banner non compare: prima l informazione', () => {
+    const alta = renderFrame(baseModel, { color: true, width: 80, termRows: 40 });
+    const bassa = renderFrame(baseModel, { color: true, width: 80, termRows: 20 });
+    const stretta = renderFrame(baseModel, { color: true, width: 50, termRows: 40 });
     assert.ok(alta.split('\n').length > bassa.split('\n').length);
-  });
-
-  it('su finestra stretta il banner non compare', () => {
-    const largo = renderFrame(baseModel, { color: true, width: 74, termRows: 40 });
-    const stretto = renderFrame(baseModel, { color: true, width: 50, termRows: 40 });
-    assert.ok(largo.split('\n').length > stretto.split('\n').length);
+    assert.ok(alta.split('\n').length > stretta.split('\n').length);
   });
 });
 
