@@ -1,15 +1,21 @@
-# Instrada le segnalazioni automatiche a Kiro.
+# Gira le segnalazioni automatiche all'agente di Amazon Q Developer.
 #
-# Kiro NON richiede una Action: è una GitHub App (app.kiro.dev → Settings →
-# Agent → Connect GitHub) che lavora le issue con label `kiro`. Questo workflow
-# serve solo a decidere QUALI auto-report meritano quella label.
+# Q Developer è già installato come GitHub App su questa repo (crea da sé la
+# label "Amazon Q development agent"). Etichettando una issue, l'agente la
+# legge, scrive il codice e apre una PR. È gratuito entro un limite mensile di
+# esecuzioni, alzabile registrando l'installazione con l'account AWS.
+#
+# Q Developer NON è Kiro: sono due prodotti AWS distinti. Kiro resta un'opzione
+# (serve piano Pro + API key), ma finché Q fa il lavoro non aggiungiamo né costi
+# né action di terze parti con permessi di scrittura su questa repo.
 #
 # Perché filtrare invece di etichettare tutto: le auto-report arrivano da tutti
 # i Mac della flotta e la maggior parte NON è un bug di codice. Un link di
 # autologin scaduto o un corso bloccato da una domanda senza risposta non si
-# risolvono con una patch, e girarli a Kiro produrrebbe solo PR inutili da
-# revisionare. Passano quindi solo le classi in cui il difetto è nel repo.
-name: Instrada auto-report a Kiro
+# risolvono con una patch, e girarli all'agente brucerebbe il limite mensile per
+# produrre PR da buttare. Passano quindi solo le classi in cui il difetto è nel
+# repo.
+name: Instrada auto-report all agente
 
 on:
   issues:
@@ -25,7 +31,7 @@ jobs:
     if: contains(github.event.issue.labels.*.name, 'auto-report')
     runs-on: ubuntu-latest
     steps:
-      - name: Etichetta kiro se è un problema di codice
+      - name: Etichetta per l agente se è un problema di codice
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Il titolo passa da variabile d'ambiente, MAI interpolato nello script:
@@ -44,13 +50,15 @@ jobs:
 
           case "$phase" in
             # Il difetto è nel repo: interstitial non gestito, selettori DOM che
-            # non combaciano più, crash ripetuti, rollback di un aggiornamento.
-            post_login_blocked|preflight_failed|crash_loop|auto_update_rollback)
-              gh issue edit "$NUMBER" --repo "$REPO" --add-label kiro
-              echo "→ passata a Kiro."
+            # non combaciano più, crash ripetuti, launcher che non parte, rollback
+            # di un aggiornamento.
+            post_login_blocked|preflight_failed|crash_loop|auto_update_rollback|scheduler_start_failed)
+              gh issue edit "$NUMBER" --repo "$REPO" \
+                --add-label "Amazon Q development agent"
+              echo "→ passata all'agente."
               ;;
-            # Credenziali, dati o stato del singolo Mac: nessuna patch li risolve.
-            autologin_invalid|need_help|scheduler_start_failed)
+            # Credenziali o dati del singolo Mac: nessuna patch li risolve.
+            autologin_invalid|need_help)
               echo "→ non è un bug di codice: resta al maintainer."
               ;;
             *)
