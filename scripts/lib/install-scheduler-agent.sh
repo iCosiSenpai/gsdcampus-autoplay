@@ -19,7 +19,10 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 UID_NUM="$(id -u)"
 
 remove_agent() {
+  # bootout anche per LABEL: se il plist e' gia sparito, il bootout del solo
+  # percorso non tocca il job, che resta registrato e fallisce per sempre.
   launchctl bootout "gui/$UID_NUM" "$PLIST" 2>/dev/null || true
+  launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null || true
   rm -f "$PLIST"
 }
 
@@ -29,6 +32,22 @@ install_agent() {
     echo "launchctl non disponibile: keepalive non installato (ok su non-macOS)."
     return 0
   fi
+
+  # Postazione di sviluppo: niente guardiano che resusciti i corsi.
+  if node -e 'try{process.exit(require(process.argv[1]).devMode===true?0:1)}catch(e){process.exit(1)}' "$DIR/config.json" 2>/dev/null; then
+    remove_agent
+    echo "Mac di sviluppo (devMode): guardiano non installato."
+    return 0
+  fi
+
+  # Da una copia temporanea l'agent nascerebbe gia' condannato: il percorso
+  # sparisce e resta un job che fallisce a ogni giro, in silenzio.
+  case "$DIR" in
+    /tmp/*|/private/tmp/*|/var/folders/*)
+      echo "installazione temporanea ($DIR): guardiano non installato." >&2
+      return 0
+      ;;
+  esac
 
   # Opt-out esplicito: config.json { "keepAlive": false } → agent rimosso.
   local enabled

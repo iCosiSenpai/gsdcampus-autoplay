@@ -271,9 +271,44 @@ function pidAlive(pid) {
 // I cloni dei colleghi sono `--depth 1` e NON hanno i tag: lì `describe`
 // restituisce solo lo sha, quindi ripieghiamo su package.json + sha
 // ("v1.1.0 · 42a07aa") invece di mostrare un esadecimale nudo.
+// Cache con scadenza, NON per sempre. Prima il valore veniva calcolato al primo
+// frame e non cambiava mai piu': su una plancia lasciata aperta, dopo un
+// aggiornamento continuava a mostrare la versione con cui era partita — che e'
+// esattamente il momento in cui uno guarda la versione per capire se e'
+// aggiornato. 30s bastano: `git describe` costa pochi millisecondi.
 let _versionCache;
+let _versionCachedAt = 0;
+const VERSION_TTL_MS = 30000;
+
+// Data del commit su cui gira questo codice. La versione da sola ("v1.1.0-81")
+// non dice a nessuno SE l'aggiornamento e' andato a buon fine: la data si', a
+// colpo d'occhio. Stessa cache a scadenza della versione.
+let _versionDateCache;
+let _versionDateAt = 0;
+function readVersionDate(root) {
+  if (_versionDateCache !== undefined && Date.now() - _versionDateAt < VERSION_TTL_MS) {
+    return _versionDateCache;
+  }
+  _versionDateAt = Date.now();
+  let iso = '';
+  try {
+    iso = String(spawnSync('git', ['log', '-1', '--format=%cI'], {
+      cwd: root, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'],
+    }).stdout || '').trim();
+  } catch (_) { iso = ''; }
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) { _versionDateCache = null; return null; }
+  const d = new Date(t);
+  const p2 = (n) => String(n).padStart(2, '0');
+  _versionDateCache = `${p2(d.getDate())}/${p2(d.getMonth() + 1)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+  return _versionDateCache;
+}
+
 function readVersion(root) {
-  if (_versionCache !== undefined) return _versionCache;
+  if (_versionCache !== undefined && Date.now() - _versionCachedAt < VERSION_TTL_MS) {
+    return _versionCache;
+  }
+  _versionCachedAt = Date.now();
   let describe = '';
   try {
     describe = String(spawnSync('git', ['describe', '--tags', '--always'], {
@@ -447,6 +482,8 @@ function readModel(root, now = Date.now()) {
     now,
     member: config.memberName || config.codice_fiscale || 'account attivo',
     version: readVersion(root),
+    versionDate: readVersionDate(root),
+    devMode: config.devMode === true,
     keepAlive: keepAliveInstalled(),
     status,
     summary: status.courseStateSummary || null,
@@ -520,15 +557,29 @@ function renderFrame(model, opts = {}) {
   const head = computeHeadline(model);
 
   // Header: mascotte animata + nome + versione release, badge di stato a destra.
-  const badge = model.schedAlive
-    ? (model.workNow ? c(ANSI.green, `${GLYPH.dot} attivo`) : c(ANSI.yellow, `${GLYPH.pause} in pausa`))
-    : c(ANSI.red, `${GLYPH.dot} fermo`);
+  // Su una postazione di sviluppo "fermo" e' lo stato giusto, non un guasto: il
+  // badge rosso manderebbe a cercare un problema che non c'e'.
+  const badge = model.devMode
+    ? c(ANSI.maze, `${GLYPH.bul} sviluppo`)
+    : model.schedAlive
+      ? (model.workNow ? c(ANSI.green, `${GLYPH.dot} attivo`) : c(ANSI.yellow, `${GLYPH.pause} in pausa`))
+      : c(ANSI.red, `${GLYPH.dot} fermo`);
   let mascot;
   if (!model.schedAlive) mascot = c(GHOST_COLORS[0], GLYPH.ghost);
   else if (head.level === 'attention') mascot = c(GHOST_COLORS[1], GLYPH.ghost);
   else if (!model.workNow) mascot = c(ANSI.pac, GLYPH.pacClosed);
   else mascot = c(ANSI.pac, PAC_FRAMES[spinIndex % PAC_FRAMES.length]);
-  const version = model.version ? ` ${c(ANSI.dim, GLYPH.bul)} ${c(ANSI.dim, model.version)}` : '';
+  // Versione + data del commit: insieme rispondono a "si e' aggiornato?".
+  // Se un aggiornamento e' gia stato scaricato ma non ancora adottato, si dice
+  // qui, dove uno guarda -- non solo in fondo al riquadro.
+  let version = '';
+  if (model.version) {
+    const stamp = model.versionDate ? ` ${c(ANSI.dim, model.versionDate)}` : '';
+    const pending = model.update && model.update.remoteVersion
+      ? ` ${c(ANSI.yellow, '↑ aggiornamento pronto')}`
+      : '';
+    version = ` ${c(ANSI.dim, GLYPH.bul)} ${c(ANSI.pellet, model.version)}${stamp}${pending}`;
+  }
   const title = `${mascot} ${c(ANSI.pac, 'GSD CAMPUS')} ${c(ANSI.maze, GLYPH.bul)} ${c(ANSI.bold, model.member)}${version}`;
   const pad = Math.max(1, width - visLen(title) - visLen(badge));
   L.push(` ${title}${' '.repeat(pad)}${badge}`);

@@ -34,6 +34,15 @@ fi
 
 ui_header "Avvio GSD Campus Autoplay" "versione $(ui_version "$DIR")" "ᗧ"
 
+# Mac di sviluppo: qui il progetto si modifica, non si usa. Senza questa guardia
+# basta un curl di troppo per far partire i corsi sull'account di qualcun altro,
+# con i cookie e lo stato di questa cartella. Si disattiva togliendo devMode.
+if node -e 'try{process.exit(require(process.argv[1]).devMode===true?0:1)}catch(e){process.exit(1)}' "$DIR/config.json" 2>/dev/null; then
+  warn "Questo Mac è configurato come postazione di SVILUPPO (devMode: true)."
+  info "I corsi non partono da qui. Per usarlo davvero: togli \"devMode\" da config.json."
+  exit 0
+fi
+
 # Verifica che config.json esista e non sia placeholder
 step "1/5" "Verifica configurazione"
 if [ ! -f "$DIR/config.json" ]; then

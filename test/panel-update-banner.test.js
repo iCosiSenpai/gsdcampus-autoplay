@@ -84,6 +84,34 @@ describe('plancia: riga auto-aggiornamento', () => {
   });
 });
 
+describe('plancia: versione e modalita sviluppo', () => {
+  it('mostra versione E data del commit: la versione da sola non dice se si e aggiornato', () => {
+    const out = frame({ ...baseModel, version: 'v1.1.0-81', versionDate: '29/07 11:34' });
+    assert.match(out, /v1\.1\.0-81 29\/07 11:34/);
+  });
+
+  it('senza data mostra almeno la versione', () => {
+    assert.match(frame({ ...baseModel, versionDate: null }), /v1\.1\.0-63/);
+  });
+
+  it('segnala in alto un aggiornamento gia scaricato', () => {
+    const out = frame({ ...baseModel, update: { remoteVersion: 'v1.1.0-90' } });
+    assert.match(out, /aggiornamento pronto/);
+  });
+
+  it('su un Mac di sviluppo il badge dice sviluppo, non "fermo"', () => {
+    // "fermo" in rosso manderebbe a cercare un guasto che non esiste: su una
+    // postazione di sviluppo l'automazione NON deve girare.
+    const out = frame({ ...baseModel, devMode: true, schedAlive: false });
+    assert.match(out, /sviluppo/);
+    assert.equal(/fermo/.test(out), false);
+  });
+
+  it('senza devMode il badge resta quello normale', () => {
+    assert.match(frame({ ...baseModel, devMode: false, schedAlive: false }), /fermo/);
+  });
+});
+
 describe('plancia: menu a frecce', () => {
   // Il menu ha sostituito i tasti a lettera. L'intenzione da difendere resta la
   // stessa: "Ferma tutto" deve dichiararsi come stop VERO (corsi + scheduler +

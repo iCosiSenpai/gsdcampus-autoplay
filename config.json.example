@@ -29,6 +29,8 @@
   "sessionUnstableCooldownMin": 30,
   "shareMetrics": false,
   "storeTag": "",
+  "_devMode": "true = postazione di sviluppo: i corsi non partono e non si installano guardiani",
+  "devMode": false,
   "memberQueue": [],
   "memberQueueIndex": 0,
   "workSchedule": {

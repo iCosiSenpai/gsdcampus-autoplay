@@ -41,6 +41,13 @@ drop_orphan_agent() {
 install_agent() {
   drop_orphan_agent
 
+  # Postazione di sviluppo: nessun automatismo in background.
+  if node -e 'try{process.exit(require(process.argv[1]).devMode===true?0:1)}catch(e){process.exit(1)}' "$DIR/config.json" 2>/dev/null; then
+    remove_agent
+    echo "Mac di sviluppo (devMode): auto-update periodico non attivato."
+    return 0
+  fi
+
   # Installare da una copia temporanea produce un agent che punta a un percorso
   # destinato a sparire: da quel momento fallisce a ogni giro e l'aggiornamento
   # automatico e' morto senza un segnale. Meglio non installarlo affatto.
