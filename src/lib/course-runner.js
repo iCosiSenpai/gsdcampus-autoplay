@@ -125,6 +125,7 @@ function createCourseRunner(deps) {
     ignoreHours: IGNORE_HOURS,
     paths: _paths,
     saveSession,
+    coursePercentOf,
   } = deps;
 
   async function solveQuizWrapper(page, courseUrl, assessmentUrl = null) {
@@ -447,6 +448,16 @@ function createCourseRunner(deps) {
           for (let qi = 0; qi < assessmentUrls.length; qi++) {
             const quizLink = assessmentUrls[qi];
             const assessmentId = courseState.assessmentIdFromUrl(quizLink);
+            // Un questionario gia' superato non si riapre. Senza questo salto il
+            // ciclo rientrava a ogni giro in una prova chiusa: inutile, e
+            // un'esposizione ripetuta a un modulo di compilazione che non
+            // dovrebbe piu' essere aperto. Il raggruppamento per numero fa sì
+            // che valga anche quando lo stesso questionario e' elencato due
+            // volte (come modulo e come corso).
+            if (courseState.isQuestionnairePassed(state, courseUrl, quizLink)) {
+              log(`Questionario ${assessmentId || (qi + 1)} risulta gia superato: non lo riapro.`);
+              continue;
+            }
             log(`Verifico questionario ${assessmentId || (qi + 1)}/${assessmentUrls.length}...`);
             monitor.update({ phase: 'quiz_dashboard', courseUrl, quizUrl: quizLink });
             const quizLocator = page.locator(`a[href="${quizLink}"]`).first();
@@ -592,6 +603,26 @@ function createCourseRunner(deps) {
         } catch (e) {
           log(`Errore quiz: ${e.message}`);
           await monitor.recordError(page, e, 'finalQuiz');
+        }
+
+        // "Nessuna lezione da fare e nessun questionario" non vuol dire "corso
+        // finito": la pagina del corso mostra solo le lezioni SBLOCCATE, e la
+        // piattaforma ne rivela altre man mano che le precedenti si completano.
+        // Dichiarare finito un corso in quel momento e' come dire di aver letto un
+        // libro dopo il primo capitolo.
+        //
+        // Visto sul conto reale: il corso 19568 e' stato segnato 'done' mentre la
+        // dashboard lo dava al 10,39%. Il record restava recuperabile solo per la
+        // clausola sui done legacy in isTerminalCourse, ma nel frattempo il corso
+        // veniva mostrato come concluso — e chi guardava credeva di aver finito.
+        const platformPercent = typeof coursePercentOf === 'function' ? coursePercentOf(courseUrl) : null;
+        if (platformPercent != null && platformPercent < 100) {
+          log(`Corso ${courseUrl}: nessuna lezione disponibile ora, ma la piattaforma lo da' al ${platformPercent}%. Restano lezioni bloccate: lo lascio in corso.`);
+          // Nessuna fase nuova: inventarne una la farebbe comparire come
+          // sconosciuta nella plancia e nell'app. Il corso resta semplicemente in
+          // corso, che e' la verita'.
+          monitor.update({ courseUrl, courseStateSummary: courseState.summarize(state) });
+          return;
         }
 
         log(`Corso ${courseUrl} TERMINATO (nessun questionario finale).`);

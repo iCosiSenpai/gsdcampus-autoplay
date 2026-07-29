@@ -117,7 +117,20 @@ function targetAccountIds(root, options = {}) {
 
 function clearResolvedFromHandoff(root, resolvedQuestions, options = {}) {
   if (!resolvedQuestions || resolvedQuestions.length === 0) return 0;
+  // normKey NON comprime gli spazi interni: "qual  e il principio" e
+  // "qual e  il principio" restano chiavi diverse. La stessa domanda arriva
+  // spaziata in modo diverso da schermate diverse, e la conseguenza e' brutta e
+  // silenziosa — la domanda resta nell'elenco delle aperte, unblockResolvedQuizCourses
+  // vede una domanda ancora in attesa, e IL CORSO NON RIPARTE MAI. Si accetta
+  // quindi anche la corrispondenza a spazi compressi: e' un sovrainsieme, e a
+  // questo punto la risposta e' comunque gia' nella banca trusted.
+  const collapse = (s) => String(s || '').split(/\s+/).filter(Boolean).join(' ');
   const resolvedKeys = new Set(resolvedQuestions.map(q => normKey(q)));
+  const resolvedLoose = new Set(resolvedQuestions.map(q => collapse(normKey(q))));
+  const isResolved = (question) => {
+    const key = normKey(question || '');
+    return resolvedKeys.has(key) || resolvedLoose.has(collapse(key));
+  };
   let removed = 0;
   for (const cf of targetAccountIds(root, options)) {
     const paths = account.stateFilePaths(root, cf);
@@ -128,8 +141,8 @@ function clearResolvedFromHandoff(root, resolvedQuestions, options = {}) {
         if (!fs.existsSync(f)) continue;
         const data = readJsonSafe(f, null);
         if (!data || !Array.isArray(data.questions)) continue;
-        const removedItems = data.questions.filter(q => resolvedKeys.has(normKey(q.question || '')));
-        const kept = data.questions.filter(q => !resolvedKeys.has(normKey(q.question || '')));
+        const removedItems = data.questions.filter(q => isResolved(q.question));
+        const kept = data.questions.filter(q => !isResolved(q.question));
         if (removedItems.length > 0) {
           removed += removedItems.length;
           for (const item of removedItems) {

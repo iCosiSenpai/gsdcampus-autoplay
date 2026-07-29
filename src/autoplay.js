@@ -98,6 +98,12 @@ function saveSession(state) {
 
 
 // Runner del singolo corso (lezioni + quiz). Dipendenze iniettate.
+// url -> percentuale riportata dalla dashboard. La riempie discoverCourses a ogni
+// giro. Serve al ciclo dei corsi per NON dichiarare finito un corso che la
+// piattaforma da' sotto il 100%: la pagina del corso mostra solo le lezioni
+// sbloccate, quindi "nessuna lezione da fare" non significa "corso finito".
+const coursePercents = {};
+
 const courseRunner = createCourseRunner({
   root: ROOT,
   log,
@@ -106,6 +112,7 @@ const courseRunner = createCourseRunner({
   ignoreHours: IGNORE_HOURS,
   paths: _paths,
   saveSession,
+  coursePercentOf: (url) => (url in coursePercents ? coursePercents[url] : null),
 });
 const { runCourse } = courseRunner;
 
@@ -347,7 +354,11 @@ async function runAutoplay() {
             const discovered = enrichCourseRows(rawCards);
             // Cattura i titoli (stesso parser del censimento) per mostrarli nella
             // plancia via status.json: discoverCourses restituisce solo URL.
-            for (const c of discovered) { if (c && c.url) courseTitles[c.url] = (c.title || '').replace(/\s+/g, ' ').trim() || null; }
+            for (const c of discovered) {
+              if (!c || !c.url) continue;
+              courseTitles[c.url] = (c.title || '').replace(/\s+/g, ' ').trim() || null;
+              if (c.pct != null) coursePercents[c.url] = c.pct;
+            }
             const links = discovered.map(c => c.url);
             const reconciledPending = recentlyReconciledPendingCourses();
             const fresh = links.filter(url => !courseState.isCourseDoneOrNeedHelp(state, url) || reconciledPending.has(url));

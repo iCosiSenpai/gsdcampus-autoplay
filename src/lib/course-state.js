@@ -177,13 +177,74 @@ function markAssessment(root, state, courseUrl, assessmentUrl, status, details =
   return updateCourse(root, state, courseUrl, { assessments });
 }
 
+// Il numero del questionario dentro l'indirizzo. E' l'identita' VERA di un
+// questionario: /questionario/VA/dashboard/69/modulo/920 e
+// /questionario/VA/dashboard/69/corso/156 sono lo stesso questionario #69.
+function questionnaireNumberFromUrl(url) {
+  const m = String(url || '').match(/\/questionario\/[^/]+\/[^/]+\/(\d+)/i);
+  return m ? m[1] : null;
+}
+
+// Un questionario risulta GIA' superato? Raggruppa come allAssessmentsPassed:
+// se lo stesso questionario e' registrato sotto piu' id, basta che uno sia
+// 'passed'.
+//
+// Serve a NON rientrare in un questionario chiuso. Il ciclo dei corsi chiamava
+// solveQuizWrapper su ogni assessment elencato, anche su quelli gia' superati:
+// con il questionario elencato due volte (come modulo e come corso) significava
+// riaprire ogni volta una prova gia' passata a 27/30. Ed e' cosi' che l'id
+// 'corso:NNN' finiva 'failed' con resultText 'ignoto' — non fallito, mai
+// ottenuto. Il tentativo si consuma solo alla finalizzazione, quindi non era una
+// perdita certa, ma era un'esposizione inutile ripetuta a ogni giro.
+function isQuestionnairePassed(state, courseUrl, assessmentUrl) {
+  const c = getCourse(state, courseUrl);
+  const assessments = c.assessments || {};
+  const wanted = questionnaireNumberFromUrl(assessmentUrl);
+  const id = assessmentIdFromUrl(assessmentUrl);
+  for (const [key, entry] of Object.entries(assessments)) {
+    if (!entry || entry.status !== 'passed') continue;
+    if (key === id) return true;
+    // Stesso questionario per numero: vale anche se l'id e' diverso.
+    if (wanted && questionnaireNumberFromUrl(entry.url) === wanted) return true;
+  }
+  return false;
+}
+
 function allAssessmentsPassed(state, courseUrl, assessmentUrls = null) {
   const c = getCourse(state, courseUrl);
   const assessments = c.assessments || {};
   const ids = Array.isArray(assessmentUrls)
     ? assessmentUrls.map(assessmentIdFromUrl).filter(Boolean)
     : Object.keys(assessments);
-  return ids.length > 0 && ids.every(id => assessments[id] && assessments[id].status === 'passed');
+  if (ids.length === 0) return false;
+
+  // Si raggruppa per QUESTIONARIO, non per id.
+  //
+  // assessmentIdFromUrl ricava due id dallo stesso questionario, perche' la
+  // pagina del corso lo elenca due volte: una volta come questionario del
+  // modulo (modulo/920) e una come questionario del corso (corso/156).
+  // Misurato dal vivo: i due indirizzi portano alla stessa pagina, stesso
+  // titolo ("SISTEMI DIGITALI MODULO: SVILUPPARE CONTENUTI DIGITALI") e stesso
+  // esito ("superato! 27/30").
+  //
+  // Superandolo una volta l'esito si registra sotto UN id solo; l'altro resta
+  // 'failed' con resultText 'ignoto' — cioe' mai ottenuto, non fallito. Con la
+  // regola precedente (ogni id deve essere passed) quei corsi non potevano
+  // chiudersi MAI. Sul conto reale succedeva su 5 corsi su 5, tutti con il
+  // questionario davvero superato (27/30, 30/30, 30/30, 27/30, 30/30).
+  //
+  // Un esito 'passed' su QUALSIASI id del gruppo vale per il questionario.
+  // L'intenzione originale resta intatta: due questionari DIVERSI hanno numeri
+  // diversi, quindi restano due gruppi e servono due esiti positivi.
+  const groups = new Map();
+  for (const id of ids) {
+    const entry = assessments[id];
+    // Senza indirizzo registrato l'id fa gruppo da solo: non si accorpa a caso.
+    const key = questionnaireNumberFromUrl(entry && entry.url) || `id:${id}`;
+    const passed = Boolean(entry && entry.status === 'passed');
+    groups.set(key, (groups.get(key) || false) || passed);
+  }
+  return [...groups.values()].every(Boolean);
 }
 
 // Riapre un corso mantenendo lezioni e ledger assessment. Diversamente da
@@ -278,6 +339,8 @@ module.exports = {
   registerAssessments,
   markAssessment,
   allAssessmentsPassed,
+  isQuestionnairePassed,
+  questionnaireNumberFromUrl,
   reopenCourse,
   isTerminalCourse,
   isCourseDoneOrNeedHelp,

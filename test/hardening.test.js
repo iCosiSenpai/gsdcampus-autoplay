@@ -10,6 +10,7 @@ const {
   registerAssessments,
   markAssessment,
   allAssessmentsPassed,
+  isQuestionnairePassed,
   isCourseDoneOrNeedHelp,
   incrementProtectedSuspension,
 } = require('../src/lib/course-state');
@@ -31,14 +32,86 @@ describe('quiz hardening: multi-assessment state', () => {
     const root = tempRoot();
     fs.mkdirSync(path.join(root, 'data'), { recursive: true });
     const course = 'https://x/corso/show/159';
+    // Due questionari DAVVERO distinti: numeri diversi (#73 e #75). Prima qui
+    // c'erano /dashboard/73/modulo/923 e /dashboard/73/corso/159, che sono lo
+    // STESSO questionario #73 raggiunto per due strade — quindi il test
+    // pretendeva due esiti positivi per un solo questionario, ed e' il motivo
+    // per cui 5 corsi con il questionario superato non si chiudevano mai.
     const a = 'https://x/questionario/VA/dashboard/73/modulo/923';
-    const b = 'https://x/questionario/VA/dashboard/73/corso/159';
+    const b = 'https://x/questionario/VA/dashboard/75/modulo/925';
     const state = {};
     registerAssessments(root, state, course, [a, b]);
     markAssessment(root, state, course, a, 'passed');
     assert.equal(allAssessmentsPassed(state, course, [a, b]), false);
     markAssessment(root, state, course, b, 'passed');
     assert.equal(allAssessmentsPassed(state, course, [a, b]), true);
+  });
+
+  it('lo stesso questionario elencato due volte conta una volta sola', () => {
+    const root = tempRoot();
+    fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+    const course = 'https://x/corso/show/156';
+    // Misurato sul conto reale: la pagina del corso elenca lo stesso
+    // questionario #69 due volte, come questionario del modulo e come
+    // questionario del corso. Aprendo i due indirizzi si arriva alla stessa
+    // pagina, stesso titolo e stesso esito ("superato! 27/30"). L'automazione
+    // registra l'esito sotto un id solo e lascia l'altro 'failed'/'ignoto'.
+    const asModulo = 'https://x/questionario/VA/dashboard/69/modulo/920';
+    const asCorso = 'https://x/questionario/VA/dashboard/69/corso/156';
+    const state = {};
+    registerAssessments(root, state, course, [asModulo, asCorso]);
+    markAssessment(root, state, course, asModulo, 'passed', { resultText: 'superato (27/30)' });
+    markAssessment(root, state, course, asCorso, 'failed', { resultText: 'ignoto' });
+    assert.equal(
+      allAssessmentsPassed(state, course, [asModulo, asCorso]),
+      true,
+      'il questionario e superato: il corso deve poter chiudersi'
+    );
+  });
+
+  it('un id senza indirizzo registrato non si accorpa ad altri', () => {
+    const root = tempRoot();
+    fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+    const course = 'https://x/corso/show/200';
+    // Il raggruppamento si basa sull'indirizzo salvato. Se manca, l'id resta
+    // gruppo a se: meglio un corso che non si chiude che uno chiuso a torto.
+    const state = {
+      200: {
+        status: 'in_progress',
+        assessments: {
+          'modulo:1': { id: 'modulo:1', url: 'https://x/questionario/VA/dashboard/80/modulo/1', status: 'passed' },
+          'corso:2': { id: 'corso:2', status: 'failed' },
+        },
+      },
+    };
+    assert.equal(allAssessmentsPassed(state, course), false);
+  });
+
+  it('un questionario gia superato non si riapre', () => {
+    const root = tempRoot();
+    fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+    const course = 'https://x/corso/show/156';
+    const asModulo = 'https://x/questionario/VA/dashboard/69/modulo/920';
+    const asCorso = 'https://x/questionario/VA/dashboard/69/corso/156';
+    const state = {};
+    registerAssessments(root, state, course, [asModulo, asCorso]);
+    markAssessment(root, state, course, asModulo, 'passed', { resultText: 'superato (27/30)' });
+    // Lo stesso questionario raggiunto per l'altra strada risulta superato:
+    // rientrarci sarebbe riaprire una prova chiusa a 27/30.
+    assert.equal(isQuestionnairePassed(state, course, asCorso), true);
+    assert.equal(isQuestionnairePassed(state, course, asModulo), true);
+  });
+
+  it('un questionario diverso non viene scambiato per superato', () => {
+    const root = tempRoot();
+    fs.mkdirSync(path.join(root, 'data'), { recursive: true });
+    const course = 'https://x/corso/show/156';
+    const passato = 'https://x/questionario/VA/dashboard/69/modulo/920';
+    const daFare = 'https://x/questionario/VA/dashboard/70/modulo/921';
+    const state = {};
+    registerAssessments(root, state, course, [passato, daFare]);
+    markAssessment(root, state, course, passato, 'passed');
+    assert.equal(isQuestionnairePassed(state, course, daFare), false);
   });
 
   it('conta una sospensione protetta separatamente dai tentativi', () => {
