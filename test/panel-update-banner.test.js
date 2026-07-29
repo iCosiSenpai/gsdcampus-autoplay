@@ -15,7 +15,7 @@ process.env.LANG = 'en_US.UTF-8';
 
 const {
   renderFrame, stripAnsi, pacmanBar, pacmanSegments, paintPacman, PAC_FRAMES,
-  terminalCloseScript, planPanelRestart,
+  terminalCloseScript, planPanelRestart, renderSprite, SPRITE_PAC, spriteGhost,
 } = require('../scripts/lib/panel-cli');
 const { readHeadSha } = require('../src/lib/update-state');
 
@@ -81,6 +81,50 @@ describe('plancia: riga auto-aggiornamento', () => {
 
   it('nessun avviso se la finestra gira già sul codice attuale', () => {
     assert.equal(/Si è aggiornato da solo/.test(frame(baseModel, { bootSha: 'bbbbbbb' })), false);
+  });
+});
+
+describe('sprite Pac-Man e mostro', () => {
+  // In una cella sola un Pac-Man "vero" non esiste: le sagome sono a pixel e
+  // rese coi mezzi blocchi, due pixel verticali per carattere.
+  it('otto righe di pixel diventano quattro righe di testo', () => {
+    const out = renderSprite(SPRITE_PAC, false);
+    assert.equal(out.length, 4);
+    assert.equal(SPRITE_PAC.length, 8);
+  });
+
+  it('ogni riga conserva la larghezza della griglia', () => {
+    for (const r of renderSprite(SPRITE_PAC, false)) assert.equal(r.length, 8);
+    for (const r of renderSprite(spriteGhost('B'), false)) assert.equal(r.length, 8);
+  });
+
+  it('il mostro ha gli occhi: pixel bianchi dentro la sagoma', () => {
+    const g = spriteGhost('B');
+    assert.ok(g.some((r) => r.includes('W')), 'occhi presenti');
+    assert.ok(g[g.length - 1].includes('.'), 'fondo ondulato');
+  });
+
+  it('il colore del mostro e parametrico (blu quando lavora)', () => {
+    assert.ok(spriteGhost('B').every((r) => !r.includes('C')));
+    assert.notDeepEqual(spriteGhost('B'), spriteGhost('P'));
+  });
+
+  it('senza colore resta comunque una sagoma leggibile', () => {
+    const out = renderSprite(SPRITE_PAC, false).join('');
+    assert.ok(/[#-]/.test(out), 'pixel resi anche in ASCII');
+    assert.equal(/\u001b/.test(out), false, 'nessun escape ANSI');
+  });
+
+  it('su finestra bassa il banner non compare: prima l informazione', () => {
+    const alta = renderFrame(baseModel, { color: true, width: 74, termRows: 40 });
+    const bassa = renderFrame(baseModel, { color: true, width: 74, termRows: 20 });
+    assert.ok(alta.split('\n').length > bassa.split('\n').length);
+  });
+
+  it('su finestra stretta il banner non compare', () => {
+    const largo = renderFrame(baseModel, { color: true, width: 74, termRows: 40 });
+    const stretto = renderFrame(baseModel, { color: true, width: 50, termRows: 40 });
+    assert.ok(largo.split('\n').length > stretto.split('\n').length);
   });
 });
 

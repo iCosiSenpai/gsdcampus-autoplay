@@ -77,6 +77,72 @@ const ANSI = {
 // I quattro fantasmi originali: Blinky (rosso), Pinky (rosa), Inky (ciano), Clyde (arancio).
 const GHOST_COLORS = ['\x1b[38;5;203m', '\x1b[38;5;213m', '\x1b[38;5;87m', '\x1b[38;5;214m'];
 
+// ── Sprite (Pac-Man e mostro veri) ────────────────────────────────────────
+// In una singola cella di terminale un Pac-Man "vero" non esiste: `ᗧ` e' un
+// ripiego e si vede. Qui le sagome sono disegnate a pixel e rese con i mezzi
+// blocchi — ogni carattere vale DUE pixel verticali (▀ alto, ▄ basso, █
+// entrambi) — quindi 8x8 pixel stanno in 8 colonne e 4 righe. Niente emoji:
+// sono a doppia larghezza e sfascerebbero l'allineamento del riquadro.
+const SPRITE_COLORS = {
+  Y: '\x1b[1;38;5;226m',  // giallo Pac-Man
+  B: '\x1b[1;38;5;21m',   // blu del mostro
+  W: '\x1b[1;97m',        // bianco degli occhi
+  P: '\x1b[1;38;5;213m',  // rosa (Pinky)
+};
+
+const SPRITE_PAC = [
+  '..YYYY..',
+  '.YYYYYY.',
+  'YYYYY...',
+  'YYYY....',
+  'YYYY....',
+  'YYYYY...',
+  '.YYYYYY.',
+  '..YYYY..',
+];
+
+const spriteGhost = (c) => [
+  '..CCCC..',
+  '.CCCCCC.',
+  'CCWWCWWC',
+  'CCWWCWWC',
+  'CCCCCCCC',
+  'CCCCCCCC',
+  'CCCCCCCC',
+  'C..CC..C',
+].map((r) => r.replace(/C/g, c));
+
+/**
+ * Converte una griglia di pixel in righe di testo con i mezzi blocchi.
+ * Pura e testabile: il colore lo mettono le lettere della griglia.
+ * @returns {string[]} meta' delle righe in ingresso
+ */
+function renderSprite(rows, color = true) {
+  const out = [];
+  for (let y = 0; y < rows.length; y += 2) {
+    const top = rows[y];
+    const bot = rows[y + 1] || ' '.repeat(top.length);
+    let line = '';
+    for (let x = 0; x < top.length; x += 1) {
+      const tk = top[x], bk = bot[x];
+      const t = tk !== '.' && tk !== ' ';
+      const b = bk !== '.' && bk !== ' ';
+      if (!color) { line += (t && b) ? '#' : (t || b) ? '-' : ' '; continue; }
+      const tc = SPRITE_COLORS[tk] || '';
+      const bc = SPRITE_COLORS[bk] || '';
+      if (t && b) {
+        // Colori diversi sopra/sotto: mezzo blocco alto sul colore di sotto in
+        // reverse, cosi si ottengono due pixel di colore diverso in una cella.
+        line += tk === bk ? `${tc}█${ANSI.reset}` : `${bc}\x1b[7m${tc}▀${ANSI.reset}`;
+      } else if (t) line += `${tc}▀${ANSI.reset}`;
+      else if (b) line += `${bc}▄${ANSI.reset}`;
+      else line += ' ';
+    }
+    out.push(line);
+  }
+  return out;
+}
+
 // ── Helper puri ───────────────────────────────────────────────────────────
 function stripAnsi(s) { return String(s).replace(/\x1b\[[0-9;]*m/g, ''); }
 function visLen(s) { return stripAnsi(s).length; }
@@ -584,6 +650,23 @@ function renderFrame(model, opts = {}) {
   const pad = Math.max(1, width - visLen(title) - visLen(badge));
   L.push(` ${title}${' '.repeat(pad)}${badge}`);
   L.push(rule);
+
+  // Banner: Pac-Man vero a sinistra, mostro vero a destra, disegnati a pixel.
+  // Si mostra solo se la finestra e' abbastanza larga: su terminali stretti
+  // ruberebbe spazio all'informazione, che viene prima della decorazione.
+  // Anche l'altezza conta: su una finestra bassa il banner spingerebbe fuori
+  // schermo lo stato, e l'informazione viene prima della decorazione.
+  const altezzaOk = !opts.termRows || opts.termRows >= 30;
+  if (color && width >= 60 && altezzaOk && opts.sprites !== false) {
+    const pac = renderSprite(SPRITE_PAC, true);
+    // Blu quando l'automazione lavora (il mostro insegue), rosa quando e' ferma.
+    const ghost = renderSprite(spriteGhost(model.schedAlive ? 'B' : 'P'), true);
+    const gap = ' '.repeat(Math.max(2, Math.min(30, width - 30)));
+    L.push('');
+    for (let i = 0; i < pac.length; i += 1) {
+      L.push(`   ${pac[i]}${gap}${ghost[i]}`);
+    }
+  }
   L.push('');
 
   // Headline
@@ -988,6 +1071,7 @@ function main() {
         bootSha,
         menu: MENU,
         selected,
+        termRows: process.stdout.rows || 24,
         restartIn: restartPlan.action === 'wait' ? restartPlan.seconds : null,
         restartHeld: restartPlan.action === 'wait' ? restartPlan.reason : null,
       });
@@ -1155,5 +1239,6 @@ module.exports = {
   formatDuration, relativeTime, formatWhen, formatEventStamp, parseLogTimeline,
   courseIdFromUrl, computeHeadline, readModel, renderFrame, renderLogView, stripAnsi, visLen,
   terminalCloseScript, readVersion, keepAliveInstalled, planPanelRestart,
+  renderSprite, SPRITE_PAC, spriteGhost,
   renderRegistryView,
 };
