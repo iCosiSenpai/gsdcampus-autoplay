@@ -515,9 +515,20 @@ function renderFrame(model, opts = {}) {
   }
 
   // Attention: corsi in need_help (ma non blocco totale) + aggiornamento
+  //
+  // "in attesa di risposte quiz" va detto SOLO se ci sono davvero domande
+  // aperte. Prima la riga si accendeva su qualsiasi need_help, quindi un corso
+  // bloccato per altro — o rimasto bloccato per errore, con i questionari già
+  // superati — annunciava per giorni un'attesa che non esisteva, e mandava il
+  // referente a cercare domande da risolvere che non c'erano.
   if (s && s.needHelp > 0 && head.level !== 'attention') {
     L.push('');
-    L.push(`  ${c(ANSI.yellow, GLYPH.warn)} ${s.needHelp} corso/i in attesa di risposte quiz — se ne occupa l’AI/il referente.`);
+    if (model.openQuiz > 0) {
+      L.push(`  ${c(ANSI.yellow, GLYPH.warn)} ${model.openQuiz} domanda/e da risolvere su ${s.needHelp} corso/i — se ne occupa l’AI/il referente.`);
+    } else {
+      L.push(`  ${c(ANSI.yellow, GLYPH.warn)} ${s.needHelp} corso/i bloccato/i, nessuna domanda aperta.`);
+      L.push(`  ${c(ANSI.dim, 'Se i questionari risultano superati il blocco è vecchio: node scripts/harvest-answers.js --reconcile --reset --yes')}`);
+    }
   }
   if (model.update && model.update.remoteVersion) {
     L.push(`  ${c(ANSI.cyan, '↑')} Aggiornamento disponibile (${model.update.remoteVersion}) — rilancia il comando curl per riceverlo.`);

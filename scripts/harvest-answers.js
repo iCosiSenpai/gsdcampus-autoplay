@@ -295,6 +295,12 @@ async function census(page, config) {
 // finale PENDENTE ma stato locale done/need_help (falsi-done), li elenca e
 // (con --reset) li resetta così discoverCourses li riprocessa. Read-only sulla
 // piattaforma; scrive solo course_state (reset) e logs/pending_questionnaires.json.
+// Solo `need_help`, non `done`: un corso concluso va lasciato stare. Ci
+// interessa il blocco che chiede intervento umano e non lo chiede più.
+function localBlocked(state, courseUrl) {
+  return courseState.getCourse(state, courseUrl).status === 'need_help';
+}
+
 async function reconcile(page, config, opt) {
   const activeCf = config.codice_fiscale;
   // Il reset scrive nel course_state dell'ACCOUNT ATTIVO (via account.stateFilePaths).
@@ -316,6 +322,12 @@ async function reconcile(page, config, opt) {
   log(`riconciliazione: ${courseUrls.length} corsi da verificare.`);
 
   const findings = [];
+  // Blocchi diventati falsi: corso locale in need_help ma sulla piattaforma
+  // TUTTI i questionari risultano superati. Il ciclo qui sotto guardava solo il
+  // caso opposto (questionari pendenti), quindi un need_help non veniva mai
+  // ripulito: restava lì per sempre, e la plancia continuava ad annunciare
+  // "N corsi in attesa di risposte quiz" quando non c'era nulla da rispondere.
+  const staleBlocks = [];
   for (const courseUrl of courseUrls) {
     try {
       await page.goto(courseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -344,6 +356,18 @@ async function reconcile(page, config, opt) {
           resetApplied: false,
         });
         log(`  ${localDone ? '⚠ FALSO-DONE' : '· da fare'}: ${redactUrl(courseUrl)} — ${pending.length} questionario/i pendente/i (stato locale: ${localDone ? 'done/need_help' : 'in_progress/assente'})`);
+      } else if (quizUrls.length > 0 && localBlocked(state, courseUrl)) {
+        // Nessun questionario pendente su un corso che localmente è bloccato:
+        // il blocco non ha più ragione di esistere. Richiediamo quizUrls > 0
+        // perché su un corso senza questionari l'assenza di pendenti non prova
+        // nulla — lì il blocco può dipendere dalle lezioni.
+        staleBlocks.push({
+          courseUrl: redactUrl(courseUrl),
+          courseUrlRaw: courseUrl,
+          passedCount: quizUrls.length,
+          reopenApplied: false,
+        });
+        log(`  ⚠ BLOCCO SUPERATO: ${redactUrl(courseUrl)} — need_help locale ma ${quizUrls.length} questionario/i tutti superati.`);
       }
     } catch (e) {
       log(`  errore su ${redactUrl(courseUrl)}: ${e.message}`);
@@ -360,6 +384,13 @@ async function reconcile(page, config, opt) {
       pendingAssessments: f.pendingAssessments,
       localDone: f.localDone,
       resetApplied: f.resetApplied === true,
+    })),
+    // Blocchi locali che la piattaforma smentisce: servono all'AI/plancia per
+    // non annunciare "in attesa di risposte quiz" quando non c'è nulla da fare.
+    staleBlocks: staleBlocks.map(b => ({
+      course: b.courseUrl,
+      passedCount: b.passedCount,
+      reopenApplied: b.reopenApplied === true,
     })),
   };
   try { fs.writeFileSync(path.join(ROOT, 'logs', 'pending_questionnaires.json'), JSON.stringify(report, null, 2)); } catch (_) {}
@@ -379,6 +410,22 @@ async function reconcile(page, config, opt) {
   } else if (falseDones.length) {
     log(`Per riaprirli esplicitamente: node scripts/harvest-answers.js --reconcile --reset --yes`);
   }
+
+  if (staleBlocks.length) {
+    log(`\n${staleBlocks.length} corso/i bloccato/i SENZA motivo: need_help locale, ma i questionari sulla piattaforma sono tutti superati.`);
+    if (canReset) {
+      for (const b of staleBlocks) {
+        // Riapertura conservativa (backup + lezioni e ledger preservati): non
+        // marchiamo done da qui perché non abbiamo verificato le lezioni. Al
+        // prossimo giro l'autoplay controlla il corso e lo chiude come si deve.
+        courseState.reopenCourse(ROOT, state, b.courseUrlRaw);
+        b.reopenApplied = true;
+        log(`  sbloccato: ${b.courseUrl} → l'autoplay lo ricontrolla e lo chiude da sé.`);
+      }
+    } else {
+      log(`Per sbloccarli: node scripts/harvest-answers.js --reconcile --reset --yes`);
+    }
+  }
   // Riscrive il report dopo eventuali reset, così l'inbox distingue una
   // riconciliazione eseguita da una semplice scansione read-only.
   try {
@@ -388,6 +435,11 @@ async function reconcile(page, config, opt) {
       pendingAssessments: f.pendingAssessments,
       localDone: f.localDone,
       resetApplied: f.resetApplied === true,
+    }));
+    report.staleBlocks = staleBlocks.map(b => ({
+      course: b.courseUrl,
+      passedCount: b.passedCount,
+      reopenApplied: b.reopenApplied === true,
     }));
     fs.writeFileSync(path.join(ROOT, 'logs', 'pending_questionnaires.json'), JSON.stringify(report, null, 2));
   } catch (_) {}
