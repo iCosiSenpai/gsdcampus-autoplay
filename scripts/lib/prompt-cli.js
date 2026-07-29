@@ -203,6 +203,14 @@ function drawMenuScreen(items, title, subtitle, selected, options = {}) {
   console.log('');
   printMenuItems(layout, items, selected);
   console.log('');
+  // Conto alla rovescia dell'avvio automatico, se attivo. Va detto a chiare
+  // lettere che sta per partire da solo e che basta un tasto per fermarlo:
+  // un menu che si muove da sé senza preavviso e' sgradevole.
+  if (options.countdown > 0) {
+    const s = options.countdown;
+    console.log(`${layout.indent}${UI.accent}▸${UI.reset} Parto da solo tra ${UI.bold}${s}${UI.reset} second${s === 1 ? 'o' : 'i'} con la voce evidenziata ${UI.dim}(premi un tasto per scegliere tu)${UI.reset}`);
+    console.log('');
+  }
   printMenuFooter(layout);
 }
 
@@ -243,8 +251,36 @@ function ttyMenu(items, title, subtitle, startIdx = 0, options = {}) {
     const GRACE_MS = 150;
     drainPendingStdin();
 
+    // Avvio automatico: se nessuno tocca niente, dopo N secondi parte la voce
+    // preselezionata. Chi rilancia il comando tutti i giorni vuole quasi sempre
+    // la prima voce, e restare a fissare un menu non aggiunge nulla. Il primo
+    // tasto — QUALSIASI tasto, anche solo una freccia — annulla il conto alla
+    // rovescia per sempre: se hai messo le mani sulla tastiera stai scegliendo.
+    let restanti = Number(options.timeoutSec) > 0 ? Math.floor(options.timeoutSec) : 0;
+    let tick = null;
+    const stopTimer = () => {
+      if (tick) { clearInterval(tick); tick = null; }
+      restanti = 0;
+      options.countdown = null;
+    };
+
     function draw() {
       drawMenuScreen(items, title, subtitle, selected, options);
+    }
+
+    if (restanti > 0) {
+      options.countdown = restanti;
+      tick = setInterval(() => {
+        restanti -= 1;
+        if (restanti <= 0) {
+          stopTimer();
+          cleanup();
+          resolve(items[selected]);
+          return;
+        }
+        options.countdown = restanti;
+        draw();
+      }, 1000);
     }
 
     readline.emitKeypressEvents(process.stdin);
@@ -252,12 +288,16 @@ function ttyMenu(items, title, subtitle, startIdx = 0, options = {}) {
     process.stdin.resume();
 
     function cleanup() {
+      if (tick) { clearInterval(tick); tick = null; }
       process.stdin.removeListener('keypress', onKeypress);
       if (process.stdin.isTTY) process.stdin.setRawMode(false);
     }
 
     function onKeypress(str, key) {
       if (!key) return;
+      // Qualunque tasto (dopo la finestra di grazia) toglie di mezzo il conto
+      // alla rovescia: da quel momento decide la persona, non il timer.
+      if (restanti > 0 && Date.now() - openedAt >= GRACE_MS) { stopTimer(); draw(); }
       // Finestra di grazia: ignora i tasti consegnati nei primissimi ms (input
       // residuo dei passi precedenti, non una scelta dell'utente). Eccezione:
       // Ctrl-C passa sempre.
@@ -755,6 +795,7 @@ function parseArgs(argv) {
   let subtitle = '';
   let preamble = '';
   let defaultN = 1;
+  let timeoutSec = 0;
   let brand = false;
   let items = [];
   let collectingItems = false;
@@ -766,10 +807,12 @@ function parseArgs(argv) {
     if (a === '--subtitle') { subtitle = args[++i]; continue; }
     if (a === '--preamble') { preamble = args[++i]; continue; }
     if (a === '--default') { defaultN = parseInt(args[++i], 10); continue; }
+    if (a === '--timeout') { timeoutSec = parseInt(args[++i], 10); continue; }
     if (a === '--brand') { brand = true; continue; }
   }
   if (Number.isNaN(defaultN) || defaultN < 1) defaultN = 1;
-  return { title, subtitle, preamble, defaultN, brand, items };
+  if (Number.isNaN(timeoutSec) || timeoutSec < 1) timeoutSec = 0;
+  return { title, subtitle, preamble, defaultN, brand, items, timeoutSec };
 }
 
 // Sottocomandi per gli script shell (setup.sh):
@@ -866,7 +909,7 @@ async function cliMain() {
   let chosen = null;
   try {
     if (process.stdin.isTTY) {
-      chosen = await ttyMenu(items, title, subtitle, (defaultN - 1), { brand, preamble });
+      chosen = await ttyMenu(items, title, subtitle, (defaultN - 1), { brand, preamble, timeoutSec });
     } else {
       // numericMenu ritorna l'item o null; mappa a indice.
       chosen = await numericMenu(items, title, subtitle, { preamble });

@@ -356,10 +356,10 @@ if [ -d "$TARGET/.git" ]; then
     ACCT_DESC="${ACCT_DESC:-Account non ancora configurato}"
     echo ""
     printf '%bPerché stai rilanciando l'"'"'installer?%b\n' "$BOLD" "$NC"
-    echo "  Usa le frecce ↑/↓ e Invio per scegliere."
+    echo "  Usa le frecce ↑/↓ e Invio per scegliere — o non fare niente: parte da solo."
     echo ""
     CHOICE=$(node "$TARGET/scripts/lib/prompt-cli.js" select \
-      --brand --title "Cosa vuoi fare?" --subtitle "$ACCT_DESC" --default 1 -- \
+      --brand --title "Cosa vuoi fare?" --subtitle "$ACCT_DESC" --default 1 --timeout 5 -- \
       "Aggiorna e avvia — Scarica fix e risposte, poi avvia i corsi (consigliato)" \
       "Cambia collega o orari — Seleziona l'account e modifica i turni di lavoro" \
       "Ripara l'installazione — Riallinea il codice e reinstalla le dipendenze" \
@@ -550,7 +550,13 @@ case "$MODE" in
         warn "Il codice NON è stato aggiornato (vedi sopra): avvio la versione già installata."
       fi
       if [ -f "$TARGET/scripts/check-requirements.sh" ] && ! "$TARGET/scripts/check-requirements.sh" --runtime >/dev/null 2>&1; then
-        info "Dipendenze da aggiornare dopo il pull. Avvio setup condizionale..."
+        # DIRE cosa manca prima di chiedere la password. Senza questo, un
+        # requisito che fallisce sempre (una versione mai soddisfatta, un hash
+        # dipendenze che non si aggiorna) si manifesta solo come "mi chiede il
+        # sudo tutte le volte", senza un filo per capire perche'.
+        info "Dipendenze da aggiornare dopo il pull. Manca questo:"
+        "$TARGET/scripts/check-requirements.sh" --runtime 2>&1 | grep -E "MANCANTE" | sed 's/^/    /' || true
+        info "Per questo serve la password del Mac (solo per installare)."
         sudo -v
         if [ -n "$TTY_REDIR" ]; then
           "$TARGET/scripts/setup.sh" --yes < "$TTY_REDIR"

@@ -746,7 +746,14 @@ function renderFrame(model, opts = {}) {
   }
   L.push('');
 
-  const row = (label, value) => L.push(`   ${c(ANSI.dim, label.padEnd(10))} ${c(ANSI.gray, GLYPH.arrow)} ${value}`);
+  // Etichetta in colore tenue ma LEGGIBILE (prima era `dim`, che su molti
+  // terminali sparisce), freccia gialla come guida per l'occhio, valore pieno.
+  const row = (label, value) => L.push(`   ${c(ANSI.maze, label.padEnd(10))} ${c(ANSI.pac, GLYPH.arrow)} ${value}`);
+  // Titoletto di sezione: separa i blocchi invece di lasciare un elenco piatto.
+  const sezione = (titolo) => {
+    L.push('');
+    L.push(`   ${c(ANSI.bold, titolo)}  ${c(ANSI.eaten, GLYPH.h.repeat(Math.max(0, width - titolo.length - 6)))}`);
+  };
 
   // Corsi + avanzamento totale
   const s = model.summary;
@@ -781,6 +788,7 @@ function renderFrame(model, opts = {}) {
   }
 
   // Quiz
+  sezione('Assistenza');
   row('Quiz', model.openQuiz > 0 ? c(ANSI.yellow, `${model.openQuiz} da risolvere`) : 'nessuno in attesa');
 
   // Claude
@@ -794,6 +802,7 @@ function renderFrame(model, opts = {}) {
   }
 
   // Turni
+  sezione('Sistema');
   if (model.scheduleDesc) {
     const state = model.workNow ? c(ANSI.green, 'in orario') : c(ANSI.yellow, 'in pausa');
     row('Turni', `${model.scheduleDesc}  ${GLYPH.bul} ${state}`);
@@ -872,15 +881,22 @@ function renderFrame(model, opts = {}) {
   const menu = Array.isArray(opts.menu) ? opts.menu : [];
   const sel = Number(opts.selected) || 0;
   if (menu.length) {
+    // Il cursore era una semplice inversione di colore e non si trovava. Ora la
+    // voce scelta e' su fondo giallo Pac-Man con testo nero, marcata da frecce
+    // piene su entrambi i lati, e le NON scelte sono spente in grigio: il
+    // contrasto fa il lavoro, senza chiedere di cercare.
+    const SEL_ON = '\x1b[1;30;48;5;226m';
     const cells = menu.map((item, i) => (i === sel
-      // Voce scelta: inversa, così si distingue anche su terminali che
-      // schiacciano i colori (e per chi distingue male le sfumature).
-      ? `${color ? '\x1b[7;1m' : ''} ${GLYPH.arrow} ${item.label} ${color ? ANSI.reset : ''}`
-      : `${c(ANSI.dim, `   ${item.label} `)}`));
-    L.push('  ' + cells.join(' '));
+      ? (color ? `${SEL_ON} ${GLYPH.arrow} ${item.label} ${ANSI.reset}` : `[ ${item.label} ]`)
+      : c(ANSI.gray, `   ${item.label}  `)));
+    L.push('');
+    L.push('  ' + cells.join(''));
+    L.push('');
     const current = menu[sel];
-    if (current && current.help) L.push(`  ${c(ANSI.dim, `${GLYPH.bul} ${current.help}`)}`);
-    L.push(`  ${c(ANSI.gray, '← → scegli   Invio conferma   ESC esci lasciando lavorare')}`);
+    if (current && current.help) {
+      L.push(`  ${c(ANSI.pac, GLYPH.arrow)} ${c(ANSI.bold, current.help)}`);
+    }
+    L.push(`  ${c(ANSI.gray, `${GLYPH.h.repeat(3)} usa ← → per spostarti ${GLYPH.bul} Invio per confermare ${GLYPH.bul} ESC per uscire lasciando lavorare`)}`);
   } else {
     // Modalita non interattiva (--once, pipe): niente menu da evidenziare, ma
     // le azioni vanno comunque elencate.
@@ -1090,7 +1106,7 @@ function main() {
   const MENU = [
     { id: 'log', label: 'Guarda dal vivo', help: 'Mostra il log mentre scorre. Sola lettura: guardare non ferma niente.' },
     { id: 'registro', label: 'Registro attività', help: 'Cronologia con data e ora, divisa per esecuzione.' },
-    { id: 'refresh', label: 'Aggiorna ora', help: 'Rilegge subito lo stato senza aspettare il prossimo giro.' },
+    { id: 'update', label: 'Aggiorna programma', help: 'Scarica e installa l\'ultima versione. Se il codice nuovo e\' rotto torna da sola al precedente.' },
     { id: 'stop', label: 'Ferma tutto', help: 'Ferma corsi, scheduler e guardiano, poi chiude la scheda. Chiede conferma.' },
     { id: 'exit', label: 'Esci', help: 'Chiude solo questa scheda: i corsi continuano a lavorare.' },
   ];
@@ -1174,6 +1190,24 @@ function main() {
     process.exit(0);
   };
 
+  const doUpdate = () => {
+    teardown();
+    process.stdout.write('\n Cerco e installo la versione piu recente…\n');
+    const script = path.join(args.root, 'scripts', 'auto-update.sh');
+    try {
+      // stdio ereditato: l'avanzamento si vede davvero invece di lasciare lo
+      // schermo fermo per un minuto senza spiegazioni.
+      spawnSync('/bin/zsh', [script], { stdio: 'inherit', cwd: args.root });
+    } catch (_) { /* best-effort: peggio che vada si resta alla versione attuale */ }
+    // Riapertura con il codice eventualmente nuovo (stesso meccanismo
+    // dell'auto-update: il contatore evita catene infinite).
+    const res = spawnSync(process.execPath, [__filename, ...process.argv.slice(2)], {
+      stdio: 'inherit',
+      env: { ...process.env, GSD_PANEL_RELAUNCH: String(relaunchCount + 1) },
+    });
+    process.exit(res && res.status != null ? res.status : 0);
+  };
+
   const doStop = () => {
     teardown();
     process.stdout.write('\nFermo i corsi e chiudo questa scheda…\n');
@@ -1222,6 +1256,11 @@ function main() {
       switch (id) {
         case 'log': view = 'log'; draw(); return;
         case 'registro': view = 'registro'; regOffset = 0; draw(); return;
+        // Aggiorna il PROGRAMMA, non la schermata: lo stato si rinfresca gia'
+        // da solo ogni due secondi e mezzo, un pulsante per rifarlo a mano non
+        // serviva a niente. auto-update.sh fa il giro completo con il gate
+        // dev-check e il rollback se il codice nuovo non passa i test.
+        case 'update': return doUpdate();
         case 'refresh': refreshNow(); draw(); return;
         // Azione pesante su un Mac che sta lavorando: sempre una conferma.
         case 'stop': confirmStop = true; draw(); return;

@@ -189,7 +189,7 @@ describe('plancia: menu a frecce', () => {
   const MENU = [
     { id: 'log', label: 'Guarda dal vivo', help: 'Mostra il log mentre scorre. Sola lettura: guardare non ferma niente.' },
     { id: 'registro', label: 'Registro attività', help: 'Cronologia con data e ora, divisa per esecuzione.' },
-    { id: 'refresh', label: 'Aggiorna ora', help: 'Rilegge subito lo stato senza aspettare il prossimo giro.' },
+    { id: 'update', label: 'Aggiorna programma', help: 'Scarica e installa l\'ultima versione.' },
     { id: 'stop', label: 'Ferma tutto', help: 'Ferma corsi, scheduler e guardiano, poi chiude la scheda. Chiede conferma.' },
     { id: 'exit', label: 'Esci', help: 'Chiude solo questa scheda: i corsi continuano a lavorare.' },
   ];
@@ -204,8 +204,15 @@ describe('plancia: menu a frecce', () => {
     const out = withMenu(baseModel);
     assert.equal(/Q ferma tutto e chiudi/.test(out), false);
     assert.equal(/L guarda dal vivo/.test(out), false);
-    assert.match(out, /← → scegli/);
-    assert.match(out, /Invio conferma/);
+    assert.match(out, /← → per spostarti/);
+    assert.match(out, /Invio per confermare/);
+  });
+
+  it('"Aggiorna" riguarda il programma, non la schermata (che si rinfresca da sola)', () => {
+    const out = withMenu(baseModel, 2);
+    assert.match(out, /Aggiorna programma/);
+    assert.match(out, /installa l'ultima versione/);
+    assert.equal(/Rilegge subito lo stato/.test(out), false);
   });
 
   it('su "Ferma tutto" dichiara che ferma davvero, non solo la finestra', () => {
