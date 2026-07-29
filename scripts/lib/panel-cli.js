@@ -762,17 +762,47 @@ function renderFrame(model, opts = {}) {
 function renderLogView(root, opts = {}) {
   const color = !!opts.color;
   const width = Math.max(48, Math.min(120, opts.width || 100));
+  const rows = Math.max(8, opts.rows || 18);
   const spinIndex = opts.spinIndex || 0;
-  const c = (code, s) => (color ? `${code}${s}${ANSI.reset}` : String(s));
-  const lines = tailLines(path.join(root, 'logs', 'autoplay.log')).slice(-18).map((l) => redactSensitiveText(l).slice(0, width));
+  const now = opts.now || Date.now();
+  const c = (code, s2) => (color ? `${code}${s2}${ANSI.reset}` : String(s2));
+
+  // Timeline invece di righe grezze: cosi ogni riga porta la data, e una coda
+  // ferma da ieri non si confonde con quello che sta succedendo adesso.
+  const all = readTimeline(root);
+  const page = all.slice(-rows);
+  const last = all.length ? all[all.length - 1] : null;
+  const idleMs = last ? Math.max(0, now - last.at) : null;
+  // "Dal vivo" solo se il log si sta davvero muovendo: dirlo sempre sarebbe una
+  // bugia proprio nel momento in cui uno apre questa finestra per capire se e'
+  // fermo.
+  const live = idleMs != null && idleMs < 90 * 1000;
+  const stato = live
+    ? c(ANSI.green, `${GLYPH.dot} dal vivo`)
+    : c(ANSI.yellow, `${GLYPH.pause} fermo da ${idleMs == null ? '?' : formatDuration(idleMs)}`);
+
   const out = [
-    ` ${c(ANSI.pac, PAC_FRAMES[spinIndex % PAC_FRAMES.length])} ${c(ANSI.pac, 'LOG DAL VIVO')} ${c(ANSI.dim, '(autoplay.log)')}`,
+    ` ${c(ANSI.pac, PAC_FRAMES[spinIndex % PAC_FRAMES.length])} ${c(ANSI.pac, 'LOG')} ${c(ANSI.dim, '(autoplay.log)')}  ${stato}`,
     ' ' + c(ANSI.maze, GLYPH.wall.repeat(width)),
   ];
-  if (!lines.length) out.push(c(ANSI.dim, '   (nessun log ancora)'));
-  else for (const l of lines) out.push('  ' + c(ANSI.dim, l));
+  if (!page.length) {
+    out.push(`  ${c(ANSI.dim, '(nessun log ancora: l\'automazione non ha ancora scritto niente)')}`);
+  } else {
+    for (const ev of page) {
+      const text = redactSensitiveText(ev.text);
+      // Colore per significato: gli errori devono saltare all'occhio in un muro
+      // di righe tutte uguali.
+      let col = ANSI.dim;
+      if (/error|errore|SESSIONE PERSA|AUTOLOGIN NON VALIDO|non superato|frozen|scomparso/i.test(text)) col = ANSI.red;
+      else if (/superato|completat|finito|verificata/i.test(text)) col = ANSI.green;
+      else if (/questionario|quiz|need_help|attesa/i.test(text)) col = ANSI.yellow;
+      else if (/^Video: /.test(text)) col = ANSI.eaten;   // battito regolare: sottotono
+      const stamp = formatEventStamp(ev.at, now);
+      out.push(`  ${c(ANSI.gray, stamp.padEnd(11))} ${c(col, text.slice(0, Math.max(20, width - 16)))}`);
+    }
+  }
   out.push(' ' + c(ANSI.maze, GLYPH.wall.repeat(width)));
-  out.push(`  ${c(ANSI.pac, 'Q')} torna alla plancia ${GLYPH.bul} sola lettura: guardare non ferma niente ${GLYPH.bul} si aggiorna da solo`);
+  out.push(`  ${c(ANSI.dim, `${GLYPH.arrow} si aggiorna da solo ${GLYPH.bul} sola lettura: guardare non ferma niente ${GLYPH.bul} Invio o ESC torna alla plancia`)}`);
   return out.join('\n');
 }
 
@@ -946,7 +976,7 @@ function main() {
   const draw = () => {
     let frame;
     if (view === 'log') {
-      frame = renderLogView(args.root, { color, width, spinIndex });
+      frame = renderLogView(args.root, { color, width, spinIndex, rows: Math.max(8, (process.stdout.rows || 24) - 6) });
     } else if (view === 'registro') {
       const rows = Math.max(6, (process.stdout.rows || 24) - 8);
       frame = renderRegistryView(args.root, { color, width, rows, offset: regOffset });

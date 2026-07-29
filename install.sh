@@ -268,6 +268,19 @@ update_repo() {
   local before after
   before=$(git rev-parse --short HEAD 2>/dev/null || echo "")
   info "Aggiorno il progetto all'ultima versione..."
+
+  # I cloni dei colleghi nascono `--depth 1` e senza tag: `git describe` li'
+  # restituisce solo lo sha, quindi la plancia mostrava sempre "v1.1.0" preso da
+  # package.json -- un numero FISSO. Il collega aggiornava davvero e continuava a
+  # leggere la stessa versione, concludendo che l'aggiornamento non funzionasse.
+  # Togliere il taglio costa ~0.6 MB e circa un secondo, una volta sola, e da
+  # allora la versione cresce a ogni aggiornamento (v1.1.0-83-gc69bac9).
+  if [ -f .git/shallow ]; then
+    info "Completo la cronologia una tantum (serve a mostrare la versione giusta)..."
+    git fetch --quiet --unshallow 2>/dev/null || true
+  fi
+  git fetch --quiet --tags origin 2>/dev/null || true
+
   if ! git fetch --quiet origin "$BRANCH"; then
     err "Aggiornamento NON eseguito: non riesco a contattare GitHub (rete o proxy)."
     info "Resto sulla versione installata${before:+ ($before)}. Riprova più tardi."

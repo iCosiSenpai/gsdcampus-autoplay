@@ -162,7 +162,10 @@ ui_kv "Account" "${BOLD}${MEMBER_LINE}${NC}"
 ui_kv "Orari" "$SCHEDULE_LINE"
 ui_kv "AI" "Claude Code on-demand · gate openQuizRequests · proxy budget temporaneo"
 
-if GSD_LAUNCHER=1 "$DIR/start.sh"; then
+# GSD_QUIET: l'avvio non stampa i suoi passi, perche' subito dopo la plancia
+# prende il controllo dello schermo. Con i passi a video si vedeva scorrere il
+# log e poi comparire la plancia sopra: sembrava che l'interfaccia fosse "i log".
+if GSD_LAUNCHER=1 GSD_QUIET=1 "$DIR/start.sh"; then
   # Riabilita e (re)installa il keepalive: mantiene vivo lo scheduler h24 anche
   # a finestra chiusa, dopo Cmd+Q o un riavvio del Mac. Idempotente; no-op su
   # non-macOS (senza launchctl).

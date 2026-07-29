@@ -104,7 +104,12 @@ ui_kv() {
 #   step "3/7 - Dipendenze npm"       →   ●●●○○○○  Passo 3/7 · Dipendenze npm
 # Retro-compatibile con entrambe le firme usate negli script (2 arg, o 1 arg
 # "N/TOT - label" come in setup.sh).
+# GSD_QUIET=1 (lo imposta il launcher, che subito dopo apre la plancia): niente
+# elenco di passi a schermo. Prima l'avvio riversava tutti i suoi step nel
+# terminale e la plancia si apriva sopra quel muro di testo — chi guardava
+# vedeva "i log" e non capiva dove fosse finita l'interfaccia.
 step() {
+  [ "${GSD_QUIET:-0}" = "1" ] && return 0
   local a="$1" b="${2:-}" cur tot label dots="" i=1
   case "$a" in
     [0-9]*/[0-9]*)
@@ -132,6 +137,12 @@ step() {
   echo ""
   echo -e " ${dots}  ${BOLD}Passo ${cur}/${tot}${NC} ${DIM}·${NC} ${label}"
 }
+
+# Glifi del corridoio di avanzamento. Fallback ASCII dove il locale non è UTF-8.
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+  *[Uu][Tt][Ff]*) UI_G_PAC='ᗧ'; UI_G_PELLET='•'; UI_G_TRACK='·'; UI_G_EATEN='─' ;;
+  *)              UI_G_PAC='C'; UI_G_PELLET='o'; UI_G_TRACK='.'; UI_G_EATEN='-' ;;
+esac
 
 # ui_version <dir>: versione leggibile del progetto per i banner
 # (tag git se esiste, altrimenti versione di package.json + commit corto) +
@@ -170,6 +181,43 @@ log_plain() {
 # altrimenti stampa la label statica). Ritorna l'exit code del comando: i
 # chiamanti sotto set -e devono gestirlo (if/||). NON usarlo per comandi
 # interattivi (sudo, login) né per quelli con progress proprio (ollama pull).
+# _ui_corridoio <larghezza> <posizione>: corridoio Pac-Man come stringa.
+# Costruito per concatenazione (niente cut/substring su UTF-8: non è portabile
+# tra bash e zsh su macOS, ed era il motivo per cui prima c'era solo |/-\).
+_ui_corridoio() {
+  local w="$1" pos="$2" out="" k=0
+  while [ "$k" -lt "$w" ]; do
+    if [ "$k" -lt "$pos" ]; then
+      out="$out${UI_G_EATEN}"
+    elif [ "$k" -eq "$pos" ]; then
+      out="$out${UI_G_PAC}"
+    elif [ $(( (k - pos) % 3 )) -eq 0 ]; then
+      out="$out${UI_G_PELLET}"
+    else
+      out="$out${UI_G_TRACK}"
+    fi
+    k=$(( k + 1 ))
+  done
+  printf '%s' "$out"
+}
+
+# Ultima riga utile del log, ripulita e accorciata: dice COSA sta facendo, non
+# solo che è vivo. Su npm install sono minuti di silenzio, e senza questo il
+# collega non distingue "sta lavorando" da "si è piantato".
+_ui_ultima_riga() {
+  tail -n 3 "$1" 2>/dev/null \
+    | sed $'s/\x1b\\[[0-9;]*[a-zA-Z]//g' \
+    | grep -v '^[[:space:]]*$' \
+    | tail -n 1 \
+    | cut -c1-34
+}
+
+# spinner_run <label> <logfile> <cmd...>: esegue il comando con output rediretto
+# sul logfile mostrando una barra di avanzamento Pac-Man, il tempo trascorso e
+# l'ultima riga del log (solo se stdout è un TTY; altrimenti stampa la label
+# statica). Ritorna l'exit code del comando: i chiamanti sotto set -e devono
+# gestirlo (if/||). NON usarlo per comandi interattivi (sudo, login) né per
+# quelli con progress proprio (ollama pull).
 spinner_run() {
   local label="$1"; shift
   local logfile="$1"; shift
@@ -180,26 +228,31 @@ spinner_run() {
   fi
   "$@" >> "$logfile" 2>&1 &
   local cmd_pid=$!
-  # Frame ASCII (niente glifi multibyte: cut/substring su UTF-8 non è portabile
-  # tra bash e zsh su macOS).
-  local i=0
-  local f='|'
+  local i=0 width=16 start_ts elapsed mm ss detail=""
+  start_ts=$(date +%s)
   while kill -0 "$cmd_pid" 2>/dev/null; do
-    case $(( i % 4 )) in
-      0) f='|' ;; 1) f='/' ;; 2) f='-' ;; 3) f='\' ;;
-    esac
-    printf '\r%b%s%b %s ' "$ACCENT" "$f" "$NC" "$label"
+    elapsed=$(( $(date +%s) - start_ts ))
+    mm=$(( elapsed / 60 )); ss=$(( elapsed % 60 ))
+    # La coda del log costa un processo: la rileggiamo ~1 volta al secondo,
+    # non a ogni frame dell'animazione.
+    if [ $(( i % 7 )) -eq 0 ]; then detail=$(_ui_ultima_riga "$logfile"); fi
+    printf '\r\033[K%b%s%b %s %b%d:%02d%b %b%s%b' \
+      "$ACCENT" "$(_ui_corridoio "$width" $(( i % width )))" "$NC" \
+      "$label" \
+      "$DIM" "$mm" "$ss" "$NC" \
+      "$DIM" "$detail" "$NC"
     i=$(( i + 1 ))
     sleep 0.15
   done
   local rc=0
   wait "$cmd_pid" || rc=$?
+  elapsed=$(( $(date +%s) - start_ts ))
+  mm=$(( elapsed / 60 )); ss=$(( elapsed % 60 ))
+  printf '\r\033[K'
   if [ "$rc" -eq 0 ]; then
-    printf '\r\033[K'
-    ok "$label"
+    ok "$(printf '%s (%d:%02d)' "$label" "$mm" "$ss")"
   else
-    printf '\r\033[K'
-    err "$label — fallito (dettagli: $logfile)"
+    err "$label — fallito dopo $(printf '%d:%02d' "$mm" "$ss") (dettagli: $logfile)"
   fi
   return $rc
 }
