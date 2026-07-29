@@ -117,8 +117,40 @@ verify_autologin_live() {
   fi
 }
 
+# Tutto gia' a posto? Config valida (account + turni) E nessun requisito
+# mancante. Serve a non ripetere ogni volta le istruzioni di PRIMA
+# installazione: il collega rilancia il comando tutti i giorni, e rileggere
+# sempre lo stesso muro di testo -- per giunta digitando la password del Mac
+# senza che serva installare niente -- insegna solo a ignorare gli avvisi.
+setup_already_complete() {
+  [ -f "$DIR/config.json" ] || return 1
+  node -e '
+    try {
+      const c = require(process.argv[1]);
+      const account = !!(c.autologinUrl && String(c.autologinUrl).includes("/autologin/"));
+      const ws = c.workSchedule || {};
+      const turni = Array.isArray(ws.days) && ws.days.length
+        && Array.isArray(ws.shifts) && ws.shifts.length;
+      process.exit(account && turni ? 0 : 1);
+    } catch (e) { process.exit(1); }
+  ' "$DIR/config.json" >/dev/null 2>&1 || return 1
+  "$DIR/scripts/check-requirements.sh" >/dev/null 2>&1 || return 1
+  return 0
+}
+
+SETUP_QUIET=false
+if setup_already_complete; then SETUP_QUIET=true; fi
+
 print_header() {
   ui_header "Setup GSD Campus Autopilot" "versione $(ui_version "$DIR")" "ᗧ"
+  if [ "$SETUP_QUIET" = true ]; then
+    # Gia' configurato e installato: una riga, niente attesa, niente password.
+    echo ""
+    ok "Tutto gia' pronto: nome, orari e programmi sono a posto."
+    echo -e "  ${DIM}Per cambiare nominativo o orari: ./scripts/setup.sh${NC}"
+    echo ""
+    return 0
+  fi
   echo ""
   echo "Ti guido in pochi passi a configurare l'automazione del corso."
   echo "Ti chiederò solo 2 cose semplici:"
@@ -159,10 +191,18 @@ print_header
 # (raw-mode, eco in user-space) o i `read` degli orari, ruba i tasti digitati
 # dall'utente — caratteri non visibili + "Sorry, try again. Password:". Il sudo
 # lo rinfreschiamo in foreground al passo 5 (Ollama), dopo i prompt interattivi.
-info "Ora ti chiedo la password del Mac — quella con cui lo accendi."
-info "Serve una volta sola per installare i programmi e non viene salvata da nessuna parte."
-sudo -v
-ok "Grazie: non me la chiederà più."
+# La password serve per INSTALLARE. Se non manca nulla non la chiediamo affatto:
+# chiederla "per abitudine" a ogni avvio e' il modo migliore per abituare la
+# gente a digitarla senza guardare. Se piu' avanti un passo ne avesse comunque
+# bisogno, sara' quel comando a chiederla.
+if [ "$SETUP_QUIET" = true ]; then
+  info "Non serve installare niente: non ti chiedo la password."
+else
+  info "Ora ti chiedo la password del Mac — quella con cui lo accendi."
+  info "Serve una volta sola per installare i programmi e non viene salvata da nessuna parte."
+  sudo -v
+  ok "Grazie: non me la chiederà più."
+fi
 
 if [ "$AUTO_YES" = false ]; then
   read -q "REPLY?Procedere? [y/N] "

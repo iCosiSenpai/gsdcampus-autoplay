@@ -52,9 +52,11 @@ const GLYPH = IS_UTF
     pellet: 'o', power: '0', track: '.', eaten: '-',
     wall: '=', capL: '[', capR: ']', pause: '||',
   };
-// Ciclo bocca: spalancata, media, chiusa, media → si legge come un morso, non
-// come un puntino che lampeggia.
-const PAC_FRAMES = [GLYPH.pacWide, GLYPH.pacOpen, GLYPH.pacClosed, GLYPH.pacOpen];
+// Ciclo bocca a due battute: aperto → chiuso. Prima c'era anche `◖` (mezzo
+// disco pieno), che in gran parte dei font monospace ha peso e larghezza
+// diversi da `ᗧ`: il risultato era un Pac-Man che sobbalzava invece di
+// masticare. Due glifi della stessa famiglia si leggono come un morso.
+const PAC_FRAMES = [GLYPH.pacOpen, GLYPH.pacOpen, GLYPH.pacClosed, GLYPH.pacClosed];
 const SPIN = IS_UTF ? ['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'] : ['-', '\\', '|', '/'];
 
 const ANSI = {
@@ -69,6 +71,8 @@ const ANSI = {
   eaten: '\x1b[38;5;237m',
   maze: '\x1b[38;5;33m',
   cherry: '\x1b[38;5;196m',
+  // Blu del fantasma spaventato, come nel gioco dopo la power pellet.
+  scared: '\x1b[1;38;5;27m',
 };
 // I quattro fantasmi originali: Blinky (rosso), Pinky (rosa), Inky (ciano), Clyde (arancio).
 const GHOST_COLORS = ['\x1b[38;5;203m', '\x1b[38;5;213m', '\x1b[38;5;87m', '\x1b[38;5;214m'];
@@ -128,7 +132,11 @@ function pacmanSegments(pct, width, frame = 0, opts = {}) {
     } else if (i === pos) {
       out.push({ ch: mouth, kind: 'pac' });                    // Pac-Man che mastica
     } else if (ghosts > 0 && fromEnd < ghosts) {
-      out.push({ ch: glyph.ghost, kind: 'ghost', ghost: fromEnd });
+      // Come nel gioco: quando Pac-Man e' addosso ai fantasmi questi diventano
+      // spaventati (blu). Qui vuol dire "ci sei quasi, i corsi bloccati stanno
+      // per cadere" — l'informazione e' la stessa, ma si vede a colpo d'occhio.
+      const scared = (cells - 1 - pos) <= ghosts + 1;
+      out.push({ ch: glyph.ghost, kind: scared ? 'ghostScared' : 'ghost', ghost: fromEnd });
     } else if (fromEnd === 0) {
       out.push({ ch: glyph.power, kind: 'power' });            // pastiglia grande in fondo
     } else if ((i - pos) % 4 === 0) {
@@ -152,6 +160,7 @@ function pacmanCellColor(cell) {
   switch (cell.kind) {
     case 'pac': return ANSI.pac;
     case 'ghost': return GHOST_COLORS[(cell.ghost || 0) % GHOST_COLORS.length];
+    case 'ghostScared': return ANSI.scared;
     case 'pellet': return ANSI.pellet;
     case 'power': return ANSI.power;
     case 'eaten': return ANSI.eaten;
@@ -191,6 +200,11 @@ function formatDuration(ms) {
   const m = Math.round(s / 60);
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60); const rem = m % 60;
+  // Oltre le 48 ore "159h 10m" non dice piu niente a nessuno: si passa ai giorni.
+  if (h >= 48) {
+    const d = Math.floor(h / 24); const hr = h % 24;
+    return hr ? `${d} giorni ${hr}h` : `${d} giorni`;
+  }
   return rem ? `${h}h ${rem}m` : `${h}h`;
 }
 
@@ -214,6 +228,23 @@ function formatWhen(iso, now) {
   else if (dayDiff === 1) abs = `domani alle ${time}`;
   else abs = `${WEEKDAYS[d.getDay()]} alle ${time}`;
   return { abs, rel: formatDuration(Math.max(0, t - now)) };
+}
+
+// Quando è successo: "16:28", "ieri 16:28", "mar 22 16:28". Il giorno va detto
+// SEMPRE se non è oggi — è esattamente l'informazione che mancava e che faceva
+// scambiare un errore della sera prima per uno appena avvenuto.
+function formatEventStamp(at, now) {
+  const d = new Date(at); const n = new Date(now);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const time = `${hh}:${mm}`;
+  const days = Math.round(
+    (new Date(n.getFullYear(), n.getMonth(), n.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000
+  );
+  if (days <= 0) return time;
+  if (days === 1) return `ieri ${time}`;
+  if (days < 7) return `${WEEKDAYS[d.getDay()]} ${time}`;
+  return `${d.getDate()}/${d.getMonth() + 1} ${time}`;
 }
 
 function courseIdFromUrl(url) {
@@ -280,13 +311,75 @@ function tailLines(file, maxBytes = 65536) {
   } catch (_) { return []; }
 }
 
-function recentEvents(root, limit = 3) {
-  const lines = tailLines(path.join(root, 'logs', 'autoplay.log'));
-  const hits = [];
-  for (let i = lines.length - 1; i >= 0 && hits.length < limit; i -= 1) {
-    if (EVENT_PATTERN.test(lines[i])) hits.push(redactSensitiveText(lines[i]).slice(0, 120));
+// Il log porta solo HH:MM:SS, senza data. Finché mostravamo la riga così com'era,
+// un errore di ieri sera sembrava appena successo: bastava un riavvio e i vecchi
+// eventi restavano lì a spaventare. Qui ricostruiamo la data assoluta ancorando
+// l'ULTIMA riga all'mtime del file e camminando all'indietro: quando l'orario di
+// una riga è maggiore di quella successiva abbiamo scavalcato la mezzanotte, e
+// scaliamo un giorno.
+const LOG_TS_RE = /^(\d{2}):(\d{2}):(\d{2})\s*\|\s*([\s\S]*)$/;
+const RUN_START_RE = /Avvio GSD Campus autoplay/;
+
+/**
+ * @param {string[]} lines righe grezze del log, in ordine cronologico
+ * @param {number} anchorMs epoch dell'ultima riga (tipicamente l'mtime del file)
+ * @returns {{at:number,text:string,raw:string,runStart:boolean,run:number}[]}
+ *   `run` = 0 per l'esecuzione più recente, 1 per la precedente, e così via.
+ *   Pura: niente I/O, così è testabile.
+ */
+function parseLogTimeline(lines, anchorMs) {
+  const out = [];
+  const anchor = new Date(anchorMs);
+  // Data di lavoro: parte dal giorno dell'ancora e arretra sui salti di mezzanotte.
+  let y = anchor.getFullYear();
+  let mo = anchor.getMonth();
+  let d = anchor.getDate();
+  let prevSecs = null; // orario della riga successiva (più recente)
+
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const m = LOG_TS_RE.exec(lines[i]);
+    if (!m) continue;
+    const secs = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+    if (prevSecs != null && secs > prevSecs) {
+      // Andando indietro l'orario è aumentato: abbiamo superato la mezzanotte.
+      const back = new Date(y, mo, d);
+      back.setDate(back.getDate() - 1);
+      y = back.getFullYear(); mo = back.getMonth(); d = back.getDate();
+    }
+    prevSecs = secs;
+    out.push({
+      at: new Date(y, mo, d, Number(m[1]), Number(m[2]), Number(m[3])).getTime(),
+      text: m[4],
+      raw: lines[i],
+      runStart: RUN_START_RE.test(lines[i]),
+      run: 0,
+    });
   }
-  return hits.reverse();
+  out.reverse();
+  // Numera le esecuzioni all'indietro: 0 = quella in corso / più recente.
+  let run = 0;
+  for (let i = out.length - 1; i >= 0; i -= 1) {
+    out[i].run = run;
+    if (out[i].runStart) run += 1;
+  }
+  return out;
+}
+
+function readTimeline(root) {
+  const file = path.join(root, 'logs', 'autoplay.log');
+  let anchor = Date.now();
+  try { anchor = fs.statSync(file).mtimeMs; } catch (_) { /* file assente: resta ora */ }
+  return parseLogTimeline(tailLines(file), anchor);
+}
+
+/** Eventi rilevanti, con data assoluta e numero di esecuzione. */
+function recentEvents(root, limit = 3) {
+  const timeline = readTimeline(root).filter((e) => EVENT_PATTERN.test(e.raw));
+  return timeline.slice(-limit).map((e) => ({
+    at: e.at,
+    run: e.run,
+    text: redactSensitiveText(e.text).slice(0, 110),
+  }));
 }
 
 function readModel(root, now = Date.now()) {
@@ -548,31 +641,54 @@ function renderFrame(model, opts = {}) {
     }
   }
 
-  // Eventi recenti
+  // Eventi recenti — con data, e marcati se appartengono a un'esecuzione finita.
   if (model.events && model.events.length) {
+    const now = model.now || Date.now();
+    // "Vecchio" non significa "di un run precedente": l'ultimo run puo essere
+    // finito giorni fa e i suoi eventi restare gli ultimi. Il segnale utile e
+    // da quanto NON succede niente — era esattamente il dubbio davanti a un
+    // MONITOR ERROR di ieri che sembrava di adesso.
+    const newest = model.events[model.events.length - 1];
+    const idleMs = newest ? Math.max(0, now - newest.at) : 0;
+    const idleNote = idleMs > 15 * 60 * 1000
+      ? `  (nessuna attivita da ${formatDuration(idleMs)})`
+      : '';
     L.push('');
     L.push(thin);
-    L.push(`   ${c(ANSI.dim, 'Ultimi eventi')}`);
-    for (const ev of model.events) L.push(`     ${c(ANSI.gray, GLYPH.bul)} ${c(ANSI.dim, ev)}`);
+    L.push(`   ${c(ANSI.dim, 'Ultimi eventi')}${idleNote ? c(ANSI.yellow, idleNote) : ''}`);
+    for (const ev of model.events) {
+      // Un evento di un run passato non deve avere lo stesso peso visivo di uno
+      // appena successo: lo stesso testo, letto senza contesto, faceva pensare
+      // a un guasto in corso.
+      const old = ev.run > 0;
+      const stamp = formatEventStamp(ev.at, now);
+      L.push(`     ${c(old ? ANSI.gray : ANSI.maze, GLYPH.bul)} ${c(old ? ANSI.gray : ANSI.dim, stamp.padEnd(11))} ${c(old ? ANSI.gray : ANSI.dim, ev.text)}`);
+    }
   }
 
-  // Footer azioni
+  // Footer azioni — menu a frecce, niente lettere da ricordare. Le scorciatoie
+  // a lettera restano attive nel gestore tasti per chi le conosce, ma non si
+  // annunciano più: chi usa la plancia deve solo spostarsi e premere Invio.
   L.push('');
   L.push(rule);
-  const key = (k, label) => `${c(ANSI.pac, k)} ${c(ANSI.dim, label)}`;
-  const actions = [
-    key('L', 'guarda dal vivo'),
-    key('R', 'aggiorna ora'),
-    key('Q', 'ferma tutto e chiudi'),
-    key('ESC', 'esci e lascia lavorare'),
-  ];
-  if (head.level === 'attention' && head.hint && head.hint.includes('C ')) actions.splice(3, 0, key('C', 'cambia collega'));
-  L.push('  ' + actions.join('   '));
-  // Q = ferma per davvero: corsi, scheduler e guardiano, poi chiude la scheda.
-  // ESC = via d'uscita non distruttiva: chiude solo questa scheda del Terminale
-  // (non l'app, non le altre finestre che possono fare altro) e lascia lavorare.
-  L.push(`  ${c(ANSI.dim, `${GLYPH.bul} Q ferma i corsi, lo scheduler e il guardiano, poi chiude questa scheda (chiede conferma).`)}`);
-  L.push(`  ${c(ANSI.dim, `${GLYPH.bul} ESC chiude solo questa scheda del Terminale (non l'app): i corsi continuano.`)}`);
+  const menu = Array.isArray(opts.menu) ? opts.menu : [];
+  const sel = Number(opts.selected) || 0;
+  if (menu.length) {
+    const cells = menu.map((item, i) => (i === sel
+      // Voce scelta: inversa, così si distingue anche su terminali che
+      // schiacciano i colori (e per chi distingue male le sfumature).
+      ? `${color ? '\x1b[7;1m' : ''} ${GLYPH.arrow} ${item.label} ${color ? ANSI.reset : ''}`
+      : `${c(ANSI.dim, `   ${item.label} `)}`));
+    L.push('  ' + cells.join(' '));
+    const current = menu[sel];
+    if (current && current.help) L.push(`  ${c(ANSI.dim, `${GLYPH.bul} ${current.help}`)}`);
+    L.push(`  ${c(ANSI.gray, '← → scegli   Invio conferma   ESC esci lasciando lavorare')}`);
+  } else {
+    // Modalita non interattiva (--once, pipe): niente menu da evidenziare, ma
+    // le azioni vanno comunque elencate.
+    L.push('  ' + c(ANSI.dim, 'Guarda dal vivo · Registro attivita · Aggiorna ora · Ferma tutto · Esci'));
+    L.push('  ' + c(ANSI.gray, 'Nella plancia interattiva scegli con ← → e conferma con Invio.'));
+  }
   if (model.keepAlive) {
     L.push(`  ${c(ANSI.dim, `${GLYPH.bul} Dopo Q l'automazione resta ferma finché non la riavvii tu: il guardiano non la resuscita.`)}`);
   } else {
@@ -606,6 +722,52 @@ function renderLogView(root, opts = {}) {
   else for (const l of lines) out.push('  ' + c(ANSI.dim, l));
   out.push(' ' + c(ANSI.maze, GLYPH.wall.repeat(width)));
   out.push(`  ${c(ANSI.pac, 'Q')} torna alla plancia ${GLYPH.bul} sola lettura: guardare non ferma niente ${GLYPH.bul} si aggiorna da solo`);
+  return out.join('\n');
+}
+
+/**
+ * Registro attività: tutti gli eventi con data e ora, dal più recente, divisi
+ * per esecuzione. È la risposta a "l'ultimo evento è di ieri ma sembra di
+ * adesso": qui il quando è esplicito e si vede dove finisce un'esecuzione e
+ * comincia la successiva. Scorribile con le frecce.
+ */
+function renderRegistryView(root, opts = {}) {
+  const color = !!opts.color;
+  const width = Math.max(48, Math.min(120, opts.width || 100));
+  const rows = Math.max(6, opts.rows || 16);
+  const now = opts.now || Date.now();
+  const c = (code, s) => (color ? `${code}${s}${ANSI.reset}` : String(s));
+
+  // Dal più recente in cima: si legge come una cronologia, non come un file.
+  const items = readTimeline(root).filter((e) => EVENT_PATTERN.test(e.raw)).reverse();
+  const maxOffset = Math.max(0, items.length - rows);
+  const offset = Math.max(0, Math.min(Number(opts.offset) || 0, maxOffset));
+  const page = items.slice(offset, offset + rows);
+
+  const out = [
+    ` ${c(ANSI.pac, GLYPH.pacOpen)} ${c(ANSI.pac, 'REGISTRO ATTIVITÀ')} ${c(ANSI.dim, `${items.length} eventi`)}`,
+    ' ' + c(ANSI.maze, GLYPH.wall.repeat(width)),
+  ];
+  if (!page.length) {
+    out.push(`  ${c(ANSI.dim, '(nessun evento registrato)')}`);
+  } else {
+    let prevRun = null;
+    for (const ev of page) {
+      if (prevRun !== null && ev.run !== prevRun) {
+        out.push(`  ${c(ANSI.gray, GLYPH.h.repeat(12) + ' esecuzione precedente ' + GLYPH.h.repeat(Math.max(0, width - 36)))}`);
+      }
+      prevRun = ev.run;
+      const old = ev.run > 0;
+      const stamp = formatEventStamp(ev.at, now).padEnd(11);
+      const text = redactSensitiveText(ev.text).slice(0, Math.max(20, width - 16));
+      out.push(`  ${c(old ? ANSI.gray : ANSI.maze, GLYPH.bul)} ${c(old ? ANSI.gray : ANSI.pellet, stamp)} ${c(old ? ANSI.gray : ANSI.dim, text)}`);
+    }
+  }
+  out.push(' ' + c(ANSI.maze, GLYPH.wall.repeat(width)));
+  const pos = items.length > rows
+    ? `${offset + 1}-${Math.min(offset + rows, items.length)} di ${items.length}`
+    : 'tutti';
+  out.push(`  ${c(ANSI.dim, `${GLYPH.arrow} ↑↓ scorri ${GLYPH.bul} ${pos} ${GLYPH.bul} Invio o ESC torna alla plancia`)}`);
   return out.join('\n');
 }
 
@@ -693,8 +855,19 @@ function main() {
 
   const input = new tty.ReadStream(ttyFd);
   let spinIndex = 0;
-  let view = 'panel'; // 'panel' | 'log'
+  let view = 'panel'; // 'panel' | 'log' | 'registro'
   let confirmStop = false;
+  // Menu del footer: l'ordine mette per primo ciò che si guarda, per ultimo ciò
+  // che ferma. La voce distruttiva non è mai quella selezionata all'apertura.
+  const MENU = [
+    { id: 'log', label: 'Guarda dal vivo', help: 'Mostra il log mentre scorre. Sola lettura: guardare non ferma niente.' },
+    { id: 'registro', label: 'Registro attività', help: 'Cronologia con data e ora, divisa per esecuzione.' },
+    { id: 'refresh', label: 'Aggiorna ora', help: 'Rilegge subito lo stato senza aspettare il prossimo giro.' },
+    { id: 'stop', label: 'Ferma tutto', help: 'Ferma corsi, scheduler e guardiano, poi chiude la scheda. Chiede conferma.' },
+    { id: 'exit', label: 'Esci', help: 'Chiude solo questa scheda: i corsi continuano a lavorare.' },
+  ];
+  let selected = 0;
+  let regOffset = 0;
   let timer = null;
   let closed = false;
   // Dati in cache: la rilettura dei file resta a REFRESH_MS, il ridisegno gira a
@@ -720,16 +893,24 @@ function main() {
   };
 
   const draw = () => {
-    const frame = view === 'log'
-      ? renderLogView(args.root, { color, width, spinIndex })
-      : renderFrame(model, {
+    let frame;
+    if (view === 'log') {
+      frame = renderLogView(args.root, { color, width, spinIndex });
+    } else if (view === 'registro') {
+      const rows = Math.max(6, (process.stdout.rows || 24) - 8);
+      frame = renderRegistryView(args.root, { color, width, rows, offset: regOffset });
+    } else {
+      frame = renderFrame(model, {
         color,
         width,
         spinIndex,
         bootSha,
+        menu: MENU,
+        selected,
         restartIn: restartPlan.action === 'wait' ? restartPlan.seconds : null,
         restartHeld: restartPlan.action === 'wait' ? restartPlan.reason : null,
       });
+    }
     const extra = (view === 'panel' && confirmStop)
       ? `\n  ${color ? ANSI.red : ''}Premere di nuovo Q per fermare corsi e scheduler e chiudere la scheda, un altro tasto per annullare.${color ? ANSI.reset : ''}`
       : '';
@@ -778,29 +959,65 @@ function main() {
     // Ctrl-C: esce dalla plancia ma NON chiude la scheda (è la via d'uscita
     // "non distruttiva", utile anche in debug).
     if (k === '\u0003') return quit('Plancia chiusa. I corsi restano come sono.');
-    if (view === 'log') { if (/^[qQ\r\n\u001b]$/.test(k)) { view = 'panel'; draw(); } return; }
+
+    // Le frecce arrivano come sequenza di 3 caratteri in un colpo solo, quindi
+    // non si confondono con ESC "nudo" (1 carattere). Vanno però intercettate
+    // PRIMA, altrimenti muoversi nel menu chiuderebbe la plancia.
+    const UP = k === '\u001b[A';
+    const DOWN = k === '\u001b[B';
+    const RIGHT = k === '\u001b[C';
+    const LEFT = k === '\u001b[D';
+    const ENTER = k === '\r' || k === '\n';
+    const ESC = k === '\u001b';
+
+    if (view === 'log') { if (ENTER || ESC || /^[qQ]$/.test(k)) { view = 'panel'; draw(); } return; }
+
+    if (view === 'registro') {
+      if (UP) { regOffset = Math.max(0, regOffset - 1); draw(); return; }
+      if (DOWN) { regOffset += 1; draw(); return; }
+      if (k === '\u001b[5~') { regOffset = Math.max(0, regOffset - 10); draw(); return; }
+      if (k === '\u001b[6~') { regOffset += 10; draw(); return; }
+      if (ENTER || ESC || /^[qQ]$/.test(k)) { view = 'panel'; regOffset = 0; draw(); }
+      return;
+    }
+
     if (confirmStop) {
       confirmStop = false;
-      // Conferma con lo stesso tasto che ha chiesto lo stop (Q, o F come alias storico).
-      if (/^[qQfF]$/.test(k)) return doStop();
+      // Conferma con Invio (coerente col menu) o con la vecchia scorciatoia Q/F.
+      if (ENTER || /^[qQfF]$/.test(k)) return doStop();
       draw();
       return;
     }
-    switch (k) {
-      // Q = fermo davvero tutto: corsi, scheduler, guardiano, e chiudo la scheda.
-      // Chiede una conferma perché su un Mac che sta lavorando è un'azione pesante.
-      case 'q': case 'Q': case 'f': case 'F': confirmStop = true; draw(); break;
-      // ESC = via d'uscita non distruttiva: chiude la plancia e lascia lavorare.
-      case '\u001b': {
-        const tail = model.keepAlive
-          ? 'I corsi continuano e il guardiano li tiene in vita.'
-          : 'Attenzione: il guardiano non è attivo — se l\'automazione si ferma, rilancia il comando curl.';
-        return quit(`Esco dalla plancia senza fermare nulla. ${tail}`, { closeTab: true });
+
+    const activate = (id) => {
+      switch (id) {
+        case 'log': view = 'log'; draw(); return;
+        case 'registro': view = 'registro'; regOffset = 0; draw(); return;
+        case 'refresh': refreshNow(); draw(); return;
+        // Azione pesante su un Mac che sta lavorando: sempre una conferma.
+        case 'stop': confirmStop = true; draw(); return;
+        case 'exit': {
+          const tail = model.keepAlive
+            ? 'I corsi continuano e il guardiano li tiene in vita.'
+            : 'Attenzione: il guardiano non è attivo — se l\'automazione si ferma, rilancia il comando curl.';
+          return quit(`Esco dalla plancia senza fermare nulla. ${tail}`, { closeTab: true });
+        }
+        default: return;
       }
-      case 'l': case 'L': view = 'log'; draw(); break;
-      case 'r': case 'R': refreshNow(); draw(); break;
-      default: break;
-    }
+    };
+
+    // Destra/sinistra scorrono il menu; su/giù fanno lo stesso per chi se lo
+    // aspetta verticale. Non si esce mai per sbaglio muovendosi.
+    if (RIGHT || DOWN) { selected = (selected + 1) % MENU.length; draw(); return; }
+    if (LEFT || UP) { selected = (selected - 1 + MENU.length) % MENU.length; draw(); return; }
+    if (ENTER || k === ' ') return activate(MENU[selected].id);
+    if (ESC) return activate('exit');
+
+    // Scorciatoie storiche: non più annunciate, ma chi le ha nelle dita le trova.
+    if (/^[qQfF]$/.test(k)) return activate('stop');
+    if (/^[lL]$/.test(k)) return activate('log');
+    if (/^[rR]$/.test(k)) return activate('refresh');
+    if (/^[aA]$/.test(k)) return activate('registro');
   };
 
   try { input.setRawMode(true); } catch (_) {
@@ -854,7 +1071,8 @@ if (require.main === module) {
 module.exports = {
   parseClockSeconds, videoPercent, progressBar, pacmanBar, pacmanSegments, paintPacman, pacmanCellColor,
   PAC_FRAMES, GLYPH,
-  formatDuration, relativeTime, formatWhen,
+  formatDuration, relativeTime, formatWhen, formatEventStamp, parseLogTimeline,
   courseIdFromUrl, computeHeadline, readModel, renderFrame, renderLogView, stripAnsi, visLen,
   terminalCloseScript, readVersion, keepAliveInstalled, planPanelRestart,
+  renderRegistryView,
 };

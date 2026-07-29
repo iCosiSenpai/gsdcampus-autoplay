@@ -166,6 +166,9 @@ warn() { log "${YELLOW}${BOLD}[ATTENZIONE]${NC} $1"; }
 
 # Pulizia file di controllo in uscita
 cleanup() {
+  # La guardia anti-stallo e' un processo figlio: non deve sopravvivere allo
+  # scheduler. Definita piu' sotto: le funzioni si risolvono alla chiamata.
+  stop_stall_watchdog 2>/dev/null || true
   rm -f "$STOP_FILE"
   if [ -f "$PID_FILE" ] && [ "$(cat "$PID_FILE" 2>/dev/null || echo '')" = "$$" ]; then
     rm -f "$PID_FILE"
@@ -537,6 +540,58 @@ apply_crash_backoff() {
   return 0
 }
 
+# ── Guardia anti-stallo ─────────────────────────────────────────────────────
+# L'autoplay puo restare VIVO e smettere comunque di combinare qualcosa: browser
+# congelato, pagina che non risponde, rete appesa. Finora nessuno se ne
+# accorgeva — lo scheduler restava in attesa per ore e il collega vedeva solo
+# "fermo", con l'ultimo evento del giorno prima e l'invito a rilanciare a mano.
+#
+# Il segnale di vita e' l'mtime di logs/autoplay.log, che l'autoplay riscrive a
+# ogni riga (anche solo l'avanzamento video, ogni 30s). Se smette di muoversi
+# oltre la soglia, chiudiamo il processo: il backoff normale lo fa ripartire da
+# solo, senza che nessuno tocchi niente.
+AUTOPLAY_LOG="$DIR/logs/autoplay.log"
+STALL_MIN=$(node -e 'try{const c=require(process.argv[1]);const v=Number(c.stallTimeoutMin);process.stdout.write(String(Number.isFinite(v)&&v>0?v:15))}catch(e){process.stdout.write("15")}' "$DIR/config.json" 2>/dev/null || echo 15)
+
+# Secondi dall'ultima scrittura del log; -1 se il file non c'e' ancora (avvio).
+log_idle_seconds() {
+  node -e 'const fs=require("fs");try{process.stdout.write(String(Math.floor((Date.now()-fs.statSync(process.argv[1]).mtimeMs)/1000)))}catch(e){process.stdout.write("-1")}' "$AUTOPLAY_LOG" 2>/dev/null || echo "-1"
+}
+
+STALL_WATCHDOG_PID=""
+
+start_stall_watchdog() {
+  stop_stall_watchdog
+  STALL_LIMIT=$(( STALL_MIN * 60 ))
+  (
+    while sleep 60; do
+      # Nessun autoplay vivo: la guardia ha finito il suo turno.
+      pgrep -f "$DIR/src/autoplay.js" >/dev/null 2>&1 || exit 0
+      STALL_IDLE=$(log_idle_seconds)
+      case "$STALL_IDLE" in (''|*[!0-9-]*) continue ;; esac
+      [ "$STALL_IDLE" -lt 0 ] && continue
+      if [ "$STALL_IDLE" -ge "$STALL_LIMIT" ]; then
+        log "Nessuna attivita da ${STALL_IDLE}s (limite ${STALL_LIMIT}s): l'automazione sembra bloccata. La chiudo e riparte da sola."
+        notify_user "GSD Campus" "L'automazione si era bloccata: l'ho chiusa e riparte da sola. Non devi fare niente." stalled || true
+        pkill -TERM -f "$DIR/src/autoplay.js" 2>/dev/null || true
+        sleep 20
+        pkill -KILL -f "$DIR/src/autoplay.js" 2>/dev/null || true
+        node "$DIR/scripts/lib/diag-ping.js" error stalled >/dev/null 2>&1 &
+        report_blocking_issue "$DIR" stalled "Automazione bloccata: nessuna riga di log per ${STALL_MIN} minuti. Chiusa dalla guardia e riavviata."
+        exit 0
+      fi
+    done
+  ) &
+  STALL_WATCHDOG_PID=$!
+}
+
+stop_stall_watchdog() {
+  [ -n "${STALL_WATCHDOG_PID:-}" ] || return 0
+  kill "$STALL_WATCHDOG_PID" 2>/dev/null || true
+  wait "$STALL_WATCHDOG_PID" 2>/dev/null || true
+  STALL_WATCHDOG_PID=""
+}
+
 while true; do
   # STOP_FILE check in cima al loop: copre entrambi i branch mid-run. Oggi solo
   # wait_ms lo controlla, e il branch ignore-hours fa `continue` bypassandolo —
@@ -568,7 +623,9 @@ while true; do
     # set -e + pipefail una pipe fallita (autoplay crashato) ucciderebbe lo
     # scheduler prima di poter leggere pipestatus.
     EXIT_CODE=0
+    start_stall_watchdog
     node "$DIR/src/autoplay.js" --ignore-hours 2>&1 | tee -a "$LOG_FILE" || EXIT_CODE=${pipestatus[1]}
+    stop_stall_watchdog
     notify_on_exit "$EXIT_CODE"
     share_learned_answers
     if [[ "$EXIT_CODE" -eq 0 ]]; then
@@ -617,7 +674,9 @@ while true; do
     node "$SCHEDULER_STATUS_CLI" mark "$DIR" scheduler_launching "" "Preflight superato; avvio browser." >/dev/null 2>&1 || true
     # zsh pipestatus (1-indexed): v. commento nel ramo ignore-hours.
     EXIT_CODE=0
+    start_stall_watchdog
     node "$DIR/src/autoplay.js" 2>&1 | tee -a "$LOG_FILE" || EXIT_CODE=${pipestatus[1]}
+    stop_stall_watchdog
     notify_on_exit "$EXIT_CODE"
     share_learned_answers
     if [[ "$EXIT_CODE" -eq 0 ]]; then

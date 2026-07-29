@@ -84,30 +84,63 @@ describe('plancia: riga auto-aggiornamento', () => {
   });
 });
 
-describe('plancia: tasti Q e ESC', () => {
-  // Q deve fermare l'automazione per davvero (corsi + scheduler + guardiano) e
-  // chiudere la scheda; ESC è la via d'uscita che lascia lavorare il Mac.
-  it('Q è dichiarato come stop reale, non come semplice chiusura scheda', () => {
-    const out = frame(baseModel);
-    assert.match(out, /Q ferma tutto e chiudi/);
-    assert.match(out, /Q ferma i corsi, lo scheduler e il guardiano/);
-    // Non deve più promettere che chiudere non ferma niente.
+describe('plancia: menu a frecce', () => {
+  // Il menu ha sostituito i tasti a lettera. L'intenzione da difendere resta la
+  // stessa: "Ferma tutto" deve dichiararsi come stop VERO (corsi + scheduler +
+  // guardiano), non come semplice chiusura di finestra, e deve esistere
+  // un'uscita che lascia lavorare il Mac.
+  const MENU = [
+    { id: 'log', label: 'Guarda dal vivo', help: 'Mostra il log mentre scorre. Sola lettura: guardare non ferma niente.' },
+    { id: 'registro', label: 'Registro attività', help: 'Cronologia con data e ora, divisa per esecuzione.' },
+    { id: 'refresh', label: 'Aggiorna ora', help: 'Rilegge subito lo stato senza aspettare il prossimo giro.' },
+    { id: 'stop', label: 'Ferma tutto', help: 'Ferma corsi, scheduler e guardiano, poi chiude la scheda. Chiede conferma.' },
+    { id: 'exit', label: 'Esci', help: 'Chiude solo questa scheda: i corsi continuano a lavorare.' },
+  ];
+  const withMenu = (model, selected = 0) => frame(model, { menu: MENU, selected });
+
+  it('elenca tutte le voci del menu', () => {
+    const out = withMenu(baseModel);
+    for (const item of MENU) assert.match(out, new RegExp(item.label.replace('à', '.')));
+  });
+
+  it('non chiede piu di premere lettere', () => {
+    const out = withMenu(baseModel);
+    assert.equal(/Q ferma tutto e chiudi/.test(out), false);
+    assert.equal(/L guarda dal vivo/.test(out), false);
+    assert.match(out, /← → scegli/);
+    assert.match(out, /Invio conferma/);
+  });
+
+  it('su "Ferma tutto" dichiara che ferma davvero, non solo la finestra', () => {
+    const out = withMenu(baseModel, 3);
+    assert.match(out, /Ferma corsi, scheduler e guardiano/);
+    assert.match(out, /Chiede conferma/);
     assert.equal(/chiudere la finestra non ferma nulla/.test(out), false);
-    assert.equal(/Q chiude solo questa scheda/.test(out), false);
   });
 
-  it('ESC è offerto come uscita che non ferma i corsi', () => {
-    const out = frame(baseModel);
-    assert.match(out, /ESC esci e lascia lavorare/);
-    assert.match(out, /ESC chiude solo questa scheda del Terminale \(non l'app\): i corsi continuano/);
+  it('su "Esci" chiarisce che i corsi continuano', () => {
+    assert.match(withMenu(baseModel, 4), /i corsi continuano a lavorare/);
   });
 
-  it('col guardiano attivo chiarisce che dopo Q non si riparte da soli', () => {
-    assert.match(frame(baseModel), /Dopo Q l'automazione resta ferma finché non la riavvii tu/);
+  it('mostra l aiuto solo della voce selezionata', () => {
+    const out = withMenu(baseModel, 0);
+    assert.match(out, /guardare non ferma niente/);
+    assert.equal(/Ferma corsi, scheduler e guardiano/.test(out), false);
+  });
+
+  it('col guardiano attivo chiarisce che dopo lo stop non si riparte da soli', () => {
+    assert.match(withMenu(baseModel), /l'automazione resta ferma finché non la riavvii tu/);
   });
 
   it('senza guardiano avvisa che l\'automazione può fermarsi', () => {
-    assert.match(frame({ ...baseModel, keepAlive: false }), /Guardiano non attivo/);
+    assert.match(withMenu({ ...baseModel, keepAlive: false }), /Guardiano non attivo/);
+  });
+
+  it('senza menu (--once) elenca comunque le azioni', () => {
+    const out = frame(baseModel);
+    assert.match(out, /Guarda dal vivo/);
+    assert.match(out, /Ferma tutto/);
+    assert.match(out, /scegli con ← → e conferma con Invio/);
   });
 });
 
@@ -120,14 +153,27 @@ describe('corridoio Pac-Man', () => {
     assert.equal(posOf(pacmanBar(100, 12, 0)), 11);
   });
 
-  it('la bocca fa un ciclo di 4 frame (spalancata, media, chiusa, media)', () => {
-    assert.equal(PAC_FRAMES.length, 4);
-    assert.equal(PAC_FRAMES[0], '◖');
-    assert.equal(PAC_FRAMES[1], 'ᗧ');
-    assert.equal(PAC_FRAMES[2], '●');
-    assert.equal(PAC_FRAMES[3], 'ᗧ');
+  it('la bocca alterna aperto e chiuso, senza cambiare peso visivo', () => {
+    // Due sole forme, entrambe della stessa famiglia di glifi. Il vecchio ciclo
+    // includeva `◖` (mezzo disco pieno): larghezza e peso diversi da `ᗧ` nella
+    // maggior parte dei font monospace, quindi Pac-Man sobbalzava.
+    assert.equal(new Set(PAC_FRAMES).size, 2, 'due forme distinte');
+    assert.ok(PAC_FRAMES.includes('ᗧ'), 'bocca aperta');
+    assert.ok(PAC_FRAMES.includes('●'), 'bocca chiusa');
+    assert.equal(PAC_FRAMES.includes('◖'), false, 'niente mezzo disco');
     const frames = [0, 1, 2, 3].map((f) => pacmanBar(50, 16, f));
-    assert.equal(new Set(frames).size, 3); // 3 forme distinte, la media si ripete
+    assert.equal(new Set(frames).size, 2);
+    // Il ciclo torna al punto di partenza: nessuno scatto al giro successivo.
+    assert.equal(pacmanBar(50, 16, 0), pacmanBar(50, 16, PAC_FRAMES.length));
+  });
+
+  it('i fantasmi si spaventano quando Pac-Man e addosso', () => {
+    const lontano = pacmanSegments(20, 40, 0, { ghosts: 3 });
+    assert.ok(lontano.some((c) => c.kind === 'ghost'));
+    assert.equal(lontano.some((c) => c.kind === 'ghostScared'), false);
+
+    const vicino = pacmanSegments(98, 40, 0, { ghosts: 3 });
+    assert.ok(vicino.some((c) => c.kind === 'ghostScared'), 'diventano blu a fine corsa');
   });
 
   it('quanti fantasmi chiedo, tanti compaiono (max 4)', () => {

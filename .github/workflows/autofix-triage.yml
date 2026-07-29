@@ -52,7 +52,7 @@ jobs:
             # Il difetto è nel repo: interstitial non gestito, selettori DOM che
             # non combaciano più, crash ripetuti, launcher che non parte, rollback
             # di un aggiornamento.
-            post_login_blocked|preflight_failed|crash_loop|auto_update_rollback|scheduler_start_failed)
+            post_login_blocked|preflight_failed|crash_loop|auto_update_rollback|scheduler_start_failed|stalled)
               gh issue edit "$NUMBER" --repo "$REPO" \
                 --add-label "Amazon Q development agent"
               echo "→ passata all'agente."
