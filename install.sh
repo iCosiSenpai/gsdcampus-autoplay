@@ -332,17 +332,33 @@ update_repo() {
 MODE="install"   # install | update | reconfig | clean | launch | diagnose | uninstall | cancel
 
 if [ -d "$TARGET/.git" ]; then
-  # Il menu viene mostrato prima di chiedere l'azione. Se la copia locale ha il
-  # renderer precedente, aggiorniamolo prima di disegnarlo: altrimenti il primo
-  # rilancio del curl mostrerebbe ancora la vecchia schermata e la nuova UI si
-  # vedrebbe soltanto dal rilancio successivo.
-  if [ -f "$TARGET/scripts/lib/prompt-cli.js" ] \
-     && ! grep -q "drawMenuScreen" "$TARGET/scripts/lib/prompt-cli.js" 2>/dev/null; then
-    if net_preflight; then
-      info "Preparo il nuovo menu di benvenuto..."
-      (cd "$TARGET" && update_repo) || warn "Menu non aggiornato (aggiornamento non riuscito): uso quello installato."
+  # Il menu lo disegna un file LOCALE, che puo' essere vecchio o rotto. Ed e'
+  # successo: un ReferenceError nel renderer faceva rispondere "Operazione
+  # annullata" a chiunque, e il collega NON poteva ricevere la correzione,
+  # perche' era il menu stesso a impedirgliela. Una trappola perfetta.
+  #
+  # Prima si tentava un aggiornamento solo se mancava drawMenuScreen: una
+  # condizione pensata per installazioni antiche, che sui Mac gia aggiornati non
+  # scattava mai. Non e' quello il criterio giusto -- non sappiamo in anticipo
+  # QUALE difetto avra' la copia locale.
+  #
+  # install.sh arriva sempre fresco da GitHub; facciamo lo stesso col renderer,
+  # in una copia temporanea. Non tocchiamo il codice installato, cosi "Solo
+  # avvia" resta onesto: aggiorniamo la SCHERMATA, non il programma.
+  MENU_CLI="$TARGET/scripts/lib/prompt-cli.js"
+  FRESH_MENU=""
+  if net_preflight; then
+    FRESH_MENU="${TMPDIR:-/tmp}/gsd-prompt-cli.$$.js"
+    if curl -fsSL -m 15 -o "$FRESH_MENU" \
+         "https://raw.githubusercontent.com/iCosiSenpai/gsdcampus-autoplay/$BRANCH/scripts/lib/prompt-cli.js" 2>/dev/null \
+       && [ -s "$FRESH_MENU" ] \
+       && node --check "$FRESH_MENU" 2>/dev/null; then
+      # Solo se scaricato E sintatticamente valido: meglio il menu installato di
+      # un file troncato da una rete che cade a meta'.
+      MENU_CLI="$FRESH_MENU"
     else
-      warn "Niente rete: uso temporaneamente il menu già installato."
+      rm -f "$FRESH_MENU" 2>/dev/null || true
+      FRESH_MENU=""
     fi
   fi
   if [ -n "$TTY_REDIR" ]; then
@@ -358,7 +374,7 @@ if [ -d "$TARGET/.git" ]; then
     printf '%bPerché stai rilanciando l'"'"'installer?%b\n' "$BOLD" "$NC"
     echo "  Usa le frecce ↑/↓ e Invio per scegliere — o non fare niente: parte da solo."
     echo ""
-    CHOICE=$(node "$TARGET/scripts/lib/prompt-cli.js" select \
+    CHOICE=$(node "$MENU_CLI" select \
       --brand --title "Cosa vuoi fare?" --subtitle "$ACCT_DESC" --default 1 --timeout 5 -- \
       "Aggiorna e avvia — Scarica fix e risposte, poi avvia i corsi (consigliato)" \
       "Cambia collega o orari — Seleziona l'account e modifica i turni di lavoro" \
@@ -368,6 +384,7 @@ if [ -d "$TARGET/.git" ]; then
       "Reinstallazione totale — Riscarica tutto da zero, tenendo il tuo nome e gli orari" \
       "Disinstalla — Rimuove programmi e componenti, dopo una conferma" \
       "Esci — Non modifica nulla" < "$TTY_REDIR" 2>/dev/null || echo 1)
+    [ -n "$FRESH_MENU" ] && rm -f "$FRESH_MENU" 2>/dev/null || true
     case "$CHOICE" in
       1) MODE="update" ;;
       2) MODE="reconfig" ;;
