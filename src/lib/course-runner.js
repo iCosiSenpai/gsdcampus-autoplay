@@ -28,6 +28,31 @@ const {
   INTERSTITIAL_CLICK_MS,
 } = require('./platform');
 const { SELECTORS } = require('./selectors');
+
+/**
+ * Dopo aver seguito un cancello, la lezione che avevamo chiesto è AVANZATA?
+ *
+ * È la domanda che decideva male. Prima si verificava soltanto la lezione del
+ * cancello — che è per definizione già al 100%, altrimenti non sarebbe un cancello —
+ * e si concludeva «attività bloccante completata» senza guardare quella che doveva
+ * progredire. Ogni giro bruciava uno dei tre tentativi, e al terzo la lezione veniva
+ * abbandonata **mentre stava avanzando**: visto sul corso 19568, dove la lezione
+ * chiesta è passata da 0% a 96,04% e proprio lì è stata marcata bloccata.
+ *
+ * La tolleranza serve perché la piattaforma persiste percentuali con i decimali e un
+ * ricalcolo può muoverle di un nulla senza che sia progresso vero.
+ *
+ * @param {number|null} before percentuale prima di seguire il cancello
+ * @param {number|null} after percentuale dopo
+ * @param {number} [tolerance] quanto deve crescere per contare
+ * @returns {boolean}
+ */
+function requestedLessonAdvanced(before, after, tolerance = 0.5) {
+  if (before === null || before === undefined) return false;
+  if (after === null || after === undefined) return false;
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return false;
+  return after > before + tolerance;
+}
 const { appendMetric } = require('./metrics');
 const { isOnDashboardUrl } = require('./session-policy');
 
@@ -142,34 +167,36 @@ function createCourseRunner(deps) {
     }
   }
 
-  // Naviga sulla pagina del corso e restituisce la percentuale di completamento
-  // riportata dalla piattaforma per una specifica lezione.
+  // Naviga sulla pagina del corso e restituisce le percentuali di TUTTE le lezioni.
+  //
+  // Serve leggerne due nella stessa passata: quando la piattaforma ci dirotta su un
+  // cancello, contano sia la lezione del cancello sia quella che avevamo chiesto, e
+  // navigare due volte costa un altro giro di ~10s di attesa di persistenza.
+  async function getLessonProgressRows(page, courseUrl) {
+    await page.goto(courseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForTimeout(PROGRESS_PERSIST_MS);
+    if (await isLoginPage(page)) {
+      throw new SessionError('Sessione caduta verificando il progresso della lezione (redirect a /login dopo goto corso).');
+    }
+    const lessonSel = lessonLinkSelector();
+    return page.evaluate((sel) => {
+      const all = [...document.querySelectorAll(sel)];
+      return all.map(a => {
+        const block = (a.closest('tr, .row, li, .card, .card-body') || a.parentElement);
+        const txt = (block?.innerText || '').replace(/\s+/g, ' ').trim();
+        const m = txt.match(/(\d+[.,]\d+)\s*%/);
+        return { href: a.href, pct: m ? parseFloat(m[1].replace(',', '.')) : null };
+      });
+    }, lessonSel);
+  }
+
+  // La percentuale di UNA lezione. Poggia sulla lettura di tutte, così non esistono
+  // due implementazioni della stessa cosa che possano divergere.
   async function getLessonProgressOnCoursePage(page, courseUrl, lessonHref) {
     try {
-      await page.goto(courseUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      // 8s: la piattaforma può impiegare diversi secondi a persistere il 100% dopo
-      // la fine del video (visto: 97% subito dopo fine video, 100% ~10s dopo). Con
-      // 3s capitava spesso il "Tentativo 1" inutile; PROGRESS_PERSIST_MS dà margine.
-      await page.waitForTimeout(PROGRESS_PERSIST_MS);
-      // Su sessione fragile il goto rimbalza su /login: NON tornare null silenzioso
-      // (sennà runCourse crede "lezione non completata" e dopo 3 tentativi marca
-      // need_help un corso legittimamente completato). Segnala il drop di sessione:
-      // runAutoplay esce con session_unstable + cooldown invece di insistere.
-      if (await isLoginPage(page)) {
-        throw new SessionError('Sessione caduta verificando il progresso della lezione (redirect a /login dopo goto corso).');
-      }
-      const lessonSel = lessonLinkSelector();
-      const rows = await page.evaluate((sel) => {
-        const all = [...document.querySelectorAll(sel)];
-        return all.map(a => {
-          const block = (a.closest('tr, .row, li, .card, .card-body') || a.parentElement);
-          const txt = (block?.innerText || '').replace(/\s+/g, ' ').trim();
-          const m = txt.match(/(\d+[.,]\d+)\s*%/);
-          return { href: a.href, pct: m ? parseFloat(m[1].replace(',', '.')) : null };
-        });
-      }, lessonSel);
-      // Match per identità (famiglia + id): l'href sulla pagina corso può
-      // differire per host/query da quello su cui siamo finiti.
+      const rows = await getLessonProgressRows(page, courseUrl);
+      // Match per identità (famiglia + id): l'href sulla pagina corso può differire
+      // per host/query da quello su cui siamo finiti.
       const found = rows.find(r => sameLesson(r.href, lessonHref));
       return found ? found.pct : null;
     } catch (e) {
@@ -401,7 +428,11 @@ function createCourseRunner(deps) {
       // avanzata → "come gli pare".
       const availableLinks = scoredLinks
         .filter(l => l.pct < 100 && !emptyUrls.has(l.href) && !stuckUrls.has(l.href));
-      const nextHref = availableLinks.length > 0 ? availableLinks[0].href : null;
+      const nextLink = availableLinks.length > 0 ? availableLinks[0] : null;
+      const nextHref = nextLink ? nextLink.href : null;
+      // La percentuale di partenza della lezione CHIESTA: è il termine di paragone che
+      // permette di distinguere «il cancello non si apre» da «sto avanzando».
+      const nextPctBefore = nextLink ? nextLink.pct : null;
 
       if (!nextHref) {
         if (emptyUrls.size > 0) {
@@ -729,13 +760,40 @@ function createCourseRunner(deps) {
         await watchVideo(page, log, monitor, shiftCheck);
 
         // Verifica che la piattaforma abbia effettivamente registrato il progresso a 100%.
-        const lessonProgress = await getLessonProgressOnCoursePage(page, courseUrl, workHref);
+        //
+        // Si leggono TUTTE le righe in una passata: servono due percentuali — quella
+        // della lezione vista e, se siamo arrivati da un cancello, quella che avevamo
+        // chiesto — e ogni lettura costa la navigazione più l'attesa di persistenza.
+        const progressRows = await getLessonProgressRows(page, courseUrl);
+        const pctOf = (href) => {
+          const row = progressRows.find(r => sameLesson(r.href, href));
+          return row ? row.pct : null;
+        };
+        const lessonProgress = pctOf(workHref);
         if (lessonProgress !== null && lessonProgress >= 99) {
           log(`Lezione ${workHref} verificata al ${lessonProgress}%: completata.`);
           courseState.addCompletedLesson(ROOT, state, courseUrl, workHref);
           if (redirected) {
-            // Cancello superato: la lezione che avevamo chiesto ora è raggiungibile.
-            log(`Attività bloccante completata: riprovo ${nextHref}.`);
+            // Il cancello risulta completo. Ma «completo» non basta a sapere se
+            // stiamo andando avanti: va guardata la lezione CHIESTA.
+            //
+            // Il difetto che questo blocco corregge: si verificava soltanto la
+            // lezione del cancello — che è già al 100%, altrimenti non sarebbe un
+            // cancello — e si concludeva «attività bloccante completata» senza mai
+            // guardare quella che doveva avanzare. Ogni giro bruciava un tentativo
+            // dei tre disponibili, e al terzo la lezione veniva marcata bloccata
+            // **mentre stava avanzando**: visto sul corso 19568, dove la lezione
+            // chiesta è passata da 0% a 96,04% e proprio allora è stata abbandonata.
+            const requestedNow = pctOf(nextHref);
+            const advanced = requestedLessonAdvanced(nextPctBefore, requestedNow);
+            if (advanced) {
+              // Progresso reale: il cancello si sta aprendo, un pezzo alla volta.
+              // Azzerare il contatore evita di arrendersi a metà di una salita.
+              redirectCounts.delete(nextHref);
+              log(`Attività bloccante completata: ${nextHref} è passata da ${nextPctBefore}% a ${requestedNow}%. Sto avanzando, riprovo.`);
+            } else {
+              log(`Attività bloccante completata, ma ${nextHref} è ancora a ${requestedNow}% (era ${nextPctBefore}%): seguire il cancello non la fa avanzare.`);
+            }
             emptyUrls.clear();
           }
         } else {
@@ -854,4 +912,4 @@ function createCourseRunner(deps) {
   return { runCourse, getLessonProgressOnCoursePage, solveQuizWrapper };
 }
 
-module.exports = { createCourseRunner, MAX_MISSING_PERMISSION, MAX_COURSE_ITER };
+module.exports = { createCourseRunner, requestedLessonAdvanced, MAX_MISSING_PERMISSION, MAX_COURSE_ITER };

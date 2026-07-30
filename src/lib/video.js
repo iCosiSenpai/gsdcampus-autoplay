@@ -8,6 +8,22 @@ const { isLoginPage } = require('./page-detect');
 //  3) % DOM solo se candidati NON-vjs e in scope del video (anti falso 100% buffer)
 // Nessun candidato DOM → ok: restano (1)+(2)+check post-video su pagina corso.
 
+// La piattaforma **salva la posizione a intervalli**, non alla fine del video. Uscire
+// appena il video termina lascia registrata la penultima posizione: la lezione resta
+// appena sotto il 100% e il suo cancello non si apre più.
+//
+// Visto sul corso 19568, lezione 14241: video di 15:33 guardato fino a 15:32, «Video
+// finito», e sulla pagina corso 96,04% per sempre. Il 96,04% non era un caso: 14:57 su
+// 15:33: l'ultimo salvataggio, scattato una trentina di secondi prima della fine. Tre
+// tentativi identici, poi la lezione dichiarata bloccata — e con lei l'intero corso,
+// perché la piattaforma svela il contenuto a blocchi.
+const REGISTERED_PROGRESS_SEL = '#avanzamento-registrato';
+/** Quanto si resta sulla pagina ad aspettare che la fine venga registrata. */
+const PERSIST_MAX_WAIT_MS = 120000;
+const PERSIST_POLL_MS = 5000;
+/** Tolleranza: la posizione registrata non arriva al secondo esatto della durata. */
+const PERSIST_EPSILON_SEC = 3;
+
 const NEAR_END_SEC = 1.5;
 const POLL_MS = 30000;
 const POLL_NEAR_END_MS = 2000;
@@ -18,6 +34,33 @@ function formatTime(t) {
   const m = Math.floor(t / 60);
   const s = Math.floor(t % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/**
+ * Pure: secondi da un testo `hh:mm:ss` o `mm:ss`.
+ * @returns {number|null} null se non interpretabile
+ */
+function parseClockToSeconds(text) {
+  const txt = String(text || '').trim();
+  const m = txt.match(/^(?:(\d{1,3}):)?(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = m[1] ? parseInt(m[1], 10) : 0;
+  const min = parseInt(m[2], 10);
+  const sec = parseInt(m[3], 10);
+  if (min > 59 || sec > 59) return null;
+  return h * 3600 + min * 60 + sec;
+}
+
+/**
+ * Pure: la posizione registrata dalla piattaforma copre la fine del video?
+ * @param {number|null} registeredSec posizione salvata
+ * @param {number|null} durationSec durata del video
+ * @returns {boolean}
+ */
+function isProgressRegistered(registeredSec, durationSec, epsilon = PERSIST_EPSILON_SEC) {
+  if (!Number.isFinite(registeredSec) || !Number.isFinite(durationSec)) return false;
+  if (durationSec <= 0) return false;
+  return registeredSec >= durationSec - epsilon;
 }
 
 /** Pure: parse % da testo corto del player (non paragrafi lunghi). */
@@ -233,6 +276,75 @@ async function watchVideo(page, log, monitor, shiftCheck) {
 
   monitor?.update({ videoProgress: 'finished' });
   log('Video finito.');
+
+  // Non si esce subito: si aspetta che la piattaforma **registri** la fine.
+  //
+  // È la correzione del difetto descritto in testa al file. Andarsene appena il video
+  // termina lascia salvata la penultima posizione, e la lezione resta bloccata appena
+  // sotto il 100% senza che nessun tentativo successivo possa rimediare — perché al
+  // ritorno il video riprende già in fondo, dura pochi secondi, e nessun salvataggio
+  // scatta in quella finestra.
+  if (finished) {
+    await waitForRegisteredProgress(page, log, lastDuration);
+  }
+}
+
+/**
+ * Resta sulla pagina finché la piattaforma non registra la fine del video.
+ *
+ * Difensiva per scelta: se l'indicatore non c'è, o la durata non è nota, **non blocca** —
+ * aspettare all'infinito su una pagina che non dice niente sarebbe peggio del difetto che
+ * si vuole correggere. Si ferma anche quando la posizione registrata smette di crescere,
+ * per non consumare due minuti a vuoto.
+ */
+async function waitForRegisteredProgress(page, log, durationSec) {
+  if (!Number.isFinite(durationSec) || durationSec <= 0) return false;
+
+  const read = async () => page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    return el ? (el.textContent || '').trim() : null;
+  }, REGISTERED_PROGRESS_SEL).catch(() => null);
+
+  const first = await read();
+  if (first === null) {
+    // Nessun indicatore su questa pagina: non c'è niente da attendere.
+    return false;
+  }
+
+  const startedAt = Date.now();
+  let best = parseClockToSeconds(first) ?? 0;
+  let stalledPolls = 0;
+
+  if (isProgressRegistered(best, durationSec)) {
+    log(`Fine già registrata dalla piattaforma (${first}).`);
+    return true;
+  }
+  log(`Attendo che la piattaforma registri la fine (ora ${first}, durata ${formatTime(durationSec)}).`);
+
+  while (Date.now() - startedAt < PERSIST_MAX_WAIT_MS) {
+    await page.waitForTimeout(PERSIST_POLL_MS);
+    const text = await read();
+    const seconds = parseClockToSeconds(text);
+
+    if (isProgressRegistered(seconds, durationSec)) {
+      log(`Fine registrata dalla piattaforma (${text}).`);
+      return true;
+    }
+    if (Number.isFinite(seconds) && seconds > best) {
+      best = seconds;
+      stalledPolls = 0;
+    } else {
+      stalledPolls++;
+      // Tre letture identiche: la piattaforma non sta più salvando. Insistere non
+      // cambierebbe niente e ruberebbe tempo alle altre lezioni.
+      if (stalledPolls >= 3) {
+        log(`La posizione registrata non cresce più (${text}): smetto di attendere.`);
+        return false;
+      }
+    }
+  }
+  log('Tempo di attesa esaurito: la fine non risulta registrata.');
+  return false;
 }
 
 module.exports = {
@@ -243,6 +355,8 @@ module.exports = {
   isDomPctComplete,
   shouldFinishVideo,
   videoPollMs,
+  parseClockToSeconds,
+  isProgressRegistered,
   NEAR_END_SEC,
   POLL_MS,
   POLL_NEAR_END_MS,

@@ -235,6 +235,6 @@ describe('conteggio onesto dei corsi', () => {
     const state = { 100: { status: 'need_help', needHelpReason: 'domande non note' } };
     const r = honestCourseCounts(state, [{ url: 'https://x/corso/show/100', pct: 100 }]);
     assert.equal(r.blocked, 1);
-    assert.match(r.sentence, /1 bloccati/);
+    assert.match(r.sentence, /1 bloccato/);
   });
 });

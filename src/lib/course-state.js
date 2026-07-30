@@ -355,7 +355,7 @@ function honestCourseCounts(state, censusCourses) {
       : `${counts.disagreeing} dati per conclusi ma incompleti`);
   }
   if (counts.incomplete > 0) parts.push(`${counts.incomplete} in corso`);
-  if (counts.blocked > 0) parts.push(`${counts.blocked} bloccati`);
+  if (counts.blocked > 0) parts.push(counts.blocked === 1 ? '1 bloccato' : `${counts.blocked} bloccati`);
 
   return { ...counts, total, sentence: parts.join(', '), perCourse };
 }
