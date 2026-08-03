@@ -81,6 +81,33 @@ describe('runtime identity lock', () => {
     assert.equal(ownerMatches(owner, { pidAlive: () => true, commandForPid: () => '/bin/zsh scheduler.sh --lock-token wrong' }), false);
   });
 
+  it('riconosce anche la app macOS come proprietaria viva', () => {
+    // Il difetto misurato il 3 agosto 2026, e il piu' grave della giornata: quando
+    // l'orchestratore e' la app, il processo e' un bundle e non contiene ne' scheduler.sh
+    // ne' il token. Il lock c'era, valido, con un pid vivo, e risultava MORTO — quindi
+    // `status.sh` lo dichiarava stale e lo RIMUOVEVA mentre la app guardava una lezione.
+    //
+    // Cioe' chiedere lo stato disarmava «una sola sessione per account», che e' la
+    // protezione contro la seconda sessione che fa smettere alla piattaforma di registrare
+    // i progressi della prima.
+    const owner = { schemaVersion: 1, pid: 123, token: 'c'.repeat(36), kind: 'scheduler' };
+    const app = '/Applications/Autoplay San.app/Contents/MacOS/Autoplay San';
+    assert.equal(ownerMatches(owner, { pidAlive: () => true, commandForPid: () => app }), true);
+
+    // Anche la copia di sviluppo, che sta in una cartella di build.
+    const dev = '/Users/x/dev/autoplay-san/.build/xcode-dbg/Build/Products/Debug/Autoplay San.app/Contents/MacOS/Autoplay San';
+    assert.equal(ownerMatches(owner, { pidAlive: () => true, commandForPid: () => dev }), true);
+
+    // Ma non un comando che NOMINA la app senza essere la app: ancorarsi al solo nome
+    // avrebbe fatto risultare vivo un lock per colpa di un terminale aperto sul diario.
+    assert.equal(
+      ownerMatches(owner, { pidAlive: () => true, commandForPid: () => 'tail -f logs/autoplay.log # Autoplay San' }),
+      false
+    );
+    // E un pid morto resta morto, app o non app.
+    assert.equal(ownerMatches(owner, { pidAlive: () => false, commandForPid: () => app }), false);
+  });
+
   it('acquire/promote lega il lock a token e PID', () => {
     const root = tempRoot('gsd-lock-');
     const token = 'b'.repeat(36);

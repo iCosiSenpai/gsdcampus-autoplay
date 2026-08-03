@@ -12,6 +12,16 @@ const { writeJsonAtomic, readJsonSafe } = require('./io');
 
 const SCHEMA_VERSION = 1;
 const TOKEN_RE = /^[a-f0-9]{24,128}$/i;
+/**
+ * Il processo della app macOS, com'e' scritto da `ps`:
+ *
+ *   /Applications/Autoplay San.app/Contents/MacOS/Autoplay San
+ *
+ * Ancorato al percorso dentro il bundle e non al solo nome: «Autoplay San» da solo
+ * matcherebbe anche un comando che PARLA della app — un `tail` sul suo diario, un `grep` —
+ * e un lock non deve poter risultare vivo per colpa di un terminale aperto.
+ */
+const APP_BUNDLE_RE = /Autoplay San\.app\/Contents\/MacOS\//;
 
 function lockDir(root) { return path.join(path.resolve(root), '.autoplay_lock'); }
 function ownerFile(root) { return path.join(lockDir(root), 'owner.json'); }
@@ -45,6 +55,28 @@ function ownerMatches(owner, deps = {}) {
   const cmd = String(command(Number(owner.pid)) || '');
   if (!cmd) return false;
   if (owner.kind === 'starting') return /(^|[/\s])start\.sh(\s|$)/.test(cmd);
+  // La app nativa tiene il lock, e non si riconosceva.
+  //
+  // Le due righe qui sotto descrivono i processi del lato Node: start.sh e scheduler.sh, il
+  // secondo con il token nella riga di comando. Quando l'orchestratore e' la app macOS il
+  // processo e' un bundle — /Applications/Autoplay San.app/Contents/MacOS/Autoplay San — e
+  // nessuna delle due combacia. Il lock c'era, valido, con un pid vivo, e risultava MORTO.
+  //
+  // La conseguenza, misurata il 3 agosto 2026: `status.sh` non trovava il pid, dichiarava
+  // «Nessuno scheduler verificato in esecuzione» e poi chiamava `autoplay_clean_stale_lock`,
+  // che RIMUOVEVA il lock della app mentre stava guardando una lezione. Cioe' chiedere lo
+  // stato disarmava la protezione «una sola sessione per account» — e quella protezione
+  // esiste perche' una seconda sessione fa smettere alla piattaforma di registrare i
+  // progressi della prima. Il lock e' scomparso due volte oggi, e la prima l'ho attribuita a
+  // un caso.
+  //
+  // Perche' qui non si verifica il token: il lato Node lo passa nella riga di comando di
+  // scheduler.sh, quindi controllarlo dimostra che quel processo e' proprio quello che ha
+  // preso il lock. Un bundle non ha il token nella riga di comando, e non lo si puo'
+  // inventare. Il controllo resta comunque doppio — pid vivo E processo che e' la app — e la
+  // difesa contro un pid riciclato la fa la app stessa: due copie insieme non ci possono
+  // essere, ci pensa la sua guardia contro le doppie istanze.
+  if (APP_BUNDLE_RE.test(cmd)) return true;
   return /scheduler\.sh/.test(cmd) && cmd.includes(String(owner.token));
 }
 
@@ -130,6 +162,7 @@ function cleanStaleLock(root) {
 module.exports = {
   SCHEMA_VERSION,
   TOKEN_RE,
+  APP_BUNDLE_RE,
   lockDir,
   ownerFile,
   commandForPid,
