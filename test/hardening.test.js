@@ -239,7 +239,7 @@ describe('conteggio onesto dei corsi', () => {
   });
 
   it('completionEvidence content_only non e una prova: il corso resta da verificare', () => {
-    // completionEvidence porta tre valori e due sono il contrario di una prova:
+    // completionEvidence porta quattro valori e due sono il contrario di una prova:
     // all_assessments_passed dice «superate», no_assessment_confirmed dice «nessuna
     // confermata», content_only dice «delle valutazioni non si sa nulla». Contarli tutti
     // come concluso rimetteva in piedi il falso concluso.
@@ -260,6 +260,25 @@ describe('conteggio onesto dei corsi', () => {
       honestCourseCounts(proven, [{ url: 'https://x/corso/show/100', pct: 100 }]).finished,
       1
     );
+  });
+
+  it('un corso senza questionari sulla pagina e concluso, e lo dice', () => {
+    // platform_shows_no_assessment lo scrive il controllo completo della app dopo aver
+    // guardato la pagina del corso al 100% e non aver trovato nessun questionario. E' una
+    // prova quanto all_assessments_passed, e dice una cosa diversa: la' un questionario
+    // c'era e e' stato superato, qui non ce n'e' nessuno da superare.
+    //
+    // Sono i corsi 4187 «PARTE GENERALE» e 4204 «SPECIFICA ADDETTO ALLE PULIZIE» di ANNA
+    // GUGLIELMI, verificati dal vivo: zero questionari sulla pagina.
+    const state = {
+      100: { status: 'done', quizAttempts: 0, completionEvidence: 'platform_shows_no_assessment' },
+    };
+    const r = honestCourseCounts(state, [{ url: 'https://x/corso/show/100', pct: 100 }]);
+    assert.equal(r.finished, 1);
+    assert.equal(r.awaitingAssessment, 0);
+    // La frase dice perche' e' concluso senza voto: senza questo, chi legge va a cercare
+    // un questionario che non esiste.
+    assert.equal(r.perCourse[0].standing, 'concluso, senza questionario');
   });
 
   it('finalQuizPassed senza nemmeno un tentativo non conta come superato', () => {

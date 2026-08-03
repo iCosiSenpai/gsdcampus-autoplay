@@ -329,18 +329,24 @@ function honestCourseCounts(state, censusCourses) {
       const hasAssessments = record && record.assessments && Object.keys(record.assessments).length > 0;
       // Senza questionari registrati vale solo una prova VERA.
       //
-      // completionEvidence porta tre valori, e due sono il contrario di una prova (li
-      // scrive markCourseDone qui sopra):
+      // completionEvidence porta quattro valori, e due sono il contrario di una prova (i
+      // primi tre li scrive markCourseDone qui sopra):
       //
-      //   all_assessments_passed   le valutazioni sono superate       <- prova
-      //   no_assessment_confirmed  nessuna valutazione confermata     <- il contrario
-      //   content_only             solo il contenuto; delle valutazioni non si sa nulla
+      //   all_assessments_passed        le valutazioni sono superate       <- prova
+      //   platform_shows_no_assessment  la pagina non elenca questionari   <- prova
+      //   no_assessment_confirmed       nessuna valutazione confermata     <- il contrario
+      //   content_only                  solo il contenuto; non si sa nulla
       //
-      // Contarli tutti come «concluso» rimetteva in piedi il falso concluso che questo
-      // conteggio esiste per smascherare. Misurato sul percorso di ANNA GUGLIELMI: 4187
-      // «PARTE GENERALE» e 4204 «SPECIFICA ADDETTO ALLE PULIZIE» sono al 100% con
-      // content_only e zero tentativi, e risultavano «concluso» senza che nessuno avesse
-      // mai guardato i loro questionari.
+      // platform_shows_no_assessment lo scrive il controllo completo della app dopo aver
+      // GUARDATO la pagina del corso al 100% e non aver trovato nessun questionario: non e'
+      // una dichiarazione, e' un resoconto, ed e' una prova quanto l'altra — la' un
+      // questionario c'era e e' stato superato, qui non ce n'e' nessuno da superare. Sul
+      // percorso di ANNA GUGLIELMI sono 4187 «PARTE GENERALE» e 4204 «SPECIFICA ADDETTO
+      // ALLE PULIZIE», tipico dei corsi di sicurezza.
+      //
+      // Contare invece TUTTI i valori come prova rimetteva in piedi il falso concluso che
+      // questo conteggio esiste per smascherare: quei due corsi risultavano conclusi senza
+      // che nessuno avesse mai guardato i loro questionari.
       //
       // E finalQuizPassed vale solo CORROBORATO da un tentativo: la dichiarazione nuda su
       // zero tentativi e' un residuo di quando i questionari non si tracciavano (corso
@@ -348,14 +354,18 @@ function honestCourseCounts(state, censusCourses) {
       // regola del lato Swift (CourseReconciliation.assessmentsPassed): due risposte alla
       // stessa domanda finiscono sempre per divergere, e questo conteggio e quello della
       // app devono dire lo stesso numero.
+      const noAssessmentOnPage = record && record.completionEvidence === 'platform_shows_no_assessment';
       const passed = hasAssessments
         ? allAssessmentsPassed({ [id]: record }, url)
         : Boolean(record && (
           record.completionEvidence === 'all_assessments_passed'
+          || noAssessmentOnPage
           || (record.finalQuizPassed === true && (record.quizAttempts || 0) > 0)
         ));
       if (passed) {
-        standing = 'concluso';
+        // Si dice PERCHE' e' concluso senza voto, altrimenti chi legge cerca il
+        // questionario che non c'e'.
+        standing = noAssessmentOnPage ? 'concluso, senza questionario' : 'concluso';
         counts.finished++;
       } else {
         standing = 'video completati, questionario da fare';
