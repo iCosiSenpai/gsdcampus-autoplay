@@ -63,3 +63,63 @@ describe('handoff delle domande aperte', () => {
     assert.match(after.questions[0].question, /rischio elettrico/);
   });
 });
+
+
+describe('il corso fermo al questionario riparte', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { unblockResolvedQuizCourses } = require('../src/lib/quiz-handoff');
+
+  const CF = 'RSSMRA80A01H501Z';
+
+  function fakeAccount(record) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-handoff-'));
+    const dir = path.join(root, 'data', 'accounts', CF);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'course_state.json'), JSON.stringify({ 100: record }));
+    // Inbox vuota: nessuna domanda in attesa, quindi la riapertura vale per tutti i corsi
+    // bloccati da un questionario.
+    fs.writeFileSync(path.join(dir, 'ai_quiz_request.json'), JSON.stringify({ questions: [] }));
+    return root;
+  }
+
+  it('riconosce quiz_capability_missing, scritto dal motore nativo', () => {
+    // Trovato il 3 agosto 2026 provando la strada che al primo questionario di ANNA
+    // GUGLIELMI avrebbe dovuto funzionare, e prima che servisse. Il motore scrive quel
+    // codice quando arriva a un questionario e non ha la facolta' di aprirlo; nessun ramo
+    // qui lo riconosceva, e il corso sarebbe rimasto bloccato per sempre — entrambi i motori
+    // saltano i need_help, quindi senza riapertura non c'e' nessuna strada per consegnare
+    // quel questionario, nemmeno passando a Playwright.
+    const root = fakeAccount({
+      status: 'need_help',
+      needHelpCode: 'quiz_capability_missing',
+      needHelpReason: 'questionario da fare: il motore non ha la facolta di aprirlo',
+      completedLessons: ['https://x/lezione/show/1'],
+    });
+    const reopened = unblockResolvedQuizCourses(root, { cf: CF });
+    assert.deepEqual(reopened, ['100']);
+
+    const after = JSON.parse(
+      fs.readFileSync(path.join(root, 'data', 'accounts', CF, 'course_state.json'), 'utf8')
+    );
+    assert.equal(after['100'].status, 'in_progress');
+    assert.equal(after['100'].needHelpCode, null);
+    // Conservativa: le lezioni fatte restano.
+    assert.equal(after['100'].completedLessons.length, 1);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('un corso bloccato per altro non viene riaperto per sbaglio', () => {
+    // Il verso opposto: un quiz davvero NON superato, con il tentativo consumato, non e' una
+    // domanda in attesa di risposta e non si riapre da se'.
+    const root = fakeAccount({
+      status: 'need_help',
+      needHelpCode: 'quiz_failed',
+      needHelpReason: 'quiz non superato',
+      completedLessons: [],
+    });
+    assert.deepEqual(unblockResolvedQuizCourses(root, { cf: CF }), []);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});

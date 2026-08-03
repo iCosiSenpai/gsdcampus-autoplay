@@ -187,8 +187,22 @@ function unblockResolvedQuizCourses(root, options = {}) {
   const reopened = [];
   for (const [id, item] of Object.entries(state || {})) {
     if (!item || item.status !== 'need_help') continue;
+    // `quiz_capability_missing` va riconosciuto quanto `quiz_answers_pending`.
+    //
+    // Lo scrive il motore nativo quando arriva a un questionario e non ha la facolta' di
+    // aprirlo: i contenuti sono finiti, resta la verifica, e il corso si ferma. Il codice
+    // che lo scrive porta scritto il requisito — «deve restare uno di quelli che una
+    // risposta risolta sa riaprire» — e non era rispettato: nessun ramo qui lo riconosceva,
+    // e nemmeno il motivo («questionario da fare: il motore non ha la facolta' di aprirlo»)
+    // combacia con i pattern qui sotto.
+    //
+    // Conseguenza, trovata il 3 agosto 2026 prima che accadesse: al primo questionario di
+    // ANNA GUGLIELMI il corso sarebbe rimasto bloccato per sempre. Riaprirlo non e' una
+    // scorciatoia — entrambi i motori saltano i corsi need_help, quindi senza riapertura non
+    // c'e' nessuna strada per consegnare quel questionario, nemmeno passando a Playwright.
     const quizBlocked = item.needHelpCode === 'quiz_answers_pending'
-      || /domande non note|tentativo protetto|risposta.*serve/i.test(String(item.needHelpReason || ''));
+      || item.needHelpCode === 'quiz_capability_missing'
+      || /domande non note|tentativo protetto|risposta.*serve|facolt./i.test(String(item.needHelpReason || ''));
     if (!quizBlocked) continue;
     const hasOpenQuestionForCourse = openQuestions.some(q => (q.contexts || [])
       .some(ctx => String(ctx.courseId || '') === String(id)));
