@@ -327,9 +327,33 @@ function honestCourseCounts(state, censusCourses) {
       // Contenuto al 100% (o percentuale ignota): decidono le valutazioni.
       const url = `/corso/show/${id}`;
       const hasAssessments = record && record.assessments && Object.keys(record.assessments).length > 0;
+      // Senza questionari registrati vale solo una prova VERA.
+      //
+      // completionEvidence porta tre valori, e due sono il contrario di una prova (li
+      // scrive markCourseDone qui sopra):
+      //
+      //   all_assessments_passed   le valutazioni sono superate       <- prova
+      //   no_assessment_confirmed  nessuna valutazione confermata     <- il contrario
+      //   content_only             solo il contenuto; delle valutazioni non si sa nulla
+      //
+      // Contarli tutti come «concluso» rimetteva in piedi il falso concluso che questo
+      // conteggio esiste per smascherare. Misurato sul percorso di ANNA GUGLIELMI: 4187
+      // «PARTE GENERALE» e 4204 «SPECIFICA ADDETTO ALLE PULIZIE» sono al 100% con
+      // content_only e zero tentativi, e risultavano «concluso» senza che nessuno avesse
+      // mai guardato i loro questionari.
+      //
+      // E finalQuizPassed vale solo CORROBORATO da un tentativo: la dichiarazione nuda su
+      // zero tentativi e' un residuo di quando i questionari non si tracciavano (corso
+      // 8122: done, finalQuizPassed true, quizAttempts 0, due questionari). E' la stessa
+      // regola del lato Swift (CourseReconciliation.assessmentsPassed): due risposte alla
+      // stessa domanda finiscono sempre per divergere, e questo conteggio e quello della
+      // app devono dire lo stesso numero.
       const passed = hasAssessments
         ? allAssessmentsPassed({ [id]: record }, url)
-        : Boolean(record && (record.finalQuizPassed === true || record.completionEvidence));
+        : Boolean(record && (
+          record.completionEvidence === 'all_assessments_passed'
+          || (record.finalQuizPassed === true && (record.quizAttempts || 0) > 0)
+        ));
       if (passed) {
         standing = 'concluso';
         counts.finished++;

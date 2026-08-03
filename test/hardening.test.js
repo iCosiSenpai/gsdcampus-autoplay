@@ -237,4 +237,46 @@ describe('conteggio onesto dei corsi', () => {
     assert.equal(r.blocked, 1);
     assert.match(r.sentence, /1 bloccato/);
   });
+
+  it('completionEvidence content_only non e una prova: il corso resta da verificare', () => {
+    // completionEvidence porta tre valori e due sono il contrario di una prova:
+    // all_assessments_passed dice «superate», no_assessment_confirmed dice «nessuna
+    // confermata», content_only dice «delle valutazioni non si sa nulla». Contarli tutti
+    // come concluso rimetteva in piedi il falso concluso.
+    //
+    // Misurato sul percorso di ANNA GUGLIELMI: 4187 «PARTE GENERALE» e 4204 «SPECIFICA
+    // ADDETTO ALLE PULIZIE», al 100% con content_only e zero tentativi, risultavano
+    // conclusi senza che nessuno avesse mai guardato i loro questionari.
+    for (const evidence of ['content_only', 'no_assessment_confirmed']) {
+      const state = { 100: { status: 'done', quizAttempts: 0, completionEvidence: evidence } };
+      const r = honestCourseCounts(state, [{ url: 'https://x/corso/show/100', pct: 100 }]);
+      assert.equal(r.finished, 0, `${evidence} non deve contare come concluso`);
+      assert.equal(r.awaitingAssessment, 1, `${evidence} e' lavoro che resta`);
+    }
+
+    // E la prova vera vale.
+    const proven = { 100: { status: 'done', completionEvidence: 'all_assessments_passed' } };
+    assert.equal(
+      honestCourseCounts(proven, [{ url: 'https://x/corso/show/100', pct: 100 }]).finished,
+      1
+    );
+  });
+
+  it('finalQuizPassed senza nemmeno un tentativo non conta come superato', () => {
+    // Il record ereditato dal corso 8122: done, finalQuizPassed true, quizAttempts 0, e il
+    // corso ha due questionari. Dichiara superato senza aver mai tentato: e' una
+    // dichiarazione impossibile, scritta quando i questionari non si tracciavano. E' la
+    // stessa regola del lato Swift, perche' i due conteggi devono dire lo stesso numero.
+    const nudo = { 100: { status: 'done', finalQuizPassed: true, quizAttempts: 0 } };
+    const r = honestCourseCounts(nudo, [{ url: 'https://x/corso/show/100', pct: 100 }]);
+    assert.equal(r.finished, 0);
+    assert.equal(r.awaitingAssessment, 1);
+
+    // Con un tentativo registrato la dichiarazione e' corroborata e vale.
+    const corroborato = { 100: { status: 'done', finalQuizPassed: true, quizAttempts: 1 } };
+    assert.equal(
+      honestCourseCounts(corroborato, [{ url: 'https://x/corso/show/100', pct: 100 }]).finished,
+      1
+    );
+  });
 });
