@@ -67,8 +67,36 @@ const PROBES = [
   {
     id: 'course.async_lesson_link',
     page: 'course',
-    required: true,
+    // NON obbligatorio, e la ragione è una misura, non un'opinione.
+    //
+    // Su 35 pagine corso reali di cinque account diversi (debug/exploration/<CF>/) un
+    // href diretto a /lezioneAsincrona/show/ NON compare mai: l'elenco del corso usa
+    // sempre /lezione/show/<id>. La rotta asincrona è quella su cui la piattaforma
+    // ATTERRA aprendo quel link (verificato sul corso 17162: l'elenco mostra
+    // /lezione/show/14062 e il click porta su /lezioneAsincrona/show/14062).
+    //
+    // Finché era required:true il probe passava solo perché la fixture qui accanto
+    // conteneva quella forma: un contratto verde su una finzione, che è peggio di
+    // nessun contratto — non poteva accorgersi di niente e dava l'impressione di
+    // vigilare. Resta come probe OPZIONALE: se un giorno la piattaforma cominciasse a
+    // emetterla, il report la mostrerebbe presente.
+    //
+    // Quello che va davvero garantito è course.lesson_link, che è required.
+    required: false,
     test: (html) => /href=["'][^"']*\/lezioneAsincrona\/show\/\d+/.test(html),
+  },
+  {
+    // La forma in cui una lezione asincrona compare davvero, quando compare: un
+    // rimando con l'indirizzo percent-encoded nella query. Opzionale perché la
+    // portano solo alcuni corsi (14 pagine su 35).
+    //
+    // Attenzione a non usarlo per scoprire il contenuto da guardare: nelle catture
+    // punta sempre allo STESSO id per tutti i corsi e tutti gli account — è una
+    // lezione condivisa, non la prossima lezione del corso.
+    id: 'course.shared_async_nav',
+    page: 'course',
+    required: false,
+    test: (html) => /r_url=lezioneAsincrona%2Fshow%2F\d+/i.test(html),
   },
   {
     id: 'course.quiz_or_open',

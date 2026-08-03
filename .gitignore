@@ -63,3 +63,11 @@ PROMPT-per-altra-AI.md
 .claude/plan.md
 # Configurazione OpenCode generata localmente (può contenere endpoint personali).
 .opencode/
+
+# Configurazione locale di Kiro: steering e hook di QUESTA postazione.
+#
+# Non è pigrizia, è la regola scritta in .kiro/steering/marcia-continua.md: la marcia
+# continua vale su questo Mac e su nessun altro, e «l'assenza del file vale come rispetta
+# i turni». Se finisse nel repository, un collega che fa «Aggiorna e avvia» erediterebbe
+# l'istruzione di ignorare i turni senza averla chiesta.
+.kiro/

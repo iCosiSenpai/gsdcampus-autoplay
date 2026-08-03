@@ -2,11 +2,22 @@
 <html>
 <body>
   <h1>Corso di esempio</h1>
+  <!-- Come la piattaforma emette DAVVERO l'elenco delle lezioni: sempre la rotta
+       /lezione/show/<id>. Misurato su 35 pagine corso reali di cinque account. -->
   <a href="/lezione/show/1001">Lezione 1</a>
   <a href="/lezione/show/1002">Lezione 2</a>
-  <!-- Lezione "asincrona": stessa lezione, rotta diversa. Il selettore storico
-       a[href*="/lezione/show/"] non la matchava e il corso restava fermo. -->
-  <a href="/lezioneAsincrona/show/1003">Lezione 3 (asincrona)</a>
+  <!-- La lezione "asincrona" è la STESSA lezione servita su un'altra rotta: aprendo
+       /lezione/show/1002 si atterra su /lezioneAsincrona/show/1002 (vedi
+       src/lib/lesson-url.js, l'identità è l'id numerico).
+
+       Qui NON si mette un href diretto a /lezioneAsincrona/show/: la piattaforma non
+       lo emette, e metterlo faceva passare un probe che pretendeva quella forma —
+       un contratto verde su una finzione, incapace di accorgersi di qualunque cosa.
+
+       Quando una lezione asincrona compare nell'elenco, compare così: un rimando con
+       l'indirizzo percent-encoded. Punta sempre allo stesso id (lezione condivisa),
+       quindi non va usato per scoprire il contenuto da guardare. -->
+  <a href="/navigate?r_url=lezioneAsincrona%2Fshow%2F8404&amp;idx=2">Lezione condivisa</a>
   <a class="btn btn-primary" href="/questionario/show/55">Apri questionario</a>
 </body>
 </html>
