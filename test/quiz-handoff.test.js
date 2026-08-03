@@ -122,4 +122,33 @@ describe('il corso fermo al questionario riparte', () => {
     assert.deepEqual(unblockResolvedQuizCourses(root, { cf: CF }), []);
     fs.rmSync(root, { recursive: true, force: true });
   });
+
+  it('«letto, tutte le risposte note» non si riapre: aspetta una decisione, non una risposta', () => {
+    // La distinzione che evita un ciclo. Quando il motore legge un questionario e la banca
+    // copre tutte le domande, non manca una risposta: manca il permesso di consegnare. Se
+    // questo caso finisse fra quelli «in attesa di risposte», con l'inbox vuota verrebbe
+    // riaperto, riletto e risospeso a ogni giro — cioe' una pagina di questionario aperta in
+    // ciclo, di notte, senza nessuno davanti.
+    const root = fakeAccount({
+      status: 'need_help',
+      needHelpCode: 'quiz_ready_to_deliver',
+      needHelpReason: 'questionario letto: 10 domande, tutte in banca. Manca solo il permesso di consegnarlo.',
+      completedLessons: [],
+    });
+    assert.deepEqual(unblockResolvedQuizCourses(root, { cf: CF }), []);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('«letto, N senza risposta nota» invece si riapre quando le risposte arrivano', () => {
+    // L'altra attesa: qui una risposta risolta e' esattamente ci  che serve, e la riapertura
+    // automatica e' quello che fa ripartire il corso senza che nessuno se ne ricordi.
+    const root = fakeAccount({
+      status: 'need_help',
+      needHelpCode: 'quiz_answers_pending',
+      needHelpReason: 'questionario letto: 10 domande, 3 senza risposta nota',
+      completedLessons: [],
+    });
+    assert.deepEqual(unblockResolvedQuizCourses(root, { cf: CF }), ['100']);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
 });
