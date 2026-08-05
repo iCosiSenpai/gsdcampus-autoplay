@@ -71,3 +71,4 @@ PROMPT-per-altra-AI.md
 # i turni». Se finisse nel repository, un collega che fa «Aggiorna e avvia» erediterebbe
 # l'istruzione di ignorare i turni senza averla chiesta.
 .kiro/
+data/quiz-benchmark.jsonl
