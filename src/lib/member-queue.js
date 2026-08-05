@@ -27,16 +27,28 @@ function getQueue(config) {
 
 /**
  * Indice del CF attivo nella coda, o 0.
+ *
+ * L'indice dichiarato in config vale **solo se concorda con il CF attivo**. Non e' pedanteria:
+ * su questo Mac la coda era ['CSOLSS95L23D862R','GGLNNA78E61E506A'] con memberQueueIndex 0 e
+ * attiva la seconda persona. Con l'indice dichiarato al comando, il «prossimo» risultava
+ * (0+1) % 2 = la persona **gia' attiva**: a fine corsi la coda sarebbe avanzata su se stessa,
+ * avrebbe segnato il giro come servito, e il collega in prima posizione non sarebbe mai stato
+ * servito. Un accesso alla piattaforma buttato e un turno perso in silenzio.
+ *
+ * L'indice resta utile dove serviva: con due CF uguali in coda distingue quale delle due
+ * occorrenze si sta servendo, perche' in quel caso concorda comunque con l'attivo.
  */
 function currentIndex(config) {
   const queue = getQueue(config);
   if (queue.length === 0) return -1;
-  if (Number.isInteger(config.memberQueueIndex) && config.memberQueueIndex >= 0 && config.memberQueueIndex < queue.length) {
-    return config.memberQueueIndex;
-  }
   const active = normalizeCf(config.codice_fiscale);
+  const declared = config.memberQueueIndex;
+  const declaredIsUsable = Number.isInteger(declared) && declared >= 0 && declared < queue.length;
+  if (declaredIsUsable && (!active || queue[declared] === active)) {
+    return declared;
+  }
   const i = queue.indexOf(active);
-  return i >= 0 ? i : 0;
+  return i >= 0 ? i : (declaredIsUsable ? declared : 0);
 }
 
 /**
