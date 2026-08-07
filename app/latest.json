@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 76,
+  "build": 77,
   "minimumSystemVersion": "26.1",
-  "sha256": "2d2e8bcc21421cbaafba6453e3c5e070e6c2dc2b242ec4b087bee3d8c6e74364",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b76/AutoplaySan-0.2.0-b76.zip",
-  "notes": "L'attesa che non aspettava: 41 righe di readyState tolte, e due banchi che tengono chiusa la famiglia. Il motivo degli errori dello scambio arriva nel diario invece di finire nello scarico. Il conteggio dei corsi viene dai record e non dal numero fossile in status.json: diceva 2 conclusi su 9 e 0 da sbloccare, mentre erano 4 e 2."
+  "sha256": "0ea460bf48cab8b6df743a62ddfbd3fdb427f2ac58495013d6d068aa41aca5c4",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b77/AutoplaySan-0.2.0-b77.zip",
+  "notes": "Un accesso che non autentica più ora apre una issue da sé, dal secondo avvistamento: il criterio esisteva ma non aveva un chiamante, quindi il blocco più grave per un collega era l'unico su cui la app taceva. Le tre segnalazioni false del 30 luglio hanno insegnato la soglia."
 }
