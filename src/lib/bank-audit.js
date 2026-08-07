@@ -40,6 +40,15 @@ function auditBank(bank) {
     const issues = [];
     if (!key) issues.push('empty_question');
     if (!answerKey) issues.push('empty_answer');
+    // Una domanda non comincia con un trattino: quello è un argomento della riga di comando.
+    //
+    // Misurato il 7 agosto 2026: la banca conteneva la voce `--force` → «la Matrice di
+    // Eisenhower», cioè un flag finito dentro come se fosse una domanda, e l'audit rispondeva
+    // «voci non valide: 0». Era anche nella banca condivisa, quindi era arrivata ai colleghi.
+    // Non fa danno diretto (quella chiave non combacerà mai con una domanda vera) ma dice che
+    // una chiamata a `set` è andata storta, e quella volta la risposta vera può essere andata
+    // perduta: è proprio il caso in cui un controllo deve parlare.
+    if (/^--?[A-Za-z]/.test(unicode(question))) issues.push('looks_like_cli_flag');
     if (hasReplacementChar(question) || hasReplacementChar(answer)) issues.push('replacement_character');
     if (issues.length) invalid.push({ question, issues });
     if (!groups.has(key)) groups.set(key, []);
