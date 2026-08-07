@@ -1,1 +1,8 @@
-{"version":"0.2.0","build":75,"minimumSystemVersion":"26.1","sha256":"529da10a2a217aaff3242663745908a6e9c6afd36c51d5bf86b6572d0eb9a547","url":"https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b75/AutoplaySan-0.2.0-b75.zip","notes":"Una lezione registrata al 90-99% non viene piu trattata come bloccata."}
+{
+  "version": "0.2.0",
+  "build": 76,
+  "minimumSystemVersion": "26.1",
+  "sha256": "2d2e8bcc21421cbaafba6453e3c5e070e6c2dc2b242ec4b087bee3d8c6e74364",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b76/AutoplaySan-0.2.0-b76.zip",
+  "notes": "L'attesa che non aspettava: 41 righe di readyState tolte, e due banchi che tengono chiusa la famiglia. Il motivo degli errori dello scambio arriva nel diario invece di finire nello scarico. Il conteggio dei corsi viene dai record e non dal numero fossile in status.json: diceva 2 conclusi su 9 e 0 da sbloccare, mentre erano 4 e 2."
+}
