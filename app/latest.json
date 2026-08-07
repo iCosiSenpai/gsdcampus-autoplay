@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 78,
+  "build": 79,
   "minimumSystemVersion": "26.1",
-  "sha256": "a8873c0c5e464391241b03e6e65cccad0f388e0ba95636e850e516d509c56d46",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b78/AutoplaySan-0.2.0-b78.zip",
-  "notes": "L'avviso dei corsi fermi nomina il corso, traduce il motivo in italiano e dice cosa succede adesso: prima diceva «1 corso in attesa · spesso basta riprovare», e riprovare era il consiglio sbagliato per il caso piu frequente, che riprova gia da se."
+  "sha256": "3f8e74ffb922cec0a7c5b79f100785d2523eb615e9ec9f0f222c2d84acb8cb49",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b79/AutoplaySan-0.2.0-b79.zip",
+  "notes": "Le attese fra due giri non si dilatano piu in silenzio: la app dichiara un'attivita per tutta la pausa (era cio che caffeinate faceva sul lato Node), conta il tempo vero contro una scadenza e scrive nel diario se sfora. Un'attesa da dieci minuti era durata 101. E non si aspetta piu quando resta un corso lavorabile."
 }
