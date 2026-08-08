@@ -23,6 +23,31 @@ const TIMEOUT_MS = 12000;
  * @param {object} remote
  * @returns {{ merged: object, added: number }}
  */
+// Una voce spuria si scarta, non si usa per bloccare tutto.
+//
+// L'8 agosto 2026 la banca condivisa conteneva la chiave "--force": un argomento da riga di
+// comando finito dentro come se fosse una domanda. La regola che la riconosce e' stata aggiunta il
+// giorno prima, ed e' giusta — ma qui trasformava un rifiuto di UNA voce nel blocco dell'INTERA
+// sincronizzazione: nessun collega riceveva piu' nessuna risposta nuova finche' qualcuno non
+// puliva il file su GitHub. Misurato: "Aggiornamento banca incompleto: remote_bank_invalid".
+//
+// E la voce tornava da se'. Il merge aggiunge e non toglie mai, quindi la copia di qualunque
+// collega che l'avesse ancora la ri-aggiungeva alla prima condivisione. Bloccare in quel caso
+// significa bloccare per sempre.
+//
+// Una chiave che non puo' essere una domanda non puo' nemmeno combaciare con una domanda: scartarla
+// e' sicuro, e cio' che resta e' esattamente cio' che serve. Il conto di quante ne sono state
+// scartate viaggia nell'esito, perche' una pulizia silenziosa e' il difetto di prima al rovescio.
+function senzaVociSpurie(bank, audit) {
+  if (!audit || !audit.invalid || audit.invalid.length === 0) return { bank, scartate: 0 };
+  const spurie = new Set(audit.invalid.map((x) => x.question));
+  const pulita = {};
+  for (const [k, v] of Object.entries(bank || {})) {
+    if (!spurie.has(k)) pulita[k] = v;
+  }
+  return { bank: pulita, scartate: spurie.size };
+}
+
 function mergeBanks(local, remote) {
   const loc = local && typeof local === 'object' ? local : {};
   const rem = remote && typeof remote === 'object' ? remote : {};
@@ -110,10 +135,12 @@ async function syncPublicBank(root, opts = {}) {
   // Il file pubblico tracciato arriva gia con git pull: mergialo SEMPRE, anche
   // quando il fetch remoto e offline o il throttle di rete e ancora attivo.
   const publicAudit = auditBank(publicFile);
-  if (!publicAudit.ok) {
-    return { ok: false, error: 'local_public_bank_invalid', invalid: publicAudit.invalid.length, conflicts: publicAudit.conflicts.length };
+  // Conflitti veri: quelli restano un problema da segnalare. Voci spurie: si scartano e si va avanti.
+  if (publicAudit.conflicts.length > 0 && publicAudit.invalid.length === 0) {
+    return { ok: false, error: 'local_public_bank_invalid', invalid: 0, conflicts: publicAudit.conflicts.length };
   }
-  const localMerge = mergeBanks(local, publicFile);
+  const puliziaPub = senzaVociSpurie(publicFile, publicAudit);
+  const localMerge = mergeBanks(local, puliziaPub.bank);
   // Un conflitto non blocca più l'intero merge: le risposte NUOVE arrivano
   // comunque (mergeMissingByCanonical non sovrascrive nulla) e il disaccordo
   // viene segnalato, non trasformato in un blocco dell'automazione. Il
@@ -143,7 +170,9 @@ async function syncPublicBank(root, opts = {}) {
     };
   }
   const remoteAudit = auditBank(remote);
-  if (!remoteAudit.ok) {
+  const puliziaRem = senzaVociSpurie(remote, remoteAudit);
+  remote = puliziaRem.bank;
+  if (remoteAudit.conflicts.length > 0) {
     return {
       ok: false,
       error: 'remote_bank_invalid',
