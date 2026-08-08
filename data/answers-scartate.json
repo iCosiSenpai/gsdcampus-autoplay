@@ -1,0 +1,17 @@
+{
+  "README": "Risposte rimosse dalla banca perche' dimostrate sbagliate. Serve a non rimettercele: se una di queste domande ricompare, va risolta guardando le opzioni, non la memoria.",
+  "voci": [
+    {
+      "domanda": "Quale delle seguenti non è una funzionalità della posta elettronica ma è una caratteristica distintiva dell'intranet aziendale moderna?",
+      "rispostaScartata": "Un repository documentale centralizzato e una directory aziendale completa con ruoli e competenze dei dipendenti.",
+      "motivo": "dedotta sbagliata per esclusione dal punteggio 24/30 del questionario 68: sei risposte verificate su fonti esterne e due sul materiale, quindi le due errate sono queste. Il materiale dei sette corsi indicizzati (519 lezioni) non contiene ne' il dato Deloitte sull'intranet ne' la distinzione intranet/posta: quel questionario appartiene a un corso diverso.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo la ricerca di Deloitte (2023) citata nelle fonti, quale vantaggio strategico principale offre un'intranet aziendale efficace?",
+      "rispostaScartata": "Una riduzione del 40% del tempo dedicato alla ricerca di documenti e un miglioramento della compliance normativa.",
+      "motivo": "dedotta sbagliata per esclusione dal punteggio 24/30 del questionario 68: sei risposte verificate su fonti esterne e due sul materiale, quindi le due errate sono queste. Il materiale dei sette corsi indicizzati (519 lezioni) non contiene ne' il dato Deloitte sull'intranet ne' la distinzione intranet/posta: quel questionario appartiene a un corso diverso.",
+      "quando": "2026-08-08"
+    }
+  ]
+}
