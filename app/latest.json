@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 80,
+  "build": 81,
   "minimumSystemVersion": "26.1",
-  "sha256": "f18e98a2b6a37ce4d1b5f8422be08bb58fcdd414fa6991204b9311b14f3f2351",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b80/AutoplaySan-0.2.0-b80.zip",
-  "notes": "Il diario porta la data completa e non solo l'ora: il file vive per giorni, quindi un orario da solo ricorre ogni giorno e rendeva sbagliato qualsiasi conteggio su una finestra di tempo."
+  "sha256": "6a1794b3425a255837426bb230f93df625bbd1f31b47765313a246ca8bd2dbd2",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b81/AutoplaySan-0.2.0-b81.zip",
+  "notes": "Ogni tentativo di questionario lascia una riga con le sue domande, l'opzione scelta per ognuna e il punteggio. Serve a isolare una risposta sbagliata: cio che compare in un tentativo pieno e dimostrato giusto, e l'errore vive nella differenza. La registrazione sta fuori dal percorso di consegna, dove un errore costerebbe un tentativo."
 }
