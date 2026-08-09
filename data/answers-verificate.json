@@ -1,0 +1,353 @@
+{
+  "README": "Risposte verificate a mano, con la fonte del giudizio. Serve perche' la misura lessicale sul materiale e' un pavimento, non un soffitto: una slide puo' dire la stessa cosa con parole diverse e la misura la classifica «parziale». Questo file ha la precedenza sulla misura automatica quando si esporta il documento per i colleghi. Non contiene risposte: solo il verdetto su quelle che stanno nella banca.",
+  "voci": [
+    {
+      "domanda": "Cosa descrive il \"Paradosso dell'Accessibilità Digitale\" teorizzato dalla Prof.ssa Maria Bianchi?",
+      "verdetto": "confermata",
+      "fonte": "materiale: modulo GESTIRE DATI, lezione 33 (divario digitale territoriale), minuto 14:00, schermata. La slide enuncia il paradosso e lo attribuisce alla stessa autrice.",
+      "quando": "2026-08-07"
+    },
+    {
+      "domanda": "Quale delle seguenti descrive la modalità di apprendimento digitale tipica della generazione \"Over 70\"?",
+      "verdetto": "confermata",
+      "fonte": "materiale: modulo GESTIRE DATI, lezione 26 (modalita di apprendimento), minuto 0:00, schermata. La riga «Over 70» della tabella corrisponde alla risposta.",
+      "quando": "2026-08-07"
+    },
+    {
+      "domanda": "Quale tecnologia, secondo il materiale, permette di controllare le azioni (visualizzare, modificare, stampare) che un utente può compiere su un documento anche dopo che questo ha lasciato il sistema aziendale?",
+      "verdetto": "confermata",
+      "fonte": "definizione standard di Information Rights Management, coerente con la documentazione dei fornitori del settore.",
+      "quando": "2026-08-07"
+    },
+    {
+      "domanda": "Cosa si intende con la tecnica della \"Lettura Laterale\" (Lateral Reading) per la verifica delle fonti?",
+      "verdetto": "confermata",
+      "fonte": "definizione della tecnica come descritta dalla ricerca sulla valutazione delle fonti online (Stanford History Education Group).",
+      "quando": "2026-08-07"
+    },
+    {
+      "domanda": "Nel contesto del divario digitale, cos'è il \"Bias di conferma\"?",
+      "verdetto": "confermata",
+      "fonte": "definizione consolidata del bias di conferma in psicologia cognitiva.",
+      "quando": "2026-08-07"
+    },
+    {
+      "domanda": "Secondo lo studio del MIT del 2018 citato nel materiale, qual è uno dei fattori principali che accelera la diffusione delle fake news rispetto alle notizie vere?",
+      "verdetto": "confermata",
+      "fonte": "fonte primaria: Vosoughi, Roy, Aral, «The spread of true and false news online», Science 2018. Il falso risultava piu nuovo e suscitava paura, disgusto e sorpresa.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo le fonti, in che modo il motore di ricerca Startpage offre una maggiore privacy rispetto a Google?",
+      "verdetto": "confermata",
+      "fonte": "modello dichiarato del servizio: risultati di Google senza registrazione dell'indirizzo IP ne tracciamento.",
+      "quando": "2026-08-07"
+    },
+    {
+      "domanda": "Nel contesto della sicurezza online, qual è la funzione principale dello \"Split Tunneling\" in una VPN?",
+      "verdetto": "confermata",
+      "fonte": "definizione standard di split tunneling nelle reti private virtuali.",
+      "quando": "2026-08-07"
+    },
+    {
+      "domanda": "Il protocollo di comunicazione SBAR è utilizzato in ambito sanitario per trasmettere informazioni critiche in modo strutturato. A cosa corrisponde la lettera 'R' nell'acronimo?",
+      "verdetto": "confermata",
+      "fonte": "acronimo SBAR: Situation, Background, Assessment, Recommendation. Nozione esterna al materiale dei sette moduli.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo il modello di Albert Mehrabian, quale percentuale dell'impatto di un messaggio è attribuita agli elementi paraverbali, come il tono di voce, il volume e il ritmo?",
+      "verdetto": "confermata",
+      "fonte": "modello di Mehrabian: 7% parole, 38% paraverbale, 55% non verbale. Nozione esterna al materiale dei sette moduli.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Il Metodo Feynman per l'apprendimento e la comprensione profonda si basa su alcuni principi chiave. Quale dei seguenti NON è uno dei pilastri di questo metodo come descritto nel materiale?",
+      "verdetto": "confermata",
+      "fonte": "domanda negativa: la sospensione delle gerarchie e una regola del brainstorming, non un pilastro del metodo Feynman (scegliere un concetto, spiegarlo con parole semplici, individuare le lacune, tornare alla fonte e semplificare).",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Quale dei seguenti NON è uno dei 'Sei Cappelli per Pensare' (Six Thinking Hats)?",
+      "verdetto": "confermata",
+      "fonte": "domanda negativa: i sei cappelli sono bianco, rosso, nero, giallo, verde e blu. Il cappello viola non esiste nel modello.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Nel film \"Apollo 13\", analizzato come caso di studio, quale principio delle High Reliability Organizations (HRO) viene esemplificato dal team di Mission Control?",
+      "verdetto": "confermata",
+      "fonte": "coerente con i principi delle organizzazioni ad alta affidabilita: linguaggio standardizzato e conferma a voce delle istruzioni per ridurre l'ambiguita sotto pressione.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "La famosa campagna di Oreo \"Dunk in the Dark\" durante il Super Bowl del 2013 è un esempio emblematico di quale strategia di marketing?",
+      "verdetto": "confermata",
+      "fonte": "esempio pubblico e documentato di real-time marketing (Super Bowl 2013).",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Quale caratteristica fondamentale distingue l'algoritmo di TikTok da quello di altre piattaforme social nella distribuzione dei contenuti?",
+      "verdetto": "confermata",
+      "fonte": "il sistema di raccomandazione della piattaforma ordina per potenziale di coinvolgimento individuale, non per grafo sociale.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Nella strategia di content marketing nota come \"Topic Cluster\", qual è il ruolo del \"Pillar Content\"?",
+      "verdetto": "confermata",
+      "fonte": "definizione standard del modello topic cluster: la pagina pilastro copre l'argomento in modo esaustivo.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "In ambito SEO, in cosa consiste la strategia di \"Broken Link Building\"?",
+      "verdetto": "confermata",
+      "fonte": "definizione standard della tecnica SEO.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo le linee guida di Google, quale elemento del principio E-E-A-T si riferisce alla necessità di dimostrare conoscenza approfondita e qualifiche professionali in un determinato argomento?",
+      "verdetto": "confermata",
+      "fonte": "nelle linee guida di Google la componente che riguarda credenziali e competenza dimostrata e' Expertise.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo diversi studi citati, qual è uno dei principali vantaggi dell'utilizzo di User-Generated Content (UGC) nelle strategie di marketing?",
+      "verdetto": "confermata",
+      "fonte": "risultato ricorrente negli studi sul contenuto generato dagli utenti: maggiore autenticita percepita e influenza sull'acquisto.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Quale cambiamento paradigmatico ha introdotto il Web 2.0 (circa 2000-2010) nell'ecosistema dei contenuti digitali?",
+      "verdetto": "confermata",
+      "fonte": "definizione consolidata: il passaggio dell'utente da consumatore a creatore di contenuti.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Quale problema fondamentale dei contenuti digitali gli NFT (Non-Fungible Token) hanno cercato di risolvere, in particolare nel mercato dell'arte digitale?",
+      "verdetto": "confermata",
+      "fonte": "il problema che gli NFT hanno affrontato e' la riproducibilita infinita e senza perdita, introducendo una scarsita verificabile.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Quale concetto teorico, precursore dell'ipertesto, fu descritto da Vannevar Bush nel 1945 nel suo articolo \"As We May Think\"?",
+      "verdetto": "confermata",
+      "fonte": "il dispositivo descritto in «As We May Think» (1945) e' il Memex.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Qual è stato l'impatto principale del modello di rilascio simultaneo di intere stagioni, reso popolare da Netflix con serie come \"House of Cards\"?",
+      "verdetto": "confermata",
+      "fonte": "effetto documentato del rilascio integrale: struttura narrativa progettata per la visione sequenziale.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo l'articolo 33 del GDPR, entro quale termine il titolare del trattamento deve notificare una violazione dei dati personali all'autorità di controllo competente?",
+      "verdetto": "confermata",
+      "fonte": "il testo dell'articolo prescrive «senza ingiustificato ritardo e, ove possibile, entro 72 ore».",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Qual è la principale limitazione della crittografia simmetrica che la crittografia asimmetrica risolve?",
+      "verdetto": "confermata",
+      "fonte": "il limite risolto dall'asimmetrica e' la distribuzione sicura della chiave condivisa.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Su quale principio fondamentale si basa il modello di sicurezza 'Zero Trust'?",
+      "verdetto": "confermata",
+      "fonte": "principio fondante del modello: non fidarsi mai e verificare sempre ogni accesso.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "L'attacco a SolarWinds del 2020 è un esempio emblematico di attacco alla supply chain. Quale tecnica specifica è stata utilizzata in questo caso?",
+      "verdetto": "confermata",
+      "fonte": "tecnica accertata dell'attacco: backdoor inserita nel software durante la compilazione.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Quale variante di phishing è specificamente diretta a dirigenti di alto livello o figure con accesso privilegiato a informazioni critiche?",
+      "verdetto": "confermata",
+      "fonte": "la variante di phishing diretta ai vertici si chiama whaling.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Quale tattica, emersa a partire dal 2019, ha significativamente aumentato la pressione sulle vittime di ransomware, andando oltre la semplice cifratura dei dati?",
+      "verdetto": "confermata",
+      "fonte": "doppia estorsione: minaccia di pubblicare i dati esfiltrati prima della cifratura, diffusa dal 2019.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Quale delle seguenti affermazioni descrive una differenza fondamentale tra la rete Tor e la rete I2P?",
+      "verdetto": "confermata",
+      "fonte": "differenza architetturale reale: I2P e' ottimizzata per i servizi interni alla rete, Tor per l'uscita verso il web in chiaro.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Cosa distingue una soluzione di Endpoint Detection and Response (EDR) da un antivirus tradizionale basato su firme?",
+      "verdetto": "confermata",
+      "fonte": "differenza sostanziale dall'antivirus a firme: telemetria continua sugli endpoint e analisi comportamentale.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "In base al D.Lgs. 231/2001, in quale circostanza un'azienda può essere ritenuta responsabile per un reato informatico commesso da un suo dipendente?",
+      "verdetto": "confermata",
+      "fonte": "il decreto prevede la responsabilita dell'ente per reati commessi nel suo interesse o vantaggio in assenza di un modello organizzativo adeguato.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Nella catena di un attacco di tipo Advanced Persistent Threat (APT), cosa si intende per 'Movimento Laterale'?",
+      "verdetto": "confermata",
+      "fonte": "nel lessico degli attacchi persistenti il movimento laterale e' l'estensione dell'accesso ad altri sistemi della rete.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo il \"Progetto Aristotele\" di Google, qual è stato identificato come il fattore predittivo più forte per il successo di un team?",
+      "verdetto": "confermata",
+      "fonte": "il fattore predittivo individuato dalla ricerca di Google e' la sicurezza psicologica.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "In base alla curva di prestazione di Yerkes-Dodson citata nei materiali, quale relazione esiste tra stress e performance lavorativa?",
+      "verdetto": "confermata",
+      "fonte": "la curva descrive una prestazione che cresce con l'attivazione fino a un optimum e poi decade.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Qual è una delle principali differenze neurologiche tra lo stress acuto e lo stress cronico, secondo le informazioni fornite?",
+      "verdetto": "confermata",
+      "fonte": "differenza documentata in letteratura: lo stress cronico produce cambiamenti strutturali, fra cui la riduzione dell'ippocampo.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "La Matrice di Eisenhower, uno strumento per la gestione delle priorità, come suggerisce di gestire le attività \"Importanti ma non urgenti\" (Quadrante 2)?",
+      "verdetto": "confermata",
+      "fonte": "per le attivita importanti e non urgenti la matrice prescrive la pianificazione e il tempo dedicato (secondo quadrante).",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Qual è il principio fondamentale dietro la regola dei \"Two-Pizza Teams\" di Jeff Bezos in Amazon?",
+      "verdetto": "confermata",
+      "fonte": "il principio e' contenere la complessita comunicativa, che cresce col numero dei membri.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Nel modello di Tuckman sulle fasi di vita di un team, cosa caratterizza la fase di \"Storming\" (Conflitto)?",
+      "verdetto": "confermata",
+      "fonte": "nel modello di Tuckman la fase di conflitto e' caratterizzata da divergenze e messa in discussione dei confini.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Quale delle seguenti è una strategia di \"igiene digitale\" raccomandata per gestire il tecnostress?",
+      "verdetto": "confermata",
+      "fonte": "strategia riconosciuta contro il tecnostress: disconnessione programmata e spazi liberi da tecnologia.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo il modello di Leadership Situazionale, in quale scenario è più appropriato lo \"Stile Direttivo\" (elevata direttività e basso supporto)?",
+      "verdetto": "confermata",
+      "fonte": "lo stile direttivo e' indicato con squadre in formazione o in crisi, quando servono istruzioni chiare.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Qual è la sequenza corretta dei quattro componenti del modello di Comunicazione Non Violenta (CNV) sviluppato da Marshall Rosenberg?",
+      "verdetto": "confermata",
+      "fonte": "i quattro componenti nell'ordine sono osservazione, sentimento, bisogno, richiesta.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo il modello di Merrill e Reid, uno stile comunicativo \"Direttivo\", come quello a volte attribuito a Steve Jobs, è caratterizzato da un orientamento a cosa?",
+      "verdetto": "confermata",
+      "fonte": "nello schema lo stile direttivo e' orientato ai risultati e alla decisione.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "In una cultura definita \"ad alto contesto\" (high-context), come quella giapponese, come tende ad essere la comunicazione?",
+      "verdetto": "confermata",
+      "fonte": "nella classificazione delle culture, in quelle ad alto contesto la comunicazione e' implicita e i segnali non verbali sono decisivi.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Il modello di storytelling persuasivo di Nancy Duarte, esemplificato dal discorso \"I Have a Dream\" di Martin Luther King Jr., crea una forte tensione narrativa alternando continuamente due elementi. Quali sono?",
+      "verdetto": "confermata",
+      "fonte": "la struttura descritta alterna «cio che e» e «cio che potrebbe essere».",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "L'economia comportamentale, con contributi di Kahneman e Tversky, ha arricchito il problem solving organizzativo principalmente attraverso:",
+      "verdetto": "confermata",
+      "fonte": "il contributo al problem solving organizzativo e' la mappatura sistematica dei bias cognitivi.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "La tecnica del 'Pre-mortem', sviluppata da Gary Klein, viene utilizzata per:",
+      "verdetto": "confermata",
+      "fonte": "la tecnica di Gary Klein consiste nell'immaginare il progetto gia fallito per far emergere i rischi.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Quale metodologia di problem solving è un ciclo iterativo in quattro fasi (Plan-Do-Check-Act) che trasforma la risoluzione dei problemi in un processo sistematico di miglioramento continuo?",
+      "verdetto": "confermata",
+      "fonte": "il ciclo in quattro fasi e' il PDCA.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Nel contesto della gestione del conflitto, la tecnica BATNA (Best Alternative To a Negotiated Agreement) serve a:",
+      "verdetto": "confermata",
+      "fonte": "l'acronimo indica la migliore alternativa in assenza di accordo.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo il \"Deloitte Workplace Mental Health Report\" del 2022 citato nel materiale, qual è il ritorno sull'investimento (ROI) medio per le organizzazioni che investono in programmi di gestione dello stress?",
+      "verdetto": "non verificabile dall'esterno",
+      "fonte": "dato citato dal materiale (rapporto Deloitte 2022): non verificabile da fonti pubbliche. Controllare sulla lezione indicata.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Quale esempio è stato usato per illustrare un grave fallimento comunicativo in una situazione di crisi, a causa della minimizzazione del problema e di dichiarazioni pubbliche insensibili da parte del CEO?",
+      "verdetto": "non verificabile dall'esterno",
+      "fonte": "l'esempio scelto dal materiale non e' deducibile dall'esterno: controllare sulla lezione indicata.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "La ricerca della neuroscienziata Amishi Jha ha dimostrato che la pratica regolare dell'ascolto mindful ha un effetto fisico sul cervello. Qual è questo effetto?",
+      "verdetto": "non verificabile dall'esterno",
+      "fonte": "affermazione del materiale: la ricerca di Jha riguarda l'attenzione, e il legame con la densita di materia grigia nelle aree dell'empatia e' associato ad altri studi. Da controllare con attenzione.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Nel caso Unilever, la trasformazione della supply chain è stata resa possibile da una riformulazione del problema. Come è stato ridefinito l'obiettivo?",
+      "verdetto": "non verificabile dall'esterno",
+      "fonte": "riformulazione descritta dal materiale in un caso di studio: non verificabile dall'esterno.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Qual è la differenza fondamentale tra 'Decision Making' e 'Decision Taking' come descritto nei documenti?",
+      "verdetto": "non verificabile dall'esterno",
+      "fonte": "distinzione come formulata nei documenti del corso: non e' terminologia standard. Controllare sulla lezione indicata.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Nel caso di studio di Salesforce sulla crisi di ritenzione dei talenti, quale approccio è stato utilizzato per generare e prototipare interventi coinvolgendo direttamente i dipendenti?",
+      "verdetto": "non verificabile dall'esterno",
+      "fonte": "approccio descritto dal materiale in un caso di studio: non verificabile dall'esterno.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Nel contesto dei pregiudizi cognitivi, come viene definito il bias per cui un manager, dopo aver formulato un'impressione iniziale su un candidato, presta attenzione principalmente alle informazioni che confermano quel primo giudizio?",
+      "verdetto": "confermata",
+      "fonte": "il fenomeno per cui si cerca conferma di un'impressione gia formata e' il bias di conferma.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo la prospettiva neuroscientifica, un brainstorming efficace richiede un'alternanza fluida tra quali due reti cerebrali?",
+      "verdetto": "confermata",
+      "fonte": "l'alternanza fra rete di default e rete orientata al compito e' il quadro corrente del pensiero divergente e convergente.",
+      "quando": "2026-08-08"
+    },
+    {
+      "domanda": "Secondo il materiale fornito, quale strumento di problem solving si concentra sull'identificazione delle 'poche cause vitali' che generano la maggioranza degli effetti problematici, basandosi sul principio 80/20?",
+      "verdetto": "confermata",
+      "fonte": "lo strumento che isola le poche cause responsabili della maggior parte degli effetti e' l'analisi di Pareto.",
+      "quando": "2026-08-08"
+    }
+  ]
+}
