@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 81,
+  "build": 82,
   "minimumSystemVersion": "26.1",
-  "sha256": "6a1794b3425a255837426bb230f93df625bbd1f31b47765313a246ca8bd2dbd2",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b81/AutoplaySan-0.2.0-b81.zip",
-  "notes": "Ogni tentativo di questionario lascia una riga con le sue domande, l'opzione scelta per ognuna e il punteggio. Serve a isolare una risposta sbagliata: cio che compare in un tentativo pieno e dimostrato giusto, e l'errore vive nella differenza. La registrazione sta fuori dal percorso di consegna, dove un errore costerebbe un tentativo."
+  "sha256": "7f507c7606910a229d09cc8f568aeb040161feef773f083b830917abc94722ec",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b82/AutoplaySan-0.2.0-b82.zip",
+  "notes": "Un blocco che si sbroglia da se non e un allarme e non offre pulsanti: l'avviso dice che sta gia riprovando e che non tocca a te. Il comando «Ricontrolla i corsi» resta dove puo servire davvero, compreso il caso in cui il codice del blocco non e riconosciuto."
 }
