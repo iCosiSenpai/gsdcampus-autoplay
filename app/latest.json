@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 82,
+  "build": 83,
   "minimumSystemVersion": "26.1",
-  "sha256": "7f507c7606910a229d09cc8f568aeb040161feef773f083b830917abc94722ec",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b82/AutoplaySan-0.2.0-b82.zip",
-  "notes": "Un blocco che si sbroglia da se non e un allarme e non offre pulsanti: l'avviso dice che sta gia riprovando e che non tocca a te. Il comando «Ricontrolla i corsi» resta dove puo servire davvero, compreso il caso in cui il codice del blocco non e riconosciuto."
+  "sha256": "a2b72375b9371fe9a7c26e0fb17075602f47530687a521f9b2af27ce49a6a50e",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b83/AutoplaySan-0.2.0-b83.zip",
+  "notes": "Un corso e concluso quando lo dice la piattaforma, non quando finiscono le lezioni visibili: non si scrive «concluso» sotto il 100 per cento, e un corso gia chiuso che la dashboard dichiara sotto il 100 torna in lavorazione da se a ogni giro. Quattro corsi erano fermi al 75-79 per cento credendosi finiti."
 }
