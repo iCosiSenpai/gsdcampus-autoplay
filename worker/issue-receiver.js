@@ -83,14 +83,168 @@ function checkKey(data, env) {
 
 // --- Issues ----------------------------------------------------------------
 
+const ISSUE_FINGERPRINT_RE = /^[a-f0-9]{64}$/;
+const ISSUE_MARKER_PREFIX = '<!-- gsd-auto-fingerprint:';
+const ISSUE_PAGE_SIZE = 100;
+const MAX_ISSUE_PAGES = 10;
+const RECONCILE_DELAYS_MS = [250, 750, 1500];
+
+async function sha256Hex(text) {
+  const bytes = new TextEncoder().encode(String(text));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function issueMarker(fingerprint) {
+  return `${ISSUE_MARKER_PREFIX}${fingerprint} -->`;
+}
+
+function occurrenceMarker(count) {
+  return `<!-- gsd-auto-occurrences:${count} -->`;
+}
+
+function decoratedIssueBody(body, fingerprint, count) {
+  const clean = String(body || '')
+    .replace(/\n*<!-- gsd-auto-fingerprint:[a-f0-9]{64} -->/g, '')
+    .replace(/\n*<!-- gsd-auto-occurrences:\d+ -->/g, '')
+    .trimEnd();
+  return `${clean}\n\n${issueMarker(fingerprint)}\n${occurrenceMarker(count)}`.slice(0, MAX_BODY);
+}
+
+function occurrenceIn(body) {
+  const match = String(body || '').match(/<!-- gsd-auto-occurrences:(\d+) -->/);
+  return match ? Math.max(1, Number(match[1]) || 1) : 1;
+}
+
+async function githubIssues(env, fingerprint) {
+  const marker = issueMarker(fingerprint);
+  const issues = [];
+  for (let page = 1; page <= MAX_ISSUE_PAGES; page++) {
+    const response = await fetch(
+      `https://api.github.com/repos/${REPO}/issues?state=open&per_page=${ISSUE_PAGE_SIZE}&page=${page}&sort=created&direction=asc`,
+      { headers: ghHeaders(env.ISSUE_TOKEN) }
+    );
+    if (response.status === 401 || response.status === 403) return { error: 'github_token' };
+    if (!response.ok) return { error: `github_lookup_${response.status}` };
+    const batch = await response.json();
+    if (!Array.isArray(batch)) return { error: 'github_lookup_invalid' };
+    issues.push(...batch.filter(
+      (issue) => !issue.pull_request && String(issue.body || '').includes(marker)
+    ));
+    if (batch.length < ISSUE_PAGE_SIZE) {
+      return { issues: issues.sort((a, b) => a.number - b.number) };
+    }
+  }
+  // Fallire chiusi è meglio che creare un duplicato quando l'indice è incompleto.
+  return { error: 'github_lookup_truncated' };
+}
+
+async function githubIssue(env, number) {
+  const response = await fetch(`https://api.github.com/repos/${REPO}/issues/${number}`, {
+    headers: ghHeaders(env.ISSUE_TOKEN),
+  });
+  if (response.status === 401 || response.status === 403) return { error: 'github_token' };
+  if (!response.ok) return { error: `github_issue_${response.status}` };
+  return { issue: await response.json() };
+}
+
+async function patchIssue(env, number, changes) {
+  return fetch(`https://api.github.com/repos/${REPO}/issues/${number}`, {
+    method: 'PATCH',
+    headers: ghHeaders(env.ISSUE_TOKEN),
+    body: JSON.stringify(changes),
+  });
+}
+
 async function createIssue(env, title, body, withLabel) {
   const payload = { title, body };
   if (withLabel) payload.labels = [LABEL];
   return fetch(`https://api.github.com/repos/${REPO}/issues`, {
     method: 'POST',
     headers: ghHeaders(env.ISSUE_TOKEN),
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
+}
+
+function githubFailure(response) {
+  if (response.status === 401 || response.status === 403) return 'github_token';
+  return `github_${response.status}`;
+}
+
+async function canonicalizeIssues(env, issues) {
+  if (issues.length === 0) return { error: 'github_reconcile_missing' };
+  const ordered = [...issues].sort((a, b) => a.number - b.number);
+  const canonical = ordered[0];
+  for (const duplicate of ordered.slice(1)) {
+    const closed = await patchIssue(env, duplicate.number, {
+      state: 'closed',
+      state_reason: 'duplicate',
+    });
+    if (!closed.ok) {
+      const detail = await closed.text().catch(() => '');
+      return {
+        error: githubFailure(closed),
+        detail: `chiusura duplicato #${duplicate.number}: ${detail.slice(0, 160)}`,
+      };
+    }
+  }
+  return { issue: canonical };
+}
+
+async function waitForCanonicalIssue(env, fingerprint, createdNumber) {
+  let lastError = null;
+  const marker = issueMarker(fingerprint);
+  for (const delay of RECONCILE_DELAYS_MS) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    const lookup = await githubIssues(env, fingerprint);
+    if (lookup.error) {
+      lastError = lookup.error;
+      continue;
+    }
+
+    // Non si ACKa finché il create di *questa* richiesta non è contabilizzato:
+    // deve essere visibile fra le open oppure già chiuso come duplicato da un
+    // concorrente. Altrimenti una issue ancora fuori dall'indice potrebbe apparire
+    // dopo che entrambi i client hanno cancellato la propria outbox.
+    const createdOpen = lookup.issues.some((issue) => issue.number === createdNumber);
+    let createdClosedAsDuplicate = false;
+    if (!createdOpen) {
+      const direct = await githubIssue(env, createdNumber);
+      if (direct.error) {
+        lastError = direct.error;
+        continue;
+      }
+      createdClosedAsDuplicate = direct.issue.state === 'closed'
+        && String(direct.issue.body || '').includes(marker);
+      if (!createdClosedAsDuplicate) continue;
+    }
+
+    if (lookup.issues.length === 0) continue;
+    const reconciled = await canonicalizeIssues(env, lookup.issues);
+    if (reconciled.error) return reconciled;
+
+    // Una seconda lettura verifica che le PATCH siano effettive e che durante la
+    // riconciliazione non sia comparso un altro create concorrente.
+    const verify = await githubIssues(env, fingerprint);
+    if (verify.error) return { error: verify.error };
+    if (verify.issues.length === 1) {
+      if (verify.issues[0].number === createdNumber || createdClosedAsDuplicate) {
+        return { issue: verify.issues[0] };
+      }
+      const direct = await githubIssue(env, createdNumber);
+      if (!direct.error && direct.issue.state === 'closed'
+          && String(direct.issue.body || '').includes(marker)) {
+        return { issue: verify.issues[0] };
+      }
+      continue;
+    }
+    if (verify.issues.length > 1) {
+      const secondPass = await canonicalizeIssues(env, verify.issues);
+      if (secondPass.error) return secondPass;
+      continue;
+    }
+  }
+  return { error: lastError || 'github_reconcile_incomplete' };
 }
 
 async function handleIssue(data, env) {
@@ -99,29 +253,74 @@ async function handleIssue(data, env) {
   }
 
   const title = redactText(String(data.title || '')).slice(0, MAX_TITLE);
-  const body = redactText(String(data.body || '')).slice(0, MAX_BODY);
+  const rawBody = redactText(String(data.body || '')).slice(0, MAX_BODY - 160);
+  const phase = redactText(String(data.phase || '')).replace(/[^a-zA-Z0-9_:-]/g, '').slice(0, 80);
   if (!title) return jsonResp(400, { ok: false, error: 'missing_title' });
-  if (!body) return jsonResp(400, { ok: false, error: 'missing_body' });
+  if (!rawBody) return jsonResp(400, { ok: false, error: 'missing_body' });
 
   if (!env.ISSUE_TOKEN) {
     return jsonResp(500, { ok: false, error: 'receiver_not_configured' });
   }
 
-  let res = await createIssue(env, title, body, true);
-  if (res.status === 422) {
-    res = await createIssue(env, title, body, false);
+  // I client nuovi inviano una fingerprint opaca. Per i client vecchi la si deriva
+  // da titolo+fase: non è precisa quanto quella del client, ma impedisce che un ACK
+  // perso riapra la stessa segnalazione a ogni avvio.
+  const supplied = String(data.fingerprint || '').toLowerCase();
+  const fingerprint = ISSUE_FINGERPRINT_RE.test(supplied)
+    ? supplied
+    : await sha256Hex(`issue-legacy-v1|${title}|${phase}`);
+
+  const lookup = await githubIssues(env, fingerprint);
+  if (lookup.error) return jsonResp(502, { ok: false, error: lookup.error });
+  if (lookup.issues.length > 0) {
+    // KEY è deliberatamente pubblica: prova compatibilità col client, non identità.
+    // Perciò un match è soltanto un ACK idempotente. Titolo, corpo e contatore della
+    // issue canonica non vengono mai riscritti con dati controllati dal chiamante.
+    const reconciled = await canonicalizeIssues(env, lookup.issues);
+    if (reconciled.error) {
+      return jsonResp(502, { ok: false, error: reconciled.error, detail: reconciled.detail });
+    }
+    return jsonResp(200, {
+      ok: true,
+      url: reconciled.issue.html_url,
+      deduplicated: true,
+      occurrenceCount: occurrenceIn(reconciled.issue.body),
+    });
   }
 
-  if (res.status === 401 || res.status === 403) {
-    return jsonResp(502, { ok: false, error: 'github_token' });
+  // Il marker di conteggio nasce dal server. Il numero dichiarato dal client non è
+  // autorità: con una chiave pubblica potrebbe essere gonfiato per bloccare aggiornamenti.
+  const body = decoratedIssueBody(rawBody, fingerprint, 1);
+  let response = await createIssue(env, title, body, true);
+  if (response.status === 422) response = await createIssue(env, title, body, false);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    return jsonResp(502, {
+      ok: false,
+      error: githubFailure(response),
+      detail: detail.slice(0, 200),
+    });
   }
-  if (!res.ok) {
-    const t = await res.text().catch(() => '');
-    return jsonResp(502, { ok: false, error: 'github_' + res.status, detail: t.slice(0, 200) });
-  }
+  const created = await response.json();
 
-  const issue = await res.json();
-  return jsonResp(200, { ok: true, url: issue.html_url });
+  // GitHub è anche l'indice idempotente. Dopo un create si attende la consistenza
+  // del listing, si sceglie sempre il numero più basso e si verifica ogni chiusura.
+  // Finché la riconciliazione non è provata si restituisce errore: il client conserva
+  // l'outbox e il retry ritrova la issue già creata invece di inventare successo.
+  const canonical = await waitForCanonicalIssue(env, fingerprint, created.number);
+  if (canonical.error) {
+    return jsonResp(502, {
+      ok: false,
+      error: canonical.error,
+      detail: canonical.detail,
+    });
+  }
+  return jsonResp(200, {
+    ok: true,
+    url: canonical.issue.html_url,
+    deduplicated: canonical.issue.number !== created.number,
+    occurrenceCount: occurrenceIn(canonical.issue.body),
+  });
 }
 
 // --- Answers bank ----------------------------------------------------------

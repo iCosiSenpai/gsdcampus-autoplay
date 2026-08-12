@@ -162,10 +162,41 @@ ui_kv "Account" "${BOLD}${MEMBER_LINE}${NC}"
 ui_kv "Orari" "$SCHEDULE_LINE"
 ui_kv "AI" "Claude Code on-demand · gate openQuizRequests · proxy budget temporaneo"
 
-# GSD_QUIET: l'avvio non stampa i suoi passi, perche' subito dopo la plancia
-# prende il controllo dello schermo. Con i passi a video si vedeva scorrere il
-# log e poi comparire la plancia sopra: sembrava che l'interfaccia fosse "i log".
-if GSD_LAUNCHER=1 GSD_QUIET=1 "$DIR/start.sh"; then
+# Il trascritto di start.sh è separato da autoplay.out: quest'ultimo viene
+# ruotato durante l'avvio e, dopo il fork, appartiene allo scheduler. Prima
+# perdevamo proprio le righe finali con l'errore e le issue #34/#35 mostravano
+# soltanto il preambolo della banca risposte.
+START_LOG="$DIR/logs/start.log"
+ISSUE_LOG="$DIR/logs/issue-report.log"
+mkdir -p "$DIR/logs" 2>/dev/null || true
+
+# Il drain viene eseguito anche se il file diagnostico non è scrivibile. Prima la
+# redirezione poteva fallire *prima* di avviare Node, lasciando la coda intatta.
+if ISSUE_FLUSH_OUTPUT="$(node "$DIR/scripts/lib/issue-report.js" flush 2>&1)"; then
+  ISSUE_FLUSH_RC=0
+else
+  ISSUE_FLUSH_RC=$?
+fi
+if [ -n "$ISSUE_FLUSH_OUTPUT" ]; then
+  if ! printf '%s\n' "$ISSUE_FLUSH_OUTPUT" >> "$ISSUE_LOG" 2>&1; then
+    printf 'Coda issue: impossibile scrivere il log (exit %s): %s\n' \
+      "$ISSUE_FLUSH_RC" "$ISSUE_FLUSH_OUTPUT" >&2 || true
+  fi
+fi
+
+# start.sh parte indipendentemente dalla scrivibilità di logs/start.log. L'output
+# è breve e viene prima catturato in memoria; la copia diagnostica è best-effort.
+if START_OUTPUT="$(GSD_LAUNCHER=1 GSD_QUIET=1 "$DIR/start.sh" 2>&1)"; then
+  START_RC=0
+else
+  START_RC=$?
+fi
+[ -z "$START_OUTPUT" ] || printf '%s\n' "$START_OUTPUT"
+if ! printf '%s\n' "$START_OUTPUT" > "$START_LOG" 2>/dev/null; then
+  warn "Non posso scrivere logs/start.log; l'avvio è proseguito e l'output è stato mostrato qui."
+fi
+
+if [ "$START_RC" -eq 0 ]; then
   # Riabilita e (re)installa il keepalive: mantiene vivo lo scheduler h24 anche
   # a finestra chiusa, dopo Cmd+Q o un riavvio del Mac. Idempotente; no-op su
   # non-macOS (senza launchctl).
@@ -177,7 +208,9 @@ if GSD_LAUNCHER=1 GSD_QUIET=1 "$DIR/start.sh"; then
   # scheduler prosegue in background anche dopo la chiusura della plancia.
   node "$DIR/scripts/lib/panel-cli.js" || true
 else
-  err "Scheduler non avviato. Controlla logs/autoplay.out e rilancia il comando curl."
-  report_blocking_issue "$DIR" scheduler_start_failed "Il launcher non è riuscito ad avviare lo scheduler (start.sh ha fallito)."
+  err "Scheduler non avviato. Controlla logs/start.log e rilancia il comando curl."
+  report_blocking_issue "$DIR" scheduler_start_failed \
+    "Il launcher non è riuscito ad avviare lo scheduler (start.sh ha fallito)." \
+    "./start.sh" "$START_RC"
   exit 1
 fi
