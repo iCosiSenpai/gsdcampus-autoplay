@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 95,
+  "build": 96,
   "minimumSystemVersion": "26.1",
-  "sha256": "c10d635fc9b7ac09ea7d5768573c50fc3014f52ddbe1580294e5f2ef968d8913",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b95/AutoplaySan-0.2.0-b95.zip",
-  "notes": "Un corso fermo su una domanda ignota ora riparte appena arriva la risposta: il motore che si ferma a meta questionario veniva registrato come guasto, e un guasto non si riapre quando una risposta arriva, quindi il corso restava fermo mezz ora con la risposta gia sul disco. La frase dice anche dove la lettura si e fermata: 2 domande di 10 invece di 2 domande, che faceva credere che il questionario ne avesse due. Corretto un messaggio del diario che diceva nessuna domanda letta anche quando la domanda era stata letta e risposta. Contiene tutto quello che c e nella b94."
+  "sha256": "7bc791cef344ecf1cb59d159ce1ea4017dac5abc7d48ce5a1ebdd1ad53413729",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b96/AutoplaySan-0.2.0-b96.zip",
+  "notes": "La app non aspetta piu sei ore su lavoro che torna disponibile fra mezz ora. Quando un corso si blocca per un motivo che invecchia, dopo trenta minuti si riprova da se: ma l attesa a lavoro esaurito si svegliava solo se qualcosa cambiava sul disco, e il tempo che passa non cambia niente. Ora l attesa dura fino alla scadenza del blocco e lo dice. Contiene la b95 (fermarsi su una domanda ignota non e piu registrato come guasto, quindi una risposta riapre il corso) e la b94 (facolta di consegnare i questionari, riapertura automatica, stato viola mentre risponde)."
 }
