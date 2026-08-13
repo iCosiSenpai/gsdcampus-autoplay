@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 93,
+  "build": 94,
   "minimumSystemVersion": "26.1",
-  "sha256": "3076f97732bf065a5637df7363cb52285f3b5f6d40fbdd380d4734ae902e4081",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b93/AutoplaySan-0.2.0-b93.zip",
-  "notes": "Accanto al pulsante Aggiorna l app ora c e scritta la versione installata, nella panoramica e nel popover della barra dei menu: serve prima di premere (sono gia aggiornato?) e subito dopo (e andato a buon fine?), perche la app si riapre identica a com era. Contiene tutte le correzioni della b92: il questionario finale che non si apriva perche il motore non aveva la facolta di consegnarlo, le riaperture a vuoto di un corso bloccato ogni dieci minuti, la chiusura per aggiornamento che prendeva due minuti invece di dodici secondi, e la finestra che diceva FERMO in cima e in ascolto sotto il nome."
+  "sha256": "17751f876a11407f11cf1ba70be2c76829cfc2db4f944348a9e9492e9ba37ff6",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b94/AutoplaySan-0.2.0-b94.zip",
+  "notes": "I questionari si aprono davvero: la b92 concedeva la facolta di consegnarli dove il progetto Node non esiste, ma la presenza di una cartella non dice chi lavora, e su un Mac dove la cartella c e ancora mentre lavora la app il corso restava fermo sul questionario finale. Un corso fermo per un permesso ora riparte da se, con le lezioni intatte: aspettava una risposta che non poteva arrivare. Via una notifica che chiedeva un intervento inesistente e via l avviso su un controllo aggiornamenti che su questi Mac non gira piu. Mentre consegna un questionario la Panoramica lo dice in viola, con una banda che spiega perche non toccare niente: un questionario interrotto consuma un tentativo."
 }
