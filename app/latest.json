@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 83,
+  "build": 85,
   "minimumSystemVersion": "26.1",
-  "sha256": "a2b72375b9371fe9a7c26e0fb17075602f47530687a521f9b2af27ce49a6a50e",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b83/AutoplaySan-0.2.0-b83.zip",
-  "notes": "Un corso e concluso quando lo dice la piattaforma, non quando finiscono le lezioni visibili: non si scrive «concluso» sotto il 100 per cento, e un corso gia chiuso che la dashboard dichiara sotto il 100 torna in lavorazione da se a ogni giro. Quattro corsi erano fermi al 75-79 per cento credendosi finiti."
+  "sha256": "f9777095e05a0ec613f1eb2818b87ffe7f69d0242faf7c6ac00a79d7c6dd24f7",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b85/AutoplaySan-0.2.0-b85.zip",
+  "notes": "Il tempo percorso di una lezione si muove ogni secondo invece di restare fermo mezzo minuto: fra due letture la posizione viene prevista, e quando le notizie si fermano la finestra dice da quanto invece di far finta. Compare la previsione di fine percorso con la data, calcolata sui turni configurati. Lo stallo di un video si misura in secondi e non in controlli, quindi un video che bufferizza vicino alla fine non viene piu ricaricato per errore."
 }
