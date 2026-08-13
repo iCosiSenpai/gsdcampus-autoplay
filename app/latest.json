@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 92,
+  "build": 93,
   "minimumSystemVersion": "26.1",
-  "sha256": "1bf567ff3eb98645b213727daf4bcabf32640260c857fe0476ce7f762a716f90",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b92/AutoplaySan-0.2.0-b92.zip",
-  "notes": "I corsi arrivano in fondo: il questionario finale non si apriva perche il motore non aveva la facolta di consegnarlo, e un Mac configurato con la guidata finiva i video per poi fermarsi su ogni questionario. Il motore continua a non tirare a indovinare: se una domanda manca in banca si ferma prima di consegnare e la manda a risolvere. Niente piu giri a vuoto: un corso bloccato veniva riaperto ogni dieci minuti anche senza risposte nuove, 32 volte in un pomeriggio. Aggiornarsi non prende piu due minuti: la chiusura aspettava il browser fino a 120 secondi, ora il tetto e 12. Una sola verita sullo stato: la finestra diceva FERMO in cima e in ascolto sotto il nome. Via l avviso su un controllo aggiornamenti che su questi Mac non esiste: la app guarda da se, ogni ora."
+  "sha256": "3076f97732bf065a5637df7363cb52285f3b5f6d40fbdd380d4734ae902e4081",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b93/AutoplaySan-0.2.0-b93.zip",
+  "notes": "Accanto al pulsante Aggiorna l app ora c e scritta la versione installata, nella panoramica e nel popover della barra dei menu: serve prima di premere (sono gia aggiornato?) e subito dopo (e andato a buon fine?), perche la app si riapre identica a com era. Contiene tutte le correzioni della b92: il questionario finale che non si apriva perche il motore non aveva la facolta di consegnarlo, le riaperture a vuoto di un corso bloccato ogni dieci minuti, la chiusura per aggiornamento che prendeva due minuti invece di dodici secondi, e la finestra che diceva FERMO in cima e in ascolto sotto il nome."
 }
