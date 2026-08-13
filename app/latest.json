@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 96,
+  "build": 97,
   "minimumSystemVersion": "26.1",
-  "sha256": "7bc791cef344ecf1cb59d159ce1ea4017dac5abc7d48ce5a1ebdd1ad53413729",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b96/AutoplaySan-0.2.0-b96.zip",
-  "notes": "La app non aspetta piu sei ore su lavoro che torna disponibile fra mezz ora. Quando un corso si blocca per un motivo che invecchia, dopo trenta minuti si riprova da se: ma l attesa a lavoro esaurito si svegliava solo se qualcosa cambiava sul disco, e il tempo che passa non cambia niente. Ora l attesa dura fino alla scadenza del blocco e lo dice. Contiene la b95 (fermarsi su una domanda ignota non e piu registrato come guasto, quindi una risposta riapre il corso) e la b94 (facolta di consegnare i questionari, riapertura automatica, stato viola mentre risponde)."
+  "sha256": "3e0b7d2e0b7c7127638590408d805127ad6f2364d0ececb6caa2d15b85ef1757",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b97/AutoplaySan-0.2.0-b97.zip",
+  "notes": "Un aggiornamento, una volta: serviva premere Aggiorna due o tre volte perche la versione nuova restasse, perche due scambi partivano in parallelo e il secondo scriveva rinuncio allo scambio proprio quando il primo era riuscito. Ora c e un lock, chi arriva secondo se ne va subito, e prima di dichiarare una rinuncia si controlla se la versione richiesta e gia installata. La frase dopo la consegna di un questionario non accusa piu un difetto di lettura quando e la piattaforma che non ha ancora pubblicato l esito. Contiene la b96, la b95 e la b94."
 }
