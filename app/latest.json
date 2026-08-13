@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 91,
+  "build": 92,
   "minimumSystemVersion": "26.1",
-  "sha256": "27963b1754a9ac54b1c549f62d307970bacda3e607540f86bba59c182095ee92",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b91/AutoplaySan-0.2.0-b91.zip",
-  "notes": "Nuova voce Sempre, senza fermarsi in Quando lavorare e nella prima configurazione: il Mac lavora a qualunque ora, e giorni e turni restano salvati. Le schermate ora lo sanno: prima dicevano in pausa, riprendo alle 09:00 mentre il Mac stava lavorando. Impostazioni piu corte: le voci da manutentore si aprono con una parola. Ogni quanto ricontrollare i corsi ora spiega perche serve. Corretta una segnalazione che diceva salvata quando era perduta e un Installo che restava scritto per sempre."
+  "sha256": "1bf567ff3eb98645b213727daf4bcabf32640260c857fe0476ce7f762a716f90",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b92/AutoplaySan-0.2.0-b92.zip",
+  "notes": "I corsi arrivano in fondo: il questionario finale non si apriva perche il motore non aveva la facolta di consegnarlo, e un Mac configurato con la guidata finiva i video per poi fermarsi su ogni questionario. Il motore continua a non tirare a indovinare: se una domanda manca in banca si ferma prima di consegnare e la manda a risolvere. Niente piu giri a vuoto: un corso bloccato veniva riaperto ogni dieci minuti anche senza risposte nuove, 32 volte in un pomeriggio. Aggiornarsi non prende piu due minuti: la chiusura aspettava il browser fino a 120 secondi, ora il tetto e 12. Una sola verita sullo stato: la finestra diceva FERMO in cima e in ascolto sotto il nome. Via l avviso su un controllo aggiornamenti che su questi Mac non esiste: la app guarda da se, ogni ora."
 }
