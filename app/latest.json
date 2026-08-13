@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 88,
+  "build": 89,
   "minimumSystemVersion": "26.1",
-  "sha256": "68aed4449a5a3a6a6259dba2fbae655fcf3db1b4e16f1b28e7337a7926a612e3",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b88/AutoplaySan-0.2.0-b88.zip",
-  "notes": "La app si porta tutto addosso: elenco delle persone e banca delle risposte sono dentro il bundle, quindi la prima configurazione funziona anche senza rete. Chi non e in elenco puo incollare il proprio link di accesso. Su un Mac senza il progetto Node la cartella di lavoro sta in Application Support invece di fingere un progetto che non c'e. Il pacchetto per installarla e adesso un disco: dentro c'e solo la app."
+  "sha256": "617293f749e7325e24f1212d5bad687e7c1ef50c569fbf75be4eb6d5f3ff892c",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b89/AutoplaySan-0.2.0-b89.zip",
+  "notes": "L'app controlla gli aggiornamenti da se e avvisa con una notifica a due pulsanti: Aggiorna ora, oppure Ricordami tra 10 minuti. Con le notifiche spente la stessa scelta compare in cima al pannello della barra dei menu. Durante un questionario non disturba: interromperlo consumerebbe un tentativo."
 }
