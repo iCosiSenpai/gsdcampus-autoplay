@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 90,
+  "build": 91,
   "minimumSystemVersion": "26.1",
-  "sha256": "6a932a9deb69c48ea4df58b0ac968a1e3b98ff3b527013528e93df6a8b94155f",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b90/AutoplaySan-0.2.0-b90.zip",
-  "notes": "Controlla gli aggiornamenti ogni ora e avvisa con due pulsanti: Aggiorna ora, oppure Ricordami tra 10 minuti. I pulsanti Aggiorna l'app e Invia problema ad Alessio sono sempre visibili nel pannello e nella Panoramica. Se la app viene aperta dal disco invece che da Applicazioni lo dice subito, perche da li non ripartirebbe dopo un riavvio. Corretti due guasti che potevano lasciare il Mac fermo dopo un riavvio senza dirlo."
+  "sha256": "27963b1754a9ac54b1c549f62d307970bacda3e607540f86bba59c182095ee92",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b91/AutoplaySan-0.2.0-b91.zip",
+  "notes": "Nuova voce Sempre, senza fermarsi in Quando lavorare e nella prima configurazione: il Mac lavora a qualunque ora, e giorni e turni restano salvati. Le schermate ora lo sanno: prima dicevano in pausa, riprendo alle 09:00 mentre il Mac stava lavorando. Impostazioni piu corte: le voci da manutentore si aprono con una parola. Ogni quanto ricontrollare i corsi ora spiega perche serve. Corretta una segnalazione che diceva salvata quando era perduta e un Installo che restava scritto per sempre."
 }
