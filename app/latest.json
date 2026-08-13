@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 85,
+  "build": 87,
   "minimumSystemVersion": "26.1",
-  "sha256": "f9777095e05a0ec613f1eb2818b87ffe7f69d0242faf7c6ac00a79d7c6dd24f7",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b85/AutoplaySan-0.2.0-b85.zip",
-  "notes": "Il tempo percorso di una lezione si muove ogni secondo invece di restare fermo mezzo minuto: fra due letture la posizione viene prevista, e quando le notizie si fermano la finestra dice da quanto invece di far finta. Compare la previsione di fine percorso con la data, calcolata sui turni configurati. Lo stallo di un video si misura in secondi e non in controlli, quindi un video che bufferizza vicino alla fine non viene piu ricaricato per errore."
+  "sha256": "101767dfdd265b5a51f72565d4b3a3fbd8e37e08b18b203eda83ef710356c06b",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b87/AutoplaySan-0.2.0-b87.zip",
+  "notes": "La app non ha piu bisogno del repository Node per funzionare: crea la cartella dei dati, scrive config.json dalla procedura guidata, e scarica dalla rete l'elenco delle persone e la banca delle risposte. Dove gli script non ci sono i corsi li apre il motore nativo senza doverlo chiedere. Le domande di quiz senza risposta diventano una issue del repository, e la risposta torna a tutte le postazioni con la banca condivisa: i corsi bloccati solo per quella domanda ripartono da se. Per chi ha gia il repository non cambia nulla."
 }
