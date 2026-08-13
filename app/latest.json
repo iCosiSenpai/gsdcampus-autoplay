@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 87,
+  "build": 88,
   "minimumSystemVersion": "26.1",
-  "sha256": "101767dfdd265b5a51f72565d4b3a3fbd8e37e08b18b203eda83ef710356c06b",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b87/AutoplaySan-0.2.0-b87.zip",
-  "notes": "La app non ha piu bisogno del repository Node per funzionare: crea la cartella dei dati, scrive config.json dalla procedura guidata, e scarica dalla rete l'elenco delle persone e la banca delle risposte. Dove gli script non ci sono i corsi li apre il motore nativo senza doverlo chiedere. Le domande di quiz senza risposta diventano una issue del repository, e la risposta torna a tutte le postazioni con la banca condivisa: i corsi bloccati solo per quella domanda ripartono da se. Per chi ha gia il repository non cambia nulla."
+  "sha256": "68aed4449a5a3a6a6259dba2fbae655fcf3db1b4e16f1b28e7337a7926a612e3",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b88/AutoplaySan-0.2.0-b88.zip",
+  "notes": "La app si porta tutto addosso: elenco delle persone e banca delle risposte sono dentro il bundle, quindi la prima configurazione funziona anche senza rete. Chi non e in elenco puo incollare il proprio link di accesso. Su un Mac senza il progetto Node la cartella di lavoro sta in Application Support invece di fingere un progetto che non c'e. Il pacchetto per installarla e adesso un disco: dentro c'e solo la app."
 }
