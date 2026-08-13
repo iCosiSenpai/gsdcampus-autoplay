@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 89,
+  "build": 90,
   "minimumSystemVersion": "26.1",
-  "sha256": "617293f749e7325e24f1212d5bad687e7c1ef50c569fbf75be4eb6d5f3ff892c",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b89/AutoplaySan-0.2.0-b89.zip",
-  "notes": "L'app controlla gli aggiornamenti da se e avvisa con una notifica a due pulsanti: Aggiorna ora, oppure Ricordami tra 10 minuti. Con le notifiche spente la stessa scelta compare in cima al pannello della barra dei menu. Durante un questionario non disturba: interromperlo consumerebbe un tentativo."
+  "sha256": "6a932a9deb69c48ea4df58b0ac968a1e3b98ff3b527013528e93df6a8b94155f",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b90/AutoplaySan-0.2.0-b90.zip",
+  "notes": "Controlla gli aggiornamenti ogni ora e avvisa con due pulsanti: Aggiorna ora, oppure Ricordami tra 10 minuti. I pulsanti Aggiorna l'app e Invia problema ad Alessio sono sempre visibili nel pannello e nella Panoramica. Se la app viene aperta dal disco invece che da Applicazioni lo dice subito, perche da li non ripartirebbe dopo un riavvio. Corretti due guasti che potevano lasciare il Mac fermo dopo un riavvio senza dirlo."
 }
