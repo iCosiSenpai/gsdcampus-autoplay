@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 98,
+  "build": 99,
   "minimumSystemVersion": "26.1",
-  "sha256": "b23a1d7ba93d4e6ebb78efe2d54ef22e63d1b0089a0f7d4dce9212ee94cb8a45",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b98/AutoplaySan-0.2.0-b98.zip",
-  "notes": "Un questionario consegnato non e un questionario fallito: la prima consegna di questa app e finita segnata come non superato solo perche la piattaforma non aveva ancora pubblicato l esito, e il corso restava fermo per sempre. Ora quell attesa ha un codice suo, la app torna a guardare l esito ogni mezz ora e chiude il corso appena arriva, rileggendo senza riaprire la compilazione e quindi senza spendere un secondo tentativo. L eta di un dato si dice in ore e giorni: letto 15 ore fa invece di letto 945 min fa. E un blocco che invecchia adesso invecchia davvero: la data si riscriveva a ogni giro anche senza cambiamenti, quindi la mezz ora dopo la quale un corso si riprova non arrivava mai. Contiene la b97, la b96, la b95 e la b94."
+  "sha256": "2b478c436ebe56feace02fe2c23853aea60a18f8a332aff0b60ae12fa11a28fd",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b99/AutoplaySan-0.2.0-b99.zip",
+  "notes": "Quando hai finito, la app te lo dice: distintivo FINITO verde, Hai finito tutti i corsi con i numeri (corsi, lezioni, questionari superati e media dei voti) e una banda verde in cima alla Panoramica. Prima, a percorso concluso, si leggeva IN ASCOLTO accanto al titolo dell ultima lezione vista. Il conteggio dei conclusi era sbagliato per difetto: un corso al 100% senza questionario da superare veniva contato fra quelli da fare, con scritto accanto niente in sospeso. Ricontrolla i corsi ora conferma la fine, mentre prima rispondeva solo con le percentuali. Contiene la b98, la b97 e la b96."
 }
