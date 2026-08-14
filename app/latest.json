@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 97,
+  "build": 98,
   "minimumSystemVersion": "26.1",
-  "sha256": "3e0b7d2e0b7c7127638590408d805127ad6f2364d0ececb6caa2d15b85ef1757",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b97/AutoplaySan-0.2.0-b97.zip",
-  "notes": "Un aggiornamento, una volta: serviva premere Aggiorna due o tre volte perche la versione nuova restasse, perche due scambi partivano in parallelo e il secondo scriveva rinuncio allo scambio proprio quando il primo era riuscito. Ora c e un lock, chi arriva secondo se ne va subito, e prima di dichiarare una rinuncia si controlla se la versione richiesta e gia installata. La frase dopo la consegna di un questionario non accusa piu un difetto di lettura quando e la piattaforma che non ha ancora pubblicato l esito. Contiene la b96, la b95 e la b94."
+  "sha256": "b23a1d7ba93d4e6ebb78efe2d54ef22e63d1b0089a0f7d4dce9212ee94cb8a45",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b98/AutoplaySan-0.2.0-b98.zip",
+  "notes": "Un questionario consegnato non e un questionario fallito: la prima consegna di questa app e finita segnata come non superato solo perche la piattaforma non aveva ancora pubblicato l esito, e il corso restava fermo per sempre. Ora quell attesa ha un codice suo, la app torna a guardare l esito ogni mezz ora e chiude il corso appena arriva, rileggendo senza riaprire la compilazione e quindi senza spendere un secondo tentativo. L eta di un dato si dice in ore e giorni: letto 15 ore fa invece di letto 945 min fa. E un blocco che invecchia adesso invecchia davvero: la data si riscriveva a ogni giro anche senza cambiamenti, quindi la mezz ora dopo la quale un corso si riprova non arrivava mai. Contiene la b97, la b96, la b95 e la b94."
 }
