@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 100,
+  "build": 101,
   "minimumSystemVersion": "26.1",
-  "sha256": "5bb9bba1203e181c42cf9c5384111a508e8eb3f00e0f2ec220d9d559b7cf242d",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b100/AutoplaySan-0.2.0-b100.zip",
-  "notes": "Un aggiornamento, una pressione. Serviva premere Aggiorna l app due volte: la prima chiudeva e riapriva la versione vecchia, la seconda installava quella nuova. Il file che dovrebbe tenere fermo il guardiano viene cancellato dalla app a ogni avvio, quindi bastava che la app ripartisse una volta nel mezzo perche il guardiano riaprisse la copia vecchia e tenesse occupato il bundle per mezzo minuto. Ora lo scambio scarica l agente del guardiano prima di toccare niente e lo rimette in piedi dopo, ed e lui a riaprire la versione nuova. Contiene la b99 (hai finito tutti i corsi in verde), la b98 e la b97."
+  "sha256": "fb02ade9d77a92b68cf0879bb0759869ee721640ec13789f028c4a3669e9736f",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b101/AutoplaySan-0.2.0-b101.zip",
+  "notes": "Dopo un cambio di persona la finestra non mostra piu il lavoro del collega precedente: selezionando un altro nome, la fascia continuava ad annunciare l ultima lezione di chi c era prima, con titolo del corso e avanzamento del video, tutto vero e attribuito alla persona sbagliata. Lo stato dell automazione e uno per Mac e non portava scritto di chi parla: ora si, e dove il nome non combacia quei dati non si mostrano. Vale anche per i file gia sul disco, dove la persona si riconosce dall indirizzo della lezione. Contiene la b100 (un aggiornamento, una pressione), la b99 (hai finito tutti i corsi in verde) e la b98."
 }
