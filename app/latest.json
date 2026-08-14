@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 101,
+  "build": 102,
   "minimumSystemVersion": "26.1",
-  "sha256": "fb02ade9d77a92b68cf0879bb0759869ee721640ec13789f028c4a3669e9736f",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b101/AutoplaySan-0.2.0-b101.zip",
-  "notes": "Dopo un cambio di persona la finestra non mostra piu il lavoro del collega precedente: selezionando un altro nome, la fascia continuava ad annunciare l ultima lezione di chi c era prima, con titolo del corso e avanzamento del video, tutto vero e attribuito alla persona sbagliata. Lo stato dell automazione e uno per Mac e non portava scritto di chi parla: ora si, e dove il nome non combacia quei dati non si mostrano. Vale anche per i file gia sul disco, dove la persona si riconosce dall indirizzo della lezione. Contiene la b100 (un aggiornamento, una pressione), la b99 (hai finito tutti i corsi in verde) e la b98."
+  "sha256": "f3c75ae2dc7149a1c0f44af6b3a0fa408a2c6001b852c015d6e9d49d8e23cc52",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b102/AutoplaySan-0.2.0-b102.zip",
+  "notes": "Il libretto si riempie da se anche dopo un cambio di persona. Con la b101 lo stato non mostra piu il lavoro del collega precedente, ma i conteggi restavano vuoti finche qualcuno non premeva Ricontrolla i corsi: il quadro dei corsi lo scriveva solo quel pulsante, mentre il giro legge la dashboard comunque a ogni sessione e buttava via quello che aveva letto. Contiene la b101 (nessun dato di un collega sotto il nome di un altro), la b100 (un aggiornamento, una pressione) e la b99 (hai finito tutti i corsi in verde)."
 }
