@@ -1,8 +1,8 @@
 {
   "version": "0.2.0",
-  "build": 102,
+  "build": 103,
   "minimumSystemVersion": "26.1",
-  "sha256": "f3c75ae2dc7149a1c0f44af6b3a0fa408a2c6001b852c015d6e9d49d8e23cc52",
-  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b102/AutoplaySan-0.2.0-b102.zip",
-  "notes": "Il libretto si riempie da se anche dopo un cambio di persona. Con la b101 lo stato non mostra piu il lavoro del collega precedente, ma i conteggi restavano vuoti finche qualcuno non premeva Ricontrolla i corsi: il quadro dei corsi lo scriveva solo quel pulsante, mentre il giro legge la dashboard comunque a ogni sessione e buttava via quello che aveva letto. Contiene la b101 (nessun dato di un collega sotto il nome di un altro), la b100 (un aggiornamento, una pressione) e la b99 (hai finito tutti i corsi in verde)."
+  "sha256": "773184a8a9b897078b06c952ab96984d5db330ffc5a55ef5938ddf4b6fed8310",
+  "url": "https://github.com/iCosiSenpai/gsdcampus-autoplay/releases/download/app-v0.2.0-b103/AutoplaySan-0.2.0-b103.zip",
+  "notes": "Correzioni interne: dall'esterno non cambia niente, basta premere Aggiorna. La verifica della firma di un aggiornamento ora usa un requisito di codice valutato da codesign invece di un confronto di testo: il controllo di prima si poteva superare firmando un bundle qualunque e scegliendogli il nome giusto, e da questa versione una app non firmata dal nostro certificato non si installa piu. Il segno dell'aggiornamento pronto e il lock dello scambio non stanno piu in /tmp, che e scrivibile da chiunque usi il Mac e dove un file piantato la poteva bloccare gli aggiornamenti per sempre: ora vivono in ~/.autoplay-san. Un archivio che non contiene la versione annunciata dal bollettino viene rifiutato, cosi non si puo piu installare una build vecchia che poi si reinstalla a ogni ora. L'orchestratore non puo piu restare bloccato quando il motore esce subito, i comandi da terminale non fanno piu impuntare la app dopo otto richieste appese, e lo stato su disco sopravvive a uno spegnimento improvviso. Contiene la b102 (il quadro dei corsi si aggiorna dove i corsi si leggono), la b101 (nessun dato di un collega sotto il nome di un altro) e la b100 (un aggiornamento, una pressione)."
 }
